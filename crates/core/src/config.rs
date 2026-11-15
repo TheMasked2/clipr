@@ -40,6 +40,9 @@ pub struct ReplayConfig {
     pub buffer_secs: u32,
     /// Play a short sound when a clip is saved.
     pub sound_on_save: bool,
+    /// Show a small "Clip saved" note in the corner of the screen. It never shows up in clips, and games in
+    /// exclusive fullscreen hide it.
+    pub toast_on_save: bool,
 }
 
 impl Default for ReplayConfig {
@@ -49,6 +52,7 @@ impl Default for ReplayConfig {
             clip_secs: 30,
             buffer_secs: 120,
             sound_on_save: true,
+            toast_on_save: true,
         }
     }
 }
@@ -100,11 +104,35 @@ impl Default for VideoConfig {
 pub struct AudioConfig {
     /// Record what you hear (game, voice chat, music): the default output device.
     pub system: bool,
+    /// System audio volume in the mix, 0–200 %.
+    pub system_volume: u32,
     /// Record your default microphone, mixed into the same track.
     pub mic: bool,
     /// Microphone volume, 0–200 %.
     pub mic_volume: u32,
-    /// AAC bitrate in kbit/s: 96, 128, 160 or 192.
+    /// Apps recorded on their own tracks (exe names, e.g. `discord.exe`). Needs Windows 10 2004 or newer.
+    pub apps: Vec<String>,
+    /// Also write every source on its own track (track 1 is always the full mix; up to 6 tracks), so you
+    /// can turn voice chat down later in an editor.
+    pub separate_tracks: bool,
+    /// Remove background noise (fans, keyboard) from the microphone (RNNoise).
+    pub noise_suppression: bool,
+    /// Mute the microphone while you're not talking.
+    pub noise_gate: bool,
+    /// The gate opens above this level, in dBFS (-60 quiet room … -30 loud room).
+    pub gate_threshold_db: i32,
+    /// Even out loud and quiet speech on the microphone.
+    pub compressor: bool,
+    /// Record the microphone only while this key is held (your voice-chat push-to-talk key, like `V` or
+    /// `Mouse4`). Empty = always on.
+    pub push_to_talk: String,
+    /// Keep the microphone open this long after the push-to-talk key is released, in ms.
+    pub ptt_release_ms: u32,
+    /// Shift the microphone in time, in ms (positive = later), if it's out of sync.
+    pub mic_offset_ms: i32,
+    /// Shift system audio in time, in ms (positive = later).
+    pub system_offset_ms: i32,
+    /// AAC bitrate per track in kbit/s: 96, 128, 160 or 192.
     pub bitrate_kbps: u32,
 }
 
@@ -112,8 +140,19 @@ impl Default for AudioConfig {
     fn default() -> Self {
         Self {
             system: true,
+            system_volume: 100,
             mic: false,
             mic_volume: 100,
+            apps: Vec::new(),
+            separate_tracks: false,
+            noise_suppression: true,
+            noise_gate: false,
+            gate_threshold_db: -45,
+            compressor: false,
+            push_to_talk: String::new(),
+            ptt_release_ms: 200,
+            mic_offset_ms: 0,
+            system_offset_ms: 0,
             bitrate_kbps: 160,
         }
     }

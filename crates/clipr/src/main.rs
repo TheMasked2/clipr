@@ -11,6 +11,7 @@
 
 mod engine;
 mod icon;
+mod overlay;
 mod tray;
 mod win;
 
@@ -85,7 +86,8 @@ fn run() -> Result<()> {
         win::open_url(&ui_url);
     }
 
-    let (engine, engine_thread) = engine::start(config.clone(), status.clone(), bus.clone(), &paths);
+    let watcher = Arc::new(clipr_games::GameWatcher::new(paths.data_dir.join("games.json")));
+    let (engine, engine_thread) = engine::start(config.clone(), status.clone(), bus.clone(), watcher);
 
     // The tray lives on this thread until the user quits.
     let clips = config.clips.clone();
