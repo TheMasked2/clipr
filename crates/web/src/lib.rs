@@ -191,6 +191,7 @@ mod tests {
         state.status.set(Activity {
             state: RecState::Buffering,
             game: Some("Minecraft".into()),
+            ..Default::default()
         });
         let (code, body) = get_body(router(state), "/api/status").await;
         assert_eq!(code, StatusCode::OK);
