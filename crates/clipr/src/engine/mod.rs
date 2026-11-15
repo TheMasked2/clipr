@@ -220,6 +220,7 @@ impl Supervisor {
                 windows::Win32::Media::MediaFoundation::MFSTARTUP_FULL,
             )
         };
+        record::recover(&self.config.clips.dir());
         let mut stats_at = Instant::now() + Duration::from_secs(10);
         let mut tick_at = Instant::now();
         loop {
@@ -295,8 +296,10 @@ impl Supervisor {
                 self.config = *config;
                 self.retry_at = None; // new settings deserve a fresh try
             }
-            Command::SetRecording(on) => self.set_recording(on, None),
-            Command::ToggleRecording => self.set_recording(self.recording.is_none(), None),
+            Command::SetRecording(true) => self.start_recording(None),
+            Command::SetRecording(false) => self.stop_recording(true),
+            Command::ToggleRecording if self.recording.is_some() => self.stop_recording(true),
+            Command::ToggleRecording => self.start_recording(None),
             Command::Stop => {}
         }
     }
@@ -503,8 +506,6 @@ impl Supervisor {
         if self.pipeline.is_none() {
             return;
         }
-        // A recording that is still wanted continues in a new file once capture runs again.
-        self.close_recording_file();
         let Some(p) = self.pipeline.take() else {
             return;
         };
@@ -517,6 +518,9 @@ impl Supervisor {
             Err(_) => tracing::warn!("the capture thread crashed"),
             Ok(Ok(())) => {}
         }
+        // Capture has stopped, so the file has every packet. A recording that is still wanted continues
+        // in a new file once capture runs again.
+        self.close_recording_file();
         self.shared.lock().unwrap().encoder = None;
         tracing::info!("capture stopped");
     }
@@ -527,10 +531,10 @@ impl Supervisor {
             self.error = None; // frames flow again
         }
         let file = self.recording.as_ref().and_then(|r| r.file.as_ref());
-        let state = match (running, file) {
-            (true, Some(_)) => RecState::Recording,
-            (true, None) => RecState::Buffering,
-            (false, _) => RecState::Idle,
+        let state = match (running, self.recording.is_some()) {
+            (_, true) => RecState::Recording,
+            (true, false) => RecState::Buffering,
+            (false, false) => RecState::Idle,
         };
         let recording_since = file.map(|(r, _)| r.since_unix);
         self.status.set(Activity {
@@ -636,32 +640,43 @@ impl Supervisor {
         self.saves.push(worker);
     }
 
-    /// Starts (asks for) or stops the full recording. `auto` is the game process that auto-started it.
-    fn set_recording(&mut self, on: bool, auto: Option<u32>) {
-        if on {
-            if self.recording.is_some() {
-                return;
-            }
-            if let Some(message) = self.low_disk() {
-                self.fail(&message, "Disk almost full");
-                return;
-            }
-            tracing::info!(
-                "recording requested{}",
-                if auto.is_some() { " (auto)" } else { "" }
-            );
-            self.recording = Some(Recording {
-                auto,
-                file: None,
-                next_disk_check: Instant::now(),
-            });
-        } else if let Some(mut r) = self.recording.take() {
-            if auto.is_none() {
-                // The user stopped it: don't auto-start it again for the same run of the game.
-                self.declined_auto = r.auto;
-            }
-            let file = r.file.take();
-            self.finish_recording_file(file);
+    /// Asks for a full recording. `auto` is the game process that auto-started it.
+    fn start_recording(&mut self, auto: Option<u32>) {
+        if self.recording.is_some() {
+            return;
+        }
+        if let Some(message) = self.low_disk() {
+            self.fail(&message, "Disk almost full");
+            self.decline_auto(); // don't retry an auto recording every poll
+            return;
+        }
+        tracing::info!(
+            "recording requested{}",
+            if auto.is_some() { " (auto)" } else { "" }
+        );
+        self.recording = Some(Recording {
+            auto,
+            file: None,
+            next_disk_check: Instant::now(),
+        });
+    }
+
+    /// Stops the full recording. `decline`: don't auto-start another one for the game running now (the
+    /// user stopped it, or a limit did).
+    fn stop_recording(&mut self, decline: bool) {
+        let Some(mut r) = self.recording.take() else {
+            return;
+        };
+        if decline {
+            self.decline_auto();
+        }
+        let file = r.file.take();
+        self.finish_recording_file(file);
+    }
+
+    fn decline_auto(&mut self) {
+        if let Some(g) = self.game.as_ref().filter(|g| g.auto_record) {
+            self.declined_auto = Some(g.pid);
         }
     }
 
@@ -673,29 +688,33 @@ impl Supervisor {
         };
         if game.auto_record && self.recording.is_none() && self.declined_auto != Some(game.pid) {
             let pid = game.pid;
-            self.set_recording(true, Some(pid));
+            self.start_recording(Some(pid));
         }
     }
 
-    /// Opens the file once capture runs, and stops at the time limit, on low disk, or when the
-    /// auto-recorded game closes.
+    /// Opens the file once capture runs, and stops at the time limit, on low disk, on a write failure, or
+    /// when the auto-recorded game closes.
     fn drive_recording(&mut self, now: Instant) {
         let Some(rec) = self.recording.as_ref() else {
             return;
         };
-        let auto = rec.auto;
-        if let Some(pid) = auto
+        if let Some(pid) = rec.auto
             && self.game.as_ref().is_none_or(|g| g.pid != pid)
         {
             tracing::info!("the auto-recorded game closed");
-            self.set_recording(false, auto);
+            self.stop_recording(false);
             return;
         }
         if let Some((r, _)) = &rec.file {
+            if let Some(why) = r.failure() {
+                self.stop_recording(true);
+                self.fail(&format!("The recording was stopped: {why}."), "Recording stopped");
+                return;
+            }
             let max = u64::from(self.config.recording.max_minutes);
             if max > 0 && r.started.elapsed() >= Duration::from_secs(max * 60) {
                 tracing::info!("the recording reached its {max} minute limit");
-                self.set_recording(false, auto);
+                self.stop_recording(true);
                 return;
             }
             if now >= rec.next_disk_check {
@@ -703,7 +722,7 @@ impl Supervisor {
                     r.next_disk_check = now + Duration::from_secs(10);
                 }
                 if let Some(message) = self.low_disk() {
-                    self.set_recording(false, auto);
+                    self.stop_recording(true);
                     self.fail(
                         &format!("The recording was stopped. {message}"),
                         "Recording stopped: disk almost full",
@@ -748,7 +767,8 @@ impl Supervisor {
         };
         let secs = recorder.started.elapsed().as_secs();
         match recorder.stop() {
-            Ok(path) => {
+            Ok(None) => tracing::info!("the recording stopped before its first frame; no file"),
+            Ok(Some(path)) => {
                 tracing::info!("recording saved: {} ({secs} s)", path.display());
                 cue(self.config.replay.sound_on_save, true);
                 if self.config.replay.toast_on_save {

@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+# The workspace version ([workspace.package] is the only `version =` at the start of a line in Cargo.toml).
 $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
 Write-Host "Packaging clipr $version"
 
@@ -17,6 +18,7 @@ if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
 npm run build
 if ($LASTEXITCODE -ne 0) { throw 'the UI build failed' }
 Pop-Location
+if (-not (Test-Path ui\dist\index.html)) { throw 'ui\dist\index.html is missing after the UI build' }
 
 cargo build --release --locked -p clipr
 if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }

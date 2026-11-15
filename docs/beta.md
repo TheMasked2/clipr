@@ -24,6 +24,10 @@ press a hotkey, like ShadowPlay or Medal, but open source, with no account and n
   Settings → Games.
 - Clips go to `Videos\clipr\<Game>\`. The Gallery lets you play, trim, rename, favorite and delete them.
 - A small "Clip saved" note appears top right. It never shows up in your clips.
+- Full recordings are saved next to your clips as `<Game>_<date>_<time>_recording.mp4`. They stop by
+  themselves at the time limit (Settings → Recording, off by default) or when the disk gets nearly full
+  (Settings → Library). If clipr or the PC crashes mid-recording, the file is recovered the next time clipr
+  starts, up to about the last second.
 
 ## If something goes wrong
 
@@ -38,4 +42,4 @@ Known limits in this beta:
 - Settings live in `%APPDATA%\clipr\config.toml`. Deleting that file resets everything.
 
 To uninstall, quit clipr, delete the folder, and optionally delete `%APPDATA%\clipr` and
-`%LOCALAPPDATA%\clipr`. If you turned on "Start with Windows", turn it off first in Settings.
+`%LOCALAPPDATA%\clipr`. If you turned on "Start with Windows", turn it off first (Settings → General).
