@@ -169,7 +169,7 @@ Ideas, not planned yet: shared squad galleries, auto highlights (kill/death dete
 | Risk | Plan |
 |---|---|
 | Media Foundation HW encoders differ between vendors (quirks, missing AV1) | Phase 1 spike on all three vendors, `VideoEncoder` trait with vendor fallbacks |
-| WGC yellow border / capture prompt | Use `IsBorderRequired = false` (Win 11) and accept the border on older builds |
+| WGC yellow border / capture prompt | On Windows 11, request borderless-capture access with `GraphicsCaptureAccess.RequestAccessAsync(GraphicsCaptureAccessKind.Borderless)` before setting `IsBorderRequired = false`; retain the border if access is denied or unsupported |
 | Exclusive fullscreen games that WGC can't capture | Fall back to monitor capture; document it |
 | Per-app audio needs Windows 10 2004+ | Detect it; fall back to system loopback |
 | Lossless trim snaps to keyframes | 1–2 s keyframe interval by default; precise trim re-encodes only the edges |
