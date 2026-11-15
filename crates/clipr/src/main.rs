@@ -9,6 +9,7 @@
 // Release builds are a tray app with no console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod engine;
 mod icon;
 mod tray;
 mod win;
@@ -84,10 +85,19 @@ fn run() -> Result<()> {
         win::open_url(&ui_url);
     }
 
+    let (engine, engine_thread) = engine::start(config.clone(), status.clone(), bus.clone(), &paths);
+
     // The tray lives on this thread until the user quits.
-    let tray_result = tray::run(&runtime, status, &ui_url);
+    let clips = config.clips.clone();
+    let tray_result = tray::run(&runtime, status, &ui_url, &engine, &config.hotkeys, || {
+        clips.dir()
+    });
 
     tracing::info!("shutting down");
+    engine.send(engine::Command::Stop);
+    if engine_thread.join().is_err() {
+        tracing::warn!("the capture engine crashed while stopping");
+    }
     bus.emit(Event::ShutdownRequested);
     let _ = shutdown_tx.send(true);
     runtime.block_on(async {

@@ -19,6 +19,197 @@ pub struct Config {
     pub ui: UiConfig,
     pub general: GeneralConfig,
     pub privacy: PrivacyConfig,
+    pub replay: ReplayConfig,
+    pub video: VideoConfig,
+    pub audio: AudioConfig,
+    pub hotkeys: HotkeyConfig,
+    pub clips: ClipsConfig,
+    pub games: GamesConfig,
+    pub recording: RecordingConfig,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReplayConfig {
+    /// Keep the replay buffer running, so the save-clip hotkey has something to save.
+    pub enabled: bool,
+    /// How many seconds a saved clip goes back.
+    pub clip_secs: u32,
+    /// How much the buffer keeps in memory; the "save long clip" hotkey saves all of it. At 15 Mbit/s,
+    /// 120 s is about 225 MB of RAM.
+    pub buffer_secs: u32,
+    /// Play a short sound when a clip is saved.
+    pub sound_on_save: bool,
+}
+
+impl Default for ReplayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            clip_secs: 30,
+            buffer_secs: 120,
+            sound_on_save: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VideoCodec {
+    /// Plays everywhere (Discord, phones, browsers). The default.
+    #[default]
+    H264,
+    /// Smaller files at the same quality; not every browser or phone plays it.
+    Hevc,
+    /// Smallest files; needs a recent GPU (RTX 40, RX 7000, Arc) and a recent player.
+    Av1,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VideoConfig {
+    pub codec: VideoCodec,
+    /// Frames per second. WGC delivers up to 60 for now.
+    pub fps: u32,
+    /// Output height in pixels (width follows the monitor's shape). 0 = the monitor's own resolution.
+    pub height: u32,
+    /// Video bitrate in kbit/s. Higher looks better and makes bigger files (15000 ≈ 56 MB per 30 s).
+    pub bitrate_kbps: u32,
+    /// Which monitor to capture: 0 = the primary monitor, 1, 2, … = that monitor in Windows' order.
+    pub monitor: u32,
+    /// Give clipr's capture work priority on the GPU and CPU, so a game running at uncapped FPS can't
+    /// starve it (stutter in clips). Never slows the game noticeably: clipr's GPU work is ~0.1 ms a frame.
+    pub high_priority: bool,
+}
+
+impl Default for VideoConfig {
+    fn default() -> Self {
+        Self {
+            codec: VideoCodec::H264,
+            fps: 60,
+            height: 1080,
+            bitrate_kbps: 15_000,
+            monitor: 0,
+            high_priority: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AudioConfig {
+    /// Record what you hear (game, voice chat, music): the default output device.
+    pub system: bool,
+    /// Record your default microphone, mixed into the same track.
+    pub mic: bool,
+    /// Microphone volume, 0–200 %.
+    pub mic_volume: u32,
+    /// AAC bitrate in kbit/s: 96, 128, 160 or 192.
+    pub bitrate_kbps: u32,
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            system: true,
+            mic: false,
+            mic_volume: 100,
+            bitrate_kbps: 160,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HotkeyConfig {
+    /// Saves the last `replay.clip_secs` seconds. Like `Alt+F10` or `Ctrl+Shift+S`; empty turns it off.
+    pub save_clip: String,
+    /// Saves the whole buffer (`replay.buffer_secs`).
+    pub save_long_clip: String,
+    /// Pauses or resumes the replay buffer. Empty (the default) turns it off.
+    pub toggle_buffer: String,
+    /// Starts or stops a full recording.
+    pub toggle_recording: String,
+    /// Marks this moment; markers show on the clip's timeline in the gallery.
+    pub mark: String,
+}
+
+impl Default for HotkeyConfig {
+    fn default() -> Self {
+        Self {
+            save_clip: "Alt+F10".into(),
+            save_long_clip: String::new(),
+            toggle_buffer: String::new(),
+            toggle_recording: "Alt+F9".into(),
+            mark: String::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClipsConfig {
+    /// Where clips go. Empty = `Videos\clipr`. Each game gets its own subfolder.
+    pub folder: String,
+    /// Delete clips older than this many days (favorites never). 0 = keep forever.
+    pub max_age_days: u32,
+    /// Keep the clips folder under this many GB by deleting the oldest (favorites never). 0 = no limit.
+    pub max_total_gb: u32,
+    /// Stop recording and warn when the clips drive has less than this many GB free.
+    pub min_free_gb: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GameMode {
+    /// Buffer only while a known game runs; idle otherwise. The default.
+    #[default]
+    Auto,
+    /// Always buffer the monitor, game or not.
+    Always,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GamesConfig {
+    pub mode: GameMode,
+    /// Extra games to detect, by exe name (`mygame.exe`).
+    pub custom: Vec<String>,
+    /// Exe names never treated as games, even if Discord lists them.
+    pub blocked: Vec<String>,
+    /// Start a full recording by itself when one of these games starts (exe names).
+    pub auto_record: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RecordingConfig {
+    /// Stop a recording after this many minutes. 0 = no limit.
+    pub max_minutes: u32,
+}
+
+impl Default for ClipsConfig {
+    fn default() -> Self {
+        Self {
+            folder: String::new(),
+            max_age_days: 0,
+            max_total_gb: 0,
+            min_free_gb: 5,
+        }
+    }
+}
+
+impl ClipsConfig {
+    /// The clips folder, with the default filled in.
+    pub fn dir(&self) -> std::path::PathBuf {
+        if !self.folder.trim().is_empty() {
+            return self.folder.trim().into();
+        }
+        dirs::video_dir()
+            .or_else(|| dirs::home_dir().map(|h| h.join("Videos")))
+            .unwrap_or_else(|| ".".into())
+            .join("clipr")
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,6 +219,8 @@ pub struct WebConfig {
     pub port: u16,
     /// Open the web UI to the local network (phone at home). Off by default; needs `lan_pin` once built.
     pub lan: bool,
+    /// The 6-digit PIN other devices on the LAN must enter. Generated when LAN access is first turned on.
+    pub lan_pin: String,
 }
 
 impl Default for WebConfig {
@@ -35,6 +228,7 @@ impl Default for WebConfig {
         Self {
             port: DEFAULT_PORT,
             lan: false,
+            lan_pin: String::new(),
         }
     }
 }
@@ -46,6 +240,8 @@ pub struct UiConfig {
     pub theme: String,
     /// Accent colour as `#rrggbb`.
     pub accent: String,
+    /// The first-run wizard was finished or skipped.
+    pub setup_done: bool,
 }
 
 impl Default for UiConfig {
@@ -53,6 +249,7 @@ impl Default for UiConfig {
         Self {
             theme: "dark-sleek".into(),
             accent: "#8B5CF6".into(),
+            setup_done: false,
         }
     }
 }
@@ -143,6 +340,14 @@ mod tests {
             config.general.open_ui_on_start,
             "a manual start should show where clipr went"
         );
+        assert_eq!(config.video.codec, VideoCodec::H264);
+        assert!(config.clips.dir().ends_with("clipr"));
+    }
+
+    #[test]
+    fn codec_is_lowercase_in_the_file() {
+        let text = toml::to_string(&Config::default()).unwrap();
+        assert!(text.contains("codec = \"h264\""), "{text}");
     }
 
     #[test]

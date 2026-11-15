@@ -179,3 +179,62 @@ fn desc(adapter: &IDXGIAdapter1) -> Result<DXGI_ADAPTER_DESC1> {
     // SAFETY: valid adapter.
     Ok(unsafe { adapter.GetDesc1() }?)
 }
+
+/// Gives clipr's GPU work priority over the game's, so a game running at uncapped FPS can't starve the
+/// capture (stutter and dropped frames in clips). clipr's own GPU work is tiny (one colour conversion per
+/// frame), so the game barely notices. Best effort: what Windows refuses is logged and skipped.
+pub fn raise_gpu_priority(gpu: &Gpu) {
+    // SAFETY: valid DXGI device; the range is -7..=7.
+    if let Ok(dxgi) = gpu.device.cast::<IDXGIDevice>()
+        && let Err(e) = unsafe { dxgi.SetGPUThreadPriority(7) }
+    {
+        tracing::debug!("GPU thread priority not raised: {e}");
+    }
+    // HIGH needs admin rights on most systems; ABOVE_NORMAL usually works without.
+    for (class, name) in [(4, "high"), (3, "above normal")] {
+        // SAFETY: the current-process pseudo handle; `class` is a valid D3DKMT_SCHEDULINGPRIORITYCLASS.
+        let status = unsafe {
+            D3DKMTSetProcessSchedulingPriorityClass(
+                windows::Win32::System::Threading::GetCurrentProcess(),
+                class,
+            )
+        };
+        if status >= 0 {
+            tracing::info!("GPU scheduling priority: {name}");
+            return;
+        }
+    }
+    tracing::info!("GPU scheduling priority left at normal (Windows refused a higher one)");
+}
+
+/// Registers the calling thread with the Windows multimedia scheduler (MMCSS, task "Capture"), so it keeps
+/// getting CPU time when a game loads every core. Lasts until the thread ends.
+pub fn raise_thread_priority() {
+    let task: Vec<u16> = "Capture".encode_utf16().chain([0]).collect();
+    let mut index = 0u32;
+    // SAFETY: valid NUL-terminated string and out-pointer.
+    let handle = unsafe { AvSetMmThreadCharacteristicsW(task.as_ptr(), &mut index) };
+    if handle == 0 {
+        tracing::debug!("MMCSS registration failed; using a raised thread priority instead");
+        // SAFETY: the current-thread pseudo handle.
+        let _ = unsafe {
+            windows::Win32::System::Threading::SetThreadPriority(
+                windows::Win32::System::Threading::GetCurrentThread(),
+                windows::Win32::System::Threading::THREAD_PRIORITY_ABOVE_NORMAL,
+            )
+        };
+    }
+}
+
+#[link(name = "gdi32")]
+unsafe extern "system" {
+    fn D3DKMTSetProcessSchedulingPriorityClass(
+        process: windows::Win32::Foundation::HANDLE,
+        class: i32,
+    ) -> i32;
+}
+
+#[link(name = "avrt")]
+unsafe extern "system" {
+    fn AvSetMmThreadCharacteristicsW(task: *const u16, index: *mut u32) -> isize;
+}

@@ -43,17 +43,28 @@ windows = { version = "0.61", features = [
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_Media_Audio",
+    "Win32_Media_KernelStreaming",
     "Win32_Media_MediaFoundation",
+    "Win32_Media_Multimedia",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Ole",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Performance",
+    "Win32_System_SystemInformation",
+    "Win32_System_ProcessStatus",
     "Win32_System_Threading",
     "Win32_System_Variant",
     "Win32_System_WinRT",
     "Win32_System_WinRT_Direct3D11",
     "Win32_System_WinRT_Graphics_Capture",
     "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows-core = "0.61"
@@ -62,6 +73,16 @@ clipr-capture = { path = "crates/capture" }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+clipr-audio = { path = "crates/audio" }
+clipr-buffer = { path = "crates/buffer" }
+clipr-encode = { path = "crates/encode" }
+clipr-games = { path = "crates/games" }
+clipr-library = { path = "crates/library" }
+clipr-mux = { path = "crates/mux" }
+tower-http = { version = "0.6", features = ["fs"] }
+ureq = { version = "3", features = ["json"] }
+trash = "5"
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

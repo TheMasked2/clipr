@@ -14,6 +14,10 @@ const CAPACITY: usize = 256;
 pub enum Event {
     /// The user asked clipr to quit (tray menu, or a shutdown signal).
     ShutdownRequested,
+    /// A clip or recording was written. `path` is absolute.
+    ClipSaved { path: std::path::PathBuf },
+    /// Saving a clip failed; `message` is for the user.
+    ClipFailed { message: String },
 }
 
 #[derive(Clone)]
