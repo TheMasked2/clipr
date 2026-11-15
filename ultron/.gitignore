@@ -1,0 +1,14 @@
+.venv/
+.cache/
+models/*
+!models/wake/
+models/wake/*
+!models/wake/ultron.onnx
+cache/
+__pycache__/
+ultron.log*
+ultron.pid
+ultron.out
+tools/
+installer/Output/
+.venv-old/
