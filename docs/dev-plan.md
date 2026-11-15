@@ -153,11 +153,13 @@ Audio processing costs about 2 % of one core. A saved clip's audio starts within
 - [x] Theme: Dark sleek + accent picker
 
 ### Phase 5: Full recordings
-- [ ] Start/stop by hotkey, tray, UI; auto per game
-- [ ] Shares the buffer's encoder by default; optional second encoder with its own settings
-- [ ] Crash-safe writing (fragmented MP4 / MKV, so a crash keeps everything up to the last second)
-- [ ] Markers in recordings; cut a clip out of a recording in the gallery
-- [ ] Stop before disk full
+- [x] Start/stop by hotkey, tray, UI; auto per game (stops when that game closes)
+- [x] Shares the buffer's encoder (an optional second encoder with its own settings: later)
+- [x] Crash-safe writing (fragmented MP4, so a crash keeps everything up to the last fragment)
+- [x] Markers in recordings; cut a clip out of a recording in the gallery (trim)
+- [x] Stop before disk full (`clips.min_free_gb`), and at `recording.max_minutes`
+
+A capture restart (new monitor or video settings) finishes the file and continues in a new one.
 
 ### Phase 6: Discord
 - [ ] Webhook destinations
