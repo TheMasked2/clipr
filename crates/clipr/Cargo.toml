@@ -23,6 +23,7 @@ tray-icon.workspace = true
 clipr-buffer.workspace = true
 clipr-capture.workspace = true
 clipr-encode.workspace = true
+clipr-audio.workspace = true
 clipr-games.workspace = true
 clipr-gpu.workspace = true
 clipr-mux.workspace = true
@@ -30,7 +31,9 @@ windows.workspace = true
 windows-core.workspace = true
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_System_LibraryLoader",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",

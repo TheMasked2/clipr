@@ -32,7 +32,8 @@ impl Packet {
 #[derive(Clone, Debug, Default)]
 pub struct Cut {
     pub video: Vec<Packet>,
-    pub audio: Vec<Packet>,
+    /// `audio[n]` is audio track `n`.
+    pub audio: Vec<Vec<Packet>>,
 }
 
 impl Cut {
@@ -51,7 +52,8 @@ impl Cut {
 
 pub struct ReplayBuffer {
     video: VecDeque<Packet>,
-    audio: VecDeque<Packet>,
+    /// One queue per audio track.
+    audio: Vec<VecDeque<Packet>>,
     keep: i64,
     bytes: usize,
 }
@@ -61,7 +63,7 @@ impl ReplayBuffer {
     pub fn new(keep_secs: f64) -> Self {
         Self {
             video: VecDeque::new(),
-            audio: VecDeque::new(),
+            audio: Vec::new(),
             keep: (keep_secs * SECOND as f64) as i64,
             bytes: 0,
         }
@@ -82,20 +84,17 @@ impl ReplayBuffer {
         self.trim();
     }
 
-    pub fn push_audio(&mut self, packet: Packet) {
+    pub fn push_audio(&mut self, track: usize, packet: Packet) {
+        if self.audio.len() <= track {
+            self.audio.resize_with(track + 1, VecDeque::new);
+        }
         self.bytes += packet.data.len();
-        self.audio.push_back(packet);
+        self.audio[track].push_back(packet);
         // Bound audio on every insert, so it can't pile up when video is missing or stalled. The slack
         // covers the extra keyframe interval the video side may keep.
         let slack = if self.video.is_empty() { 0 } else { 10 * SECOND };
-        let newest = self.audio.back().map_or(0, Packet::end);
-        while self
-            .audio
-            .front()
-            .is_some_and(|p| p.end() < newest - self.keep - slack)
-        {
-            self.pop_audio();
-        }
+        let newest = self.audio[track].back().map_or(0, Packet::end);
+        self.trim_audio(track, newest - self.keep - slack);
     }
 
     pub fn clear(&mut self) {
@@ -138,8 +137,13 @@ impl ReplayBuffer {
         let audio = self
             .audio
             .iter()
-            .filter(|p| p.end() > t0 && p.pts < newest)
-            .cloned()
+            .map(|track| {
+                track
+                    .iter()
+                    .filter(|p| p.end() > t0 && p.pts < newest)
+                    .cloned()
+                    .collect()
+            })
             .collect();
         Cut { video, audio }
     }
@@ -162,14 +166,17 @@ impl ReplayBuffer {
             }
         }
         let first = self.video.front().map_or(i64::MAX, |p| p.pts);
-        while self.audio.front().is_some_and(|p| p.end() <= first) {
-            self.pop_audio();
+        for track in 0..self.audio.len() {
+            self.trim_audio(track, first);
         }
     }
 
-    fn pop_audio(&mut self) {
-        if let Some(p) = self.audio.pop_front() {
-            self.bytes -= p.data.len();
+    /// Drops packets of `track` that end at or before `cutoff`.
+    fn trim_audio(&mut self, track: usize, cutoff: i64) {
+        while self.audio[track].front().is_some_and(|p| p.end() <= cutoff) {
+            if let Some(p) = self.audio[track].pop_front() {
+                self.bytes -= p.data.len();
+            }
         }
     }
 }
@@ -205,7 +212,8 @@ mod tests {
         for i in 0..frames {
             buffer.push_video(video(i));
             while audio(a).pts < (i + 1) * FRAME {
-                buffer.push_audio(audio(a));
+                buffer.push_audio(0, audio(a));
+                buffer.push_audio(1, audio(a));
                 a += 1;
             }
         }
@@ -221,8 +229,8 @@ mod tests {
             b.video_secs()
         );
         assert!(b.video[0].keyframe);
-        assert!(b.audio[0].end() > b.video[0].pts);
-        let expected = b.video.len() * 100 + b.audio.len() * 10;
+        assert!(b.audio[0][0].end() > b.video[0].pts);
+        let expected = b.video.len() * 100 + (b.audio[0].len() + b.audio[1].len()) * 10;
         assert_eq!(b.bytes(), expected);
     }
 
@@ -235,8 +243,8 @@ mod tests {
         // 30 s total, asked for 5.5 s: the keyframe at 24 s.
         assert_eq!(cut.start(), Some(video(24 * 60).pts));
         assert!((cut.duration_secs() - 6.0).abs() < 0.02);
-        assert!(cut.audio.first().unwrap().pts <= video(24 * 60).pts);
-        assert!(cut.audio.last().unwrap().end() >= 30 * SECOND - 3 * FRAME);
+        assert!(cut.audio[0].first().unwrap().pts <= video(24 * 60).pts);
+        assert!(cut.audio[1].last().unwrap().end() >= 30 * SECOND - 3 * FRAME);
     }
 
     #[test]
@@ -262,9 +270,9 @@ mod tests {
     fn audio_alone_stays_bounded() {
         let mut b = ReplayBuffer::new(2.0);
         for i in 0..1000 {
-            b.push_audio(audio(i));
+            b.push_audio(0, audio(i));
         }
-        assert!(b.audio.len() < 100, "{}", b.audio.len());
+        assert!(b.audio[0].len() < 100, "{}", b.audio[0].len());
     }
 
     #[test]

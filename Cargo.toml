@@ -82,6 +82,7 @@ clipr-mux = { path = "crates/mux" }
 tower-http = { version = "0.6", features = ["fs"] }
 ureq = { version = "3", features = ["json"] }
 trash = "5"
+nnnoiseless = "0.5"
 rusqlite = { version = "0.37", features = ["bundled"] }
 
 [workspace.lints.rust]

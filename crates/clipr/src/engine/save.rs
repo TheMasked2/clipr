@@ -62,7 +62,7 @@ fn local_stamp() -> String {
 pub fn write(
     path: &Path,
     video: &MediaFormat,
-    audio: Option<&MediaFormat>,
+    audio: &[MediaFormat],
     cut: &Cut,
     markers: &[i64],
 ) -> Result<()> {

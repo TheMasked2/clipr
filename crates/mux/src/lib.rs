@@ -181,30 +181,30 @@ impl Writer {
 }
 
 /// Writes `cut` to an MP4 at `path`, with time 0 at the first video packet.
-pub fn write_clip(path: &Path, video: &MediaFormat, audio: Option<&MediaFormat>, cut: &Cut) -> Result<()> {
+pub fn write_clip(path: &Path, video: &MediaFormat, audio: &[MediaFormat], cut: &Cut) -> Result<()> {
     let Some(start) = cut.start() else {
         bail!("the replay buffer is empty");
     };
     let _mf = Mf::start()?;
     let formats: Vec<&MediaFormat> = std::iter::once(video).chain(audio).collect();
     let writer = Writer::create(path, MFTranscodeContainerType_MPEG4, &formats)?;
-    let audio_packets: &[Packet] = if audio.is_some() { &cut.audio } else { &[] };
-    // Interleave by time so the file plays smoothly from the start.
-    let (mut v, mut a) = (0, 0);
-    while v < cut.video.len() || a < audio_packets.len() {
-        let take_video =
-            a >= audio_packets.len() || (v < cut.video.len() && cut.video[v].pts <= audio_packets[a].pts);
-        if take_video {
-            writer.write(0, &sample_from_packet(&cut.video[v], start)?)?;
-            v += 1;
-        } else {
-            let p = &audio_packets[a];
-            a += 1;
-            if p.pts < start {
-                continue; // audio from before the first picture
-            }
-            writer.write(1, &sample_from_packet(p, start)?)?;
+    // Stream 0 is video, stream n + 1 is audio track n. Interleave by time so the file plays smoothly.
+    let mut streams: Vec<&[Packet]> = vec![&cut.video];
+    for track in 0..audio.len() {
+        streams.push(cut.audio.get(track).map_or(&[][..], Vec::as_slice));
+    }
+    let mut next = vec![0usize; streams.len()];
+    loop {
+        let pick = (0..streams.len())
+            .filter(|&s| next[s] < streams[s].len())
+            .min_by_key(|&s| (streams[s][next[s]].pts, s));
+        let Some(s) = pick else { break };
+        let p = &streams[s][next[s]];
+        next[s] += 1;
+        if p.pts < start {
+            continue; // audio from before the first picture
         }
+        writer.write(s, &sample_from_packet(p, start)?)?;
     }
     writer.finish()?;
     Ok(())
@@ -213,7 +213,7 @@ pub fn write_clip(path: &Path, video: &MediaFormat, audio: Option<&MediaFormat>,
 /// A full recording, written as fragmented MP4 while it runs.
 pub struct LiveWriter {
     writer: Writer,
-    has_audio: bool,
+    audio_tracks: usize,
     start: Option<i64>,
     _mf: Mf,
 }
@@ -222,12 +222,12 @@ pub struct LiveWriter {
 unsafe impl Send for LiveWriter {}
 
 impl LiveWriter {
-    pub fn create(path: &Path, video: &MediaFormat, audio: Option<&MediaFormat>) -> Result<Self> {
+    pub fn create(path: &Path, video: &MediaFormat, audio: &[MediaFormat]) -> Result<Self> {
         let mf = Mf::start()?;
         let formats: Vec<&MediaFormat> = std::iter::once(video).chain(audio).collect();
         Ok(Self {
             writer: Writer::create(path, MFTranscodeContainerType_FMPEG4, &formats)?,
-            has_audio: audio.is_some(),
+            audio_tracks: audio.len(),
             start: None,
             _mf: mf,
         })
@@ -245,10 +245,10 @@ impl LiveWriter {
         self.writer.write(0, &sample_from_packet(packet, start)?)
     }
 
-    pub fn write_audio(&mut self, packet: &Packet) -> Result<()> {
+    pub fn write_audio(&mut self, track: usize, packet: &Packet) -> Result<()> {
         match self.start {
-            Some(start) if self.has_audio && packet.pts >= start => {
-                self.writer.write(1, &sample_from_packet(packet, start)?)
+            Some(start) if track < self.audio_tracks && packet.pts >= start => {
+                self.writer.write(track + 1, &sample_from_packet(packet, start)?)
             }
             _ => Ok(()),
         }
@@ -281,18 +281,18 @@ pub fn trim(src: &Path, dst: &Path, start_secs: f64, end_secs: f64) -> Result<()
         reader.SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false)?;
         // Stream order in the new file: the first video stream, then the first audio stream.
         let mut picks: Vec<(u32, MediaFormat, bool)> = Vec::new();
-        let (mut have_video, mut have_audio) = (false, false);
+        let mut have_video = false;
         let mut index = 0u32;
         while let Ok(t) = reader.GetNativeMediaType(index, 0) {
             let major = t.GetGUID(&MF_MT_MAJOR_TYPE)?;
             let video = major == MFMediaType_Video;
             let audio = major == MFMediaType_Audio;
-            if (video && !have_video) || (audio && !have_audio) {
+            // Every audio track (clips can carry up to 6), but only the first video stream.
+            if (video && !have_video) || audio {
                 reader.SetStreamSelection(index, true)?;
                 reader.SetCurrentMediaType(index, None, &t)?;
                 picks.push((index, MediaFormat::from_type(&t)?, video));
                 have_video |= video;
-                have_audio |= audio;
             }
             index += 1;
         }
