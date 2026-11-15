@@ -1,0 +1,14 @@
+[package]
+name = "clipr-library"
+description = "clipr: The clip library: SQLite index, thumbnails and hover-scrub sprites, shelves, markers, auto-cleanup."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

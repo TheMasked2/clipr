@@ -8,8 +8,9 @@ replay buffer, so you can clip a moment with a hotkey (or, later, with your voic
 gallery where you can trim, sort and share them. They can also go to Discord: posted to a channel or your DMs,
 and fetched from your phone with bot commands.
 
-> **Status:** design phase, with no Rust code yet. The full roadmap is in [docs/dev-plan.md](docs/dev-plan.md).
-> The code clipr grew out of is archived in [`legacy/`](legacy/).
+> **Status:** Phase 0 (foundations). There's a tray app with a local web UI, but no recording yet. The full
+> roadmap is in [docs/dev-plan.md](docs/dev-plan.md). To build it yourself, see
+> [CONTRIBUTING.md](CONTRIBUTING.md). The code clipr grew out of is archived in [`legacy/`](legacy/).
 
 ## Principles
 
@@ -147,6 +148,11 @@ and fetched from your phone with bot commands.
 
 | Path | What |
 |---|---|
+| `crates/clipr` | The `clipr.exe` binary: tray, single instance, lifecycle |
+| `crates/core` | Config, paths, logging, status, event bus |
+| `crates/web` | Local web server (REST + WebSocket) with the UI embedded |
+| `crates/*` (others) | Placeholders for later phases: capture, gpu, encode, audio, buffer, mux, games, library, discord, cloud, voice, update |
+| `ui/` | The Svelte web UI, built into `ui/dist` and embedded in the exe |
 | `docs/dev-plan.md` | Phased development plan and milestones |
 | `legacy/ultron/` | [TheMasked2/ultron](https://github.com/TheMasked2/ultron) at `5590c12`, MIT. Voice clipping on OBS: game detection, wake word + STT, installer, updater. Reference only. |
 | `legacy/pumpkin/` | The recording side of TheMasked2/pumpkin at `bb70d3e`: WGC capture agent, segment ring buffer, GPU encoding, WASAPI + mic sync, R2 upload, clips archive, gallery. Reference only. |

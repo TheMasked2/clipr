@@ -1,6 +1,12 @@
+/target
+*.pdb
+.vscode/
+.idea/
+*.log
+Thumbs.db
+.DS_Store
 __pycache__/
 *.pyc
 .venv/
 .cache/
-*.log
 .env

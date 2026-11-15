@@ -1,0 +1,25 @@
+[package]
+name = "clipr-encode"
+description = "clipr: video encoding behind the VideoEncoder trait. The Windows implementation uses Media Foundation hardware encoders (NVENC, AMF, Quick Sync). Also hosts the GPU/encoder probe."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+clipr-gpu.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+windows-core.workspace = true
+
+[dev-dependencies]
+clipr-capture.workspace = true
+tracing-subscriber.workspace = true

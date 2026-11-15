@@ -1,0 +1,26 @@
+[package]
+name = "clipr-web"
+description = "clipr: the local web server (REST + WebSocket API) and the embedded Svelte UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+clipr-core.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+mime_guess.workspace = true
+rust-embed.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+http-body-util.workspace = true
