@@ -12,7 +12,7 @@ phases, milestones and the risks to settle early.
 | Capture | Windows Graphics Capture → D3D11 textures | No injection, safe with anti-cheat, frames stay on the GPU |
 | Colour / HDR | D3D11 compute shader (BGRA/FP16 → NV12, HDR tonemap) | GPU-only conversion before the encoder |
 | Video encode | Media Foundation hardware MFTs (H.264, HEVC, AV1) | Native NVENC/AMF/QSV, no ffmpeg |
-| Audio | WASAPI loopback, process loopback (per-app), capture (mic) | Built in since Windows 10 2004 |
+| Audio | WASAPI system loopback, microphone capture, per-app process loopback (Windows build 20348+) | Detect process-loopback support; use system loopback when unavailable |
 | Audio filters | `nnnoiseless` (RNNoise port), own gate / compressor / gain | Pure Rust, cheap |
 | Audio encode | MF AAC encoder, `opus` for Opus | |
 | Mux | Own fragmented-MP4 + MKV writer (or the MF Sink Writer if simpler) | Instant clip save from buffered packets |
@@ -171,7 +171,7 @@ Ideas, not planned yet: shared squad galleries, auto highlights (kill/death dete
 | Media Foundation HW encoders differ between vendors (quirks, missing AV1) | Phase 1 spike on all three vendors, `VideoEncoder` trait with vendor fallbacks |
 | WGC yellow border / capture prompt | On Windows 11, request borderless-capture access with `GraphicsCaptureAccess.RequestAccessAsync(GraphicsCaptureAccessKind.Borderless)` before setting `IsBorderRequired = false`; retain the border if access is denied or unsupported |
 | Exclusive fullscreen games that WGC can't capture | Fall back to monitor capture; document it |
-| Per-app audio needs Windows 10 2004+ | Detect it; fall back to system loopback |
+| Per-app process loopback requires Windows build 20348+ | Detect process-loopback API support; keep system loopback and microphone capture distinct, and fall back to system loopback when process loopback is unavailable |
 | Lossless trim snaps to keyframes | 1–2 s keyframe interval by default; precise trim re-encodes only the edges |
 | Bot token handling | Stored with Windows DPAPI, never logged, never sent anywhere except Discord |
 | Scope creep | v1 cutline above; everything else waits for v1.x |
