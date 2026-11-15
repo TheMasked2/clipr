@@ -337,8 +337,11 @@ pub fn trim(src: &Path, dst: &Path, start_secs: f64, end_secs: f64) -> Result<()
             if time < offset {
                 continue;
             }
-            sample.SetSampleTime(time - offset)?;
-            writer.write(slot, &sample)?;
+            // A fresh sample with just time, duration and data: the reader's samples carry seek attributes
+            // (a discontinuity) that make the MP4 sink stretch the audio track's duration.
+            let mut packet = packet_from_sample(&sample)?;
+            packet.pts = time;
+            writer.write(slot, &sample_from_packet(&packet, offset)?)?;
         }
         drop(reader);
         writer.finish()?;
