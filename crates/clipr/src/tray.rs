@@ -121,8 +121,8 @@ pub fn run(
         settings: MenuItem::new("Settings", true, None),
         quit: MenuItem::new("Quit clipr", true, None),
     };
-    // Full recordings come with Phase 5.
-    let record = MenuItem::new("Start recording", false, None);
+    let record = MenuItem::new(with_key("Start recording", &hotkeys.toggle_recording), true, None);
+    let mut record_key = hotkeys.toggle_recording.clone();
     let menu = Menu::new();
     menu.append_items(&[
         &items.status,
@@ -182,6 +182,7 @@ pub fn run(
             while let Ok(keys) = new_hotkeys.try_recv() {
                 register_hotkeys(&keys);
                 items.save_clip.set_text(with_key("Save clip", &keys.save_clip));
+                record_key = keys.toggle_recording.clone();
             }
             while let Ok(wake) = rx.try_recv() {
                 match wake {
@@ -194,6 +195,8 @@ pub fn run(
                             // The engine owns the switch (the hotkey and web UI flip it too); the label
                             // follows the status it publishes.
                             engine.send(Command::SetBuffering(status.activity().paused));
+                        } else if id == record.id() {
+                            engine.send(Command::ToggleRecording);
                         } else if id == items.open.id() {
                             win::open_url(ui_url);
                         } else if id == items.gallery.id() {
@@ -212,6 +215,12 @@ pub fn run(
                         items.status.set_text(status.tray_line());
                         let _ = tray.set_tooltip(Some(tooltip(&status)));
                         items.pause.set_text(pause_label(status.activity().paused));
+                        let label = if status.activity().state == RecState::Recording {
+                            "Stop recording"
+                        } else {
+                            "Start recording"
+                        };
+                        record.set_text(with_key(label, &record_key));
                         let now = status.activity().state;
                         if now != state {
                             state = now;
