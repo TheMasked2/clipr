@@ -239,7 +239,11 @@ pub fn safe_folder_name(name: &str) -> String {
             && (stem.starts_with("COM") || stem.starts_with("LPT"))
             && stem.ends_with(|c: char| c.is_ascii_digit()));
     if reserved {
-        format!("{trimmed}_")
+        // The underscore goes before the extension: "CON.txt" -> "CON_.txt".
+        match trimmed.find('.') {
+            Some(dot) => format!("{}_{}", &trimmed[..dot], &trimmed[dot..]),
+            None => format!("{trimmed}_"),
+        }
     } else {
         trimmed.to_string()
     }

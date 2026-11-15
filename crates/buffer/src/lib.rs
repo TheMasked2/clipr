@@ -85,12 +85,16 @@ impl ReplayBuffer {
     pub fn push_audio(&mut self, packet: Packet) {
         self.bytes += packet.data.len();
         self.audio.push_back(packet);
-        if self.video.is_empty() {
-            // No video yet: keep only the window, so audio can't pile up.
-            let newest = self.audio.back().map_or(0, Packet::end);
-            while self.audio.front().is_some_and(|p| p.end() < newest - self.keep) {
-                self.pop_audio();
-            }
+        // Bound audio on every insert, so it can't pile up when video is missing or stalled. The slack
+        // covers the extra keyframe interval the video side may keep.
+        let slack = if self.video.is_empty() { 0 } else { 10 * SECOND };
+        let newest = self.audio.back().map_or(0, Packet::end);
+        while self
+            .audio
+            .front()
+            .is_some_and(|p| p.end() < newest - self.keep - slack)
+        {
+            self.pop_audio();
         }
     }
 

@@ -163,7 +163,9 @@ impl Supervisor {
     fn handle(&mut self, command: Command) {
         match command {
             Command::SaveClip(secs) => self.save(secs.unwrap_or(self.config.replay.clip_secs)),
-            Command::SaveLongClip => self.save(self.config.replay.buffer_secs),
+            Command::SaveLongClip => {
+                self.save(self.config.replay.buffer_secs.max(self.config.replay.clip_secs))
+            }
             Command::SetBuffering(on) => self.buffering = on,
             Command::ToggleBuffering => self.buffering = !self.buffering,
             Command::Mark => {
