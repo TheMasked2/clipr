@@ -17,8 +17,8 @@ use clipr_buffer::{Cut, Packet};
 use windows::Win32::Media::MediaFoundation::{
     IMFAttributes, IMFMediaType, IMFSample, IMFSinkWriter, IMFSourceReader, MF_MT_MAJOR_TYPE,
     MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SINK_WRITER_DISABLE_THROTTLING, MF_SOURCE_READER_ALL_STREAMS,
-    MF_SOURCE_READERF_ENDOFSTREAM, MF_TRANSCODE_CONTAINERTYPE, MF_VERSION, MFCreateAttributes,
-    MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL,
+    MF_SOURCE_READER_ANY_STREAM, MF_SOURCE_READERF_ENDOFSTREAM, MF_TRANSCODE_CONTAINERTYPE, MF_VERSION,
+    MFCreateAttributes, MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL,
     MFCreateSourceReaderFromURL, MFGetAttributesAsBlob, MFGetAttributesAsBlobSize, MFInitAttributesFromBlob,
     MFMediaType_Audio, MFMediaType_Video, MFSTARTUP_FULL, MFSampleExtension_CleanPoint, MFShutdown,
     MFStartup, MFTranscodeContainerType_FMPEG4, MFTranscodeContainerType_MPEG4,
@@ -313,7 +313,7 @@ pub fn trim(src: &Path, dst: &Path, start_secs: f64, end_secs: f64) -> Result<()
             let (mut actual, mut flags, mut time) = (0u32, 0u32, 0i64);
             let mut sample = None;
             reader.ReadSample(
-                MF_SOURCE_READER_ALL_STREAMS.0 as u32,
+                MF_SOURCE_READER_ANY_STREAM.0 as u32,
                 0,
                 Some(&mut actual),
                 Some(&mut flags),

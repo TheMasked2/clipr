@@ -93,9 +93,12 @@ impl GameWatcher {
     /// thread. Never blocks on the network.
     pub fn new(cache_file: PathBuf) -> Self {
         let cache = catalog::load_cache(&cache_file);
-        let fresh = cache
+        let now = catalog::now_secs();
+        // How long until the cached list is due for a refresh (zero: now).
+        let due_in = cache
             .as_ref()
-            .is_some_and(|c| catalog::is_fresh(c.fetched_at, catalog::now_secs()));
+            .filter(|c| catalog::is_fresh(c.fetched_at, now))
+            .map_or(0, |c| catalog::MAX_AGE_SECS - (now - c.fetched_at));
         let known = match cache {
             Some(c) if !c.games.is_empty() => c.games,
             _ => catalog::builtin(),
@@ -107,14 +110,12 @@ impl GameWatcher {
             current: None,
             logged: HashSet::new(),
         }));
-        if !fresh {
-            let state = Arc::clone(&state);
-            let spawned = std::thread::Builder::new()
-                .name("games-refresh".into())
-                .spawn(move || refresh(&state, &cache_file));
-            if let Err(e) = spawned {
-                tracing::warn!("could not start the game list refresh: {e}");
-            }
+        let refresher = Arc::clone(&state);
+        let spawned = std::thread::Builder::new()
+            .name("games-refresh".into())
+            .spawn(move || refresh_forever(&refresher, &cache_file, due_in));
+        if let Err(e) = spawned {
+            tracing::warn!("could not start the game list refresh: {e}");
         }
         Self { state }
     }
@@ -196,7 +197,21 @@ fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
     state.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn refresh(state: &Mutex<State>, cache_file: &std::path::Path) {
+/// Keeps the list fresh while clipr runs: daily, and an hour after a failed download.
+fn refresh_forever(state: &Mutex<State>, cache_file: &std::path::Path, mut due_in: u64) {
+    const RETRY_SECS: u64 = 60 * 60;
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(due_in));
+        due_in = if refresh(state, cache_file) {
+            catalog::MAX_AGE_SECS
+        } else {
+            RETRY_SECS
+        };
+    }
+}
+
+/// Downloads the list once. True when a new list was loaded.
+fn refresh(state: &Mutex<State>, cache_file: &std::path::Path) -> bool {
     match catalog::download() {
         Ok(games) if !games.is_empty() => {
             tracing::info!("downloaded {} known game executables", games.len());
@@ -208,9 +223,16 @@ fn refresh(state: &Mutex<State>, cache_file: &std::path::Path) {
                 tracing::warn!("could not save the game list: {e:#}");
             }
             lock(state).known = cache.games;
+            true
         }
-        Ok(_) => tracing::warn!("the downloaded game list was empty; keeping the old one"),
-        Err(e) => tracing::warn!("{e:#}; using the cached game list"),
+        Ok(_) => {
+            tracing::warn!("the downloaded game list was empty; keeping the old one");
+            false
+        }
+        Err(e) => {
+            tracing::warn!("{e:#}; using the cached game list");
+            false
+        }
     }
 }
 

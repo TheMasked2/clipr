@@ -32,6 +32,8 @@ pub struct Activity {
     pub error: Option<String>,
     /// When the running full recording started, in seconds since the Unix epoch.
     pub recording_since: Option<u64>,
+    /// The user paused the buffer (tray, hotkey or web UI).
+    pub paused: bool,
 }
 
 /// What `/api/status` returns and the WebSocket pushes.
@@ -43,6 +45,8 @@ pub struct StatusSnapshot {
     pub encoder: Option<String>,
     pub error: Option<String>,
     pub recording_since: Option<u64>,
+    #[serde(default)]
+    pub paused: bool,
     pub uptime_secs: u64,
 }
 
@@ -93,6 +97,7 @@ impl Status {
             encoder: activity.encoder,
             error: activity.error,
             recording_since: activity.recording_since,
+            paused: activity.paused,
             uptime_secs: self.started.elapsed().as_secs(),
         }
     }
@@ -103,6 +108,7 @@ impl Status {
         let game = activity.game.as_deref();
         match (activity.state, game) {
             (RecState::Idle, _) if activity.error.is_some() => "Capture stopped (see the web UI)".into(),
+            (RecState::Idle, _) if activity.paused => "Buffer paused".into(),
             (RecState::Idle, _) => "Not buffering".into(),
             (RecState::Buffering, Some(game)) => format!("● Buffering {game}"),
             (RecState::Buffering, None) => "● Buffering".into(),

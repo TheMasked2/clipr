@@ -175,7 +175,7 @@ pub fn run(
         }
     });
 
-    let mut paused = false;
+    let pause_label = |paused: bool| if paused { "Resume buffer" } else { "Pause buffer" };
     win::message_loop(
         || {
             while let Ok(wake) = rx.try_recv() {
@@ -186,11 +186,9 @@ pub fn run(
                         if id == items.save_clip.id() {
                             engine.send(Command::SaveClip(None));
                         } else if id == items.pause.id() {
-                            paused = !paused;
-                            engine.send(Command::SetBuffering(!paused));
-                            items
-                                .pause
-                                .set_text(if paused { "Resume buffer" } else { "Pause buffer" });
+                            // The engine owns the switch (the hotkey and web UI flip it too); the label
+                            // follows the status it publishes.
+                            engine.send(Command::SetBuffering(status.activity().paused));
                         } else if id == items.open.id() {
                             win::open_url(ui_url);
                         } else if id == items.gallery.id() {
@@ -208,6 +206,7 @@ pub fn run(
                     Wake::Status => {
                         items.status.set_text(status.tray_line());
                         let _ = tray.set_tooltip(Some(tooltip(&status)));
+                        items.pause.set_text(pause_label(status.activity().paused));
                         let now = status.activity().state;
                         if now != state {
                             state = now;

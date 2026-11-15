@@ -103,7 +103,8 @@ pub fn start(config: Config, status: Arc<Status>, bus: Bus, paths: &Paths) -> (E
                 bus,
                 watcher,
                 game: None,
-                last_game_name: None,
+                buffer_game: None,
+                saves: Vec::new(),
                 next_poll: Instant::now(),
                 pipeline: None,
                 retry_at: None,
@@ -131,8 +132,11 @@ struct Supervisor {
     /// The user's pause switch (tray, hotkey, UI).
     buffering: bool,
     game: Option<Game>,
-    /// Name used for clips saved after the game closed.
-    last_game_name: Option<String>,
+    /// The game whose footage the buffer holds (`None`: the desktop). Kept while capture is paused or
+    /// the game has closed, so later saves still land in the right folder.
+    buffer_game: Option<String>,
+    /// Saves still being written; joined on shutdown so no clip is left as a `.part` file.
+    saves: Vec<JoinHandle<()>>,
     next_poll: Instant,
     pipeline: Option<Pipeline>,
     retry_at: Option<Instant>,
@@ -157,6 +161,9 @@ impl Supervisor {
             }
         }
         self.stop_pipeline();
+        for save in self.saves.drain(..) {
+            let _ = save.join();
+        }
         tracing::info!("capture engine stopped");
     }
 
@@ -198,9 +205,11 @@ impl Supervisor {
         if now >= self.next_poll {
             self.next_poll = now + GAME_POLL;
             self.game = self.watcher.poll();
-            if let Some(g) = &self.game {
-                self.last_game_name = Some(g.name.clone());
+            if self.pipeline.is_some() {
+                // What's on screen now is what the buffer's newest footage shows.
+                self.buffer_game = self.game.as_ref().map(|g| g.name.clone());
             }
+            self.saves.retain(|s| !s.is_finished());
         }
 
         // A pipeline that ended by itself failed (or its monitor went away).
@@ -281,6 +290,7 @@ impl Supervisor {
             s.stats = Stats::default();
         }
         self.last_stats = Stats::default();
+        self.buffer_game = self.game.as_ref().map(|g| g.name.clone());
         let stop = Arc::new(AtomicBool::new(false));
         let video = video::spawn(settings.clone(), self.shared.clone(), stop.clone());
         tracing::info!("capture started");
@@ -323,6 +333,7 @@ impl Supervisor {
             encoder: self.shared.lock().unwrap().encoder.clone(),
             error: self.error.clone(),
             recording_since: None,
+            paused: !self.buffering,
         });
     }
 
@@ -370,19 +381,15 @@ impl Supervisor {
             );
             return;
         };
-        let game = self
-            .game
-            .as_ref()
-            .map(|g| g.name.clone())
-            .or_else(|| self.last_game_name.clone())
-            .unwrap_or_else(|| "Desktop".into());
-        let path = save::clip_path(&self.config.clips.dir(), &game, "");
+        let game = self.buffer_game.clone().unwrap_or_else(|| "Desktop".into());
+        let reserved = save::clip_path(&self.config.clips.dir(), &game, "");
         let bus = self.bus.clone();
         let sound = self.config.replay.sound_on_save;
         let length = cut.duration_secs();
-        std::thread::Builder::new()
+        let worker = std::thread::Builder::new()
             .name("clipr-save".into())
             .spawn(move || {
+                let path = reserved.path().to_path_buf();
                 let started = Instant::now();
                 match save::write(&path, &video_format, None, &cut, &markers) {
                     Ok(()) => {
@@ -402,8 +409,10 @@ impl Supervisor {
                         });
                     }
                 }
+                drop(reserved);
             })
             .expect("can't start a thread");
+        self.saves.push(worker);
     }
 
     fn fail(&self, message: &str) {
