@@ -78,6 +78,12 @@ fn run() -> Result<()> {
         },
     ));
 
+    // A tray app gives no sign it started, so show the UI, unless Windows started us at login.
+    let background = std::env::args().any(|a| a == "--background");
+    if config.general.open_ui_on_start && !background {
+        win::open_url(&ui_url);
+    }
+
     // The tray lives on this thread until the user quits.
     let tray_result = tray::run(&runtime, status, &ui_url);
 

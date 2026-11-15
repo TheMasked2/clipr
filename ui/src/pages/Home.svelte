@@ -23,6 +23,11 @@
   {/if}
 </section>
 
+<p class="hint muted">
+  clipr lives in your system tray (the <strong>c</strong> icon near the clock, maybe under the ^ arrow).
+  Click it to come back here; right-click for quick actions. Closing this tab doesn't stop clipr.
+</p>
+
 <style>
   dl {
     margin: 0;
@@ -32,4 +37,5 @@
   }
   dt { color: var(--text-muted); }
   dd { margin: 0; overflow-wrap: anywhere; }
+  .hint { margin-top: 1rem; font-size: 0.9rem; line-height: 1.5; }
 </style>

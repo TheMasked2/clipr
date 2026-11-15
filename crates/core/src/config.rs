@@ -57,13 +57,26 @@ impl Default for UiConfig {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneralConfig {
     /// Start clipr when Windows starts.
     pub start_with_windows: bool,
+    /// Open the web UI when you start clipr yourself, so you can see it's running. Never happens when
+    /// Windows starts it (`--background`).
+    pub open_ui_on_start: bool,
     /// Check GitHub releases and update by itself. Opt-in.
     pub auto_update: bool,
+}
+
+impl Default for GeneralConfig {
+    fn default() -> Self {
+        Self {
+            start_with_windows: false,
+            open_ui_on_start: true,
+            auto_update: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +139,10 @@ mod tests {
         assert!(!config.general.auto_update, "auto-update must be opt-in");
         assert!(!config.privacy.crash_reports, "crash reports must be opt-in");
         assert!(!config.web.lan, "LAN access must be opt-in");
+        assert!(
+            config.general.open_ui_on_start,
+            "a manual start should show where clipr went"
+        );
     }
 
     #[test]
