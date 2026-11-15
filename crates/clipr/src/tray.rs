@@ -97,6 +97,7 @@ pub fn run(
     ui_url: &str,
     engine: &Engine,
     hotkeys: &HotkeyConfig,
+    new_hotkeys: mpsc::Receiver<HotkeyConfig>,
     clips_dir: impl Fn() -> PathBuf,
 ) -> Result<()> {
     let main_thread = win::current_thread_id();
@@ -178,6 +179,10 @@ pub fn run(
     let pause_label = |paused: bool| if paused { "Resume buffer" } else { "Pause buffer" };
     win::message_loop(
         || {
+            while let Ok(keys) = new_hotkeys.try_recv() {
+                register_hotkeys(&keys);
+                items.save_clip.set_text(with_key("Save clip", &keys.save_clip));
+            }
             while let Ok(wake) = rx.try_recv() {
                 match wake {
                     Wake::Click => win::open_url(ui_url),
@@ -226,7 +231,7 @@ pub fn run(
             Some(Action::SaveLongClip) => engine.send(Command::SaveLongClip),
             Some(Action::ToggleBuffer) => engine.send(Command::ToggleBuffering),
             Some(Action::Mark) => engine.send(Command::Mark),
-            Some(Action::ToggleRecording) => tracing::info!("full recordings arrive in Phase 5"),
+            Some(Action::ToggleRecording) => engine.send(Command::ToggleRecording),
             None => {}
         },
     );

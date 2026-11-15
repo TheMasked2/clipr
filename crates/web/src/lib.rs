@@ -1,13 +1,19 @@
 //! The local web server: the REST + WebSocket API and the Svelte UI embedded in the exe.
 //!
-//! It listens on `127.0.0.1` only. LAN access (opt-in, with a PIN) comes in Phase 4.
-//!
-//! API (the UI's `src/lib/api.ts` mirrors this):
-//! - `GET /api/status` → [`StatusSnapshot`](clipr_core::status::StatusSnapshot) as JSON
-//! - `GET /api/events` (WebSocket) → `{"type":"status", ...snapshot}` on connect and on every change
+//! It listens on `127.0.0.1`; with LAN access on, the app also calls [`bind_lan`] and every request from
+//! another machine needs the PIN (see `auth`). The API is described in `docs/api.md` (the UI's
+//! `src/lib/api.ts` mirrors it).
+
+mod api;
+mod auth;
+mod control;
+#[cfg(test)]
+mod tests;
 
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::Router;
@@ -15,14 +21,26 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{any, get, post};
+use clipr_core::events::{Bus, Event};
 use clipr_core::status::Status;
+use clipr_library::Library;
 use rust_embed::RustEmbed;
+use serde_json::{Value, json};
 use tokio::net::TcpListener;
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
+use tokio::task::JoinSet;
+
+pub use control::{Control, NoopControl};
 
 /// How many ports after the preferred one to try before giving up.
 const PORT_ATTEMPTS: u16 = 20;
+
+/// Waits this long after a library change before telling the UI, so a burst becomes one message.
+const LIBRARY_DEBOUNCE: Duration = Duration::from_millis(300);
+
+/// How often connected UIs get the audio levels (10 times a second).
+const LEVELS_EVERY: Duration = Duration::from_millis(100);
 
 /// The built UI. In debug builds rust-embed reads these files from disk at runtime, so `npm run build` is
 /// picked up without recompiling; release builds bake them into the exe.
@@ -42,6 +60,13 @@ pub struct AppState {
     pub status: Arc<Status>,
     /// Flips to `true` when clipr shuts down; open WebSockets close on it.
     pub shutdown: watch::Receiver<bool>,
+    /// What the API asks the rest of clipr to do.
+    pub control: Arc<dyn Control>,
+    /// Where `ClipSaved` / `ClipFailed` come from.
+    pub bus: Bus,
+    pub library: Arc<Library>,
+    /// Where the library writes thumbnails (`library.thumbs_dir()`).
+    pub thumbs_dir: PathBuf,
 }
 
 /// Binds `127.0.0.1:<preferred>`, or the next free port after it.
@@ -70,54 +95,241 @@ pub async fn bind(preferred: u16) -> Result<(TcpListener, u16)> {
     })
 }
 
+/// Binds `0.0.0.0:<port>` for LAN access (the app calls this when `web.lan` is on, with the port [`bind`] got).
+/// Serve it together with the loopback listener using [`serve_many`]; other machines need the PIN.
+pub async fn bind_lan(port: u16) -> Result<TcpListener> {
+    TcpListener::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)))
+        .await
+        .with_context(|| {
+            format!("can't listen on the local network at port {port} (is it taken or blocked?)")
+        })
+}
+
 pub fn router(state: AppState) -> Router {
+    let auth = Arc::new(auth::Auth::default());
     Router::new()
         .route("/api/status", get(status))
         .route("/api/events", get(events))
-        .route("/api/{*rest}", get(api_not_found))
+        .route("/api/clip", post(api::save_clip))
+        .route("/api/buffer", post(api::set_buffer))
+        .route("/api/recording", post(api::set_recording))
+        .route("/api/mark", post(api::mark))
+        .route("/api/config", get(api::get_config).put(api::put_config))
+        .route("/api/system", get(api::system))
+        .route(
+            "/api/clips",
+            get(api::list_clips)
+                .patch(api::patch_clip)
+                .delete(api::delete_clip),
+        )
+        .route("/api/clips/trim", post(api::trim_clip))
+        .route("/api/clips/reveal", post(api::reveal))
+        .route("/api/games", get(api::games))
+        .route("/api/shelves", get(api::shelves))
+        .route("/api/cleanup", post(api::cleanup))
+        .route("/api/disk", get(api::disk))
+        .route("/api/login", post(auth::login))
+        .route("/media/{*id}", get(api::media))
+        .route("/thumbs/{*name}", get(api::thumb))
+        .route("/api/{*rest}", any(api_not_found))
         .fallback(static_file)
-        .with_state(state)
+        .with_state(state.clone())
+        .layer(axum::middleware::from_fn_with_state(state, auth::guard))
+        .layer(axum::Extension(auth))
+        .layer(axum::middleware::from_fn(auth::origin_guard))
 }
 
 /// Serves until `shutdown` flips to `true`.
 pub async fn serve(listener: TcpListener, state: AppState) -> Result<()> {
+    serve_many(vec![listener], state).await
+}
+
+/// Like [`serve`], on several listeners at once (loopback plus LAN). Also runs the background jobs: the first
+/// scan, indexing of saved clips (thumbnails), and the hourly cleanup.
+pub async fn serve_many(listeners: Vec<TcpListener>, state: AppState) -> Result<()> {
+    let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
+    let mut tasks: JoinSet<Result<()>> = JoinSet::new();
+    for listener in listeners {
+        let mut shutdown = state.shutdown.clone();
+        let app = app.clone();
+        tasks.spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown.wait_for(|stop| *stop).await;
+                })
+                .await
+                .context("web server stopped")
+        });
+    }
+    tasks.spawn(first_scan(state.clone()));
+    tasks.spawn(index_saved_clips(state.clone()));
+    tasks.spawn(hourly_cleanup(state));
+    let mut result = Ok(());
+    while let Some(done) = tasks.join_next().await {
+        match done {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                if result.is_ok() {
+                    result = Err(e);
+                }
+            }
+            Err(e) => tracing::warn!("a web task panicked: {e}"),
+        }
+    }
+    result
+}
+
+async fn first_scan(state: AppState) -> Result<()> {
+    let library = state.library.clone();
+    match tokio::task::spawn_blocking(move || library.scan()).await {
+        Ok(Ok(report)) if report.changed() => state.library.notify_changed(),
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => tracing::warn!("can't scan the clips folder: {e:#}"),
+        Err(e) => tracing::warn!("the clip scan failed: {e}"),
+    }
+    Ok(())
+}
+
+/// Adds every saved clip to the library (and queues its thumbnails) even when no browser is open.
+async fn index_saved_clips(state: AppState) -> Result<()> {
+    let mut bus = state.bus.subscribe();
     let mut shutdown = state.shutdown.clone();
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(async move {
-            let _ = shutdown.wait_for(|stop| *stop).await;
-        })
-        .await
-        .context("web server stopped")
+    loop {
+        tokio::select! {
+            event = bus.recv() => match event {
+                Ok(Event::ClipSaved { path }) => {
+                    let library = state.library.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        if let Err(e) = library.add_file(&path) {
+                            tracing::warn!("can't add {} to the library: {e:#}", path.display());
+                        }
+                    })
+                    .await;
+                }
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+            () = stopped(&mut shutdown) => return Ok(()),
+        }
+    }
+}
+
+/// Runs the age/size cleanup a minute after start and then every hour.
+async fn hourly_cleanup(state: AppState) -> Result<()> {
+    let mut shutdown = state.shutdown.clone();
+    let mut wait = Duration::from_secs(60);
+    loop {
+        tokio::select! {
+            () = tokio::time::sleep(wait) => {}
+            () = stopped(&mut shutdown) => return Ok(()),
+        }
+        wait = Duration::from_secs(3600);
+        let library = state.library.clone();
+        let clips = state.control.config().clips;
+        match tokio::task::spawn_blocking(move || library.cleanup(&clips)).await {
+            Ok(Ok((removed, freed))) if removed > 0 => {
+                tracing::info!("cleanup removed {removed} clips, freeing {freed} bytes");
+                state.library.notify_changed();
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => tracing::warn!("cleanup failed: {e:#}"),
+            Err(e) => tracing::warn!("cleanup panicked: {e}"),
+        }
+    }
 }
 
 async fn status(State(state): State<AppState>) -> impl IntoResponse {
     axum::Json(state.status.snapshot())
 }
 
-async fn api_not_found() -> StatusCode {
-    StatusCode::NOT_FOUND
+async fn api_not_found() -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        axum::Json(json!({ "error": "no such API call" })),
+    )
 }
 
 async fn events(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| push_status(socket, state))
+    ws.on_upgrade(move |socket| push_events(socket, state))
 }
 
-async fn push_status(mut socket: WebSocket, state: AppState) {
+async fn send_json(socket: &mut WebSocket, value: &Value) -> bool {
+    socket.send(Message::Text(value.to_string().into())).await.is_ok()
+}
+
+/// Status on connect and on every change, plus saved clips, failures, library changes and audio levels.
+async fn push_events(mut socket: WebSocket, state: AppState) {
     let mut changes = state.status.subscribe();
+    let mut bus = state.bus.subscribe();
+    let mut library = state.library.subscribe();
     let mut shutdown = state.shutdown.clone();
+    let mut send_status = true;
+    let mut meter = tokio::time::interval(LEVELS_EVERY);
+    meter.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
-        let mut message = serde_json::to_value(state.status.snapshot()).expect("status is always JSON");
-        message["type"] = "status".into();
-        if socket
-            .send(Message::Text(message.to_string().into()))
-            .await
-            .is_err()
-        {
-            return;
+        if send_status {
+            let mut message = serde_json::to_value(state.status.snapshot()).expect("status is always JSON");
+            message["type"] = "status".into();
+            if !send_json(&mut socket, &message).await {
+                return;
+            }
+            send_status = false;
         }
         tokio::select! {
-            changed = changes.changed() => if changed.is_err() { break },
-            _ = shutdown.wait_for(|stop| *stop) => break,
+            changed = changes.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                send_status = true;
+            }
+            _ = meter.tick() => {
+                let levels = state.control.levels();
+                if !levels.is_empty() {
+                    let list: Vec<Value> = levels.iter().map(|(name, db)| json!({ "name": name, "db": db })).collect();
+                    if !send_json(&mut socket, &json!({ "type": "levels", "levels": list })).await {
+                        return;
+                    }
+                }
+            }
+            event = bus.recv() => match event {
+                Ok(Event::ClipSaved { path }) => {
+                    let lib = state.library.clone();
+                    match tokio::task::spawn_blocking(move || lib.add_file(&path)).await {
+                        Ok(Ok(clip)) => {
+                            if !send_json(&mut socket, &json!({ "type": "clip_saved", "clip": clip })).await {
+                                return;
+                            }
+                        }
+                        Ok(Err(e)) => tracing::warn!("a saved clip can't be added to the library: {e:#}"),
+                        Err(e) => tracing::warn!("adding a saved clip failed: {e}"),
+                    }
+                }
+                Ok(Event::ClipFailed { message }) => {
+                    if !send_json(&mut socket, &json!({ "type": "clip_failed", "message": message })).await {
+                        return;
+                    }
+                }
+                Ok(_) => {}
+                // Missed some events: have the UI refetch the list.
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    if !send_json(&mut socket, &json!({ "type": "library" })).await {
+                        return;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            changed = library.recv() => {
+                if matches!(changed, Err(broadcast::error::RecvError::Closed)) {
+                    break;
+                }
+                // One message for a burst of changes (thumbnails finishing, a bulk cleanup).
+                tokio::time::sleep(LIBRARY_DEBOUNCE).await;
+                while library.try_recv().is_ok() {}
+                if !send_json(&mut socket, &json!({ "type": "library" })).await {
+                    return;
+                }
+            }
+            () = stopped(&mut shutdown) => break,
             incoming = socket.recv() => match incoming {
                 // The UI doesn't send anything yet; ignore pings/text, stop when it goes away.
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
@@ -155,73 +367,7 @@ async fn static_file(uri: Uri) -> Response {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::body::Body;
-    use axum::http::Request;
-    use clipr_core::status::{Activity, RecState};
-    use http_body_util::BodyExt;
-    use tower::ServiceExt;
-
-    fn state() -> (AppState, watch::Sender<bool>) {
-        let (tx, rx) = watch::channel(false);
-        (
-            AppState {
-                status: Arc::new(Status::new()),
-                shutdown: rx,
-            },
-            tx,
-        )
-    }
-
-    async fn get_body(app: Router, uri: &str) -> (StatusCode, String) {
-        let response = app
-            .oneshot(Request::get(uri).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        let code = response.status();
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
-        (code, String::from_utf8_lossy(&bytes).into_owned())
-    }
-
-    #[tokio::test]
-    async fn status_endpoint_reports_activity() {
-        let (state, _tx) = state();
-        state.status.set(Activity {
-            state: RecState::Buffering,
-            game: Some("Minecraft".into()),
-            ..Default::default()
-        });
-        let (code, body) = get_body(router(state), "/api/status").await;
-        assert_eq!(code, StatusCode::OK);
-        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(json["state"], "buffering");
-        assert_eq!(json["game"], "Minecraft");
-    }
-
-    #[tokio::test]
-    async fn unknown_api_path_is_404_not_the_ui() {
-        let (state, _tx) = state();
-        let (code, _) = get_body(router(state), "/api/nope").await;
-        assert_eq!(code, StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn client_routes_fall_back_to_html() {
-        let (state, _tx) = state();
-        let (code, body) = get_body(router(state), "/gallery/some/clip").await;
-        assert_eq!(code, StatusCode::OK);
-        assert!(body.contains("<"), "expected HTML, got {body:?}");
-    }
-
-    #[tokio::test]
-    async fn bind_falls_back_to_next_port() {
-        // Port 0 means "any free port"; keep it occupied and ask for it again.
-        let (first, taken) = bind(0).await.unwrap();
-        assert_ne!(taken, 0);
-        let (_second, got) = bind(taken).await.unwrap();
-        assert_ne!(got, taken);
-        drop(first);
-    }
+/// Resolves when clipr shuts down. (Returns `()` so no watch guard is held across later awaits.)
+async fn stopped(shutdown: &mut watch::Receiver<bool>) {
+    let _ = shutdown.wait_for(|stop| *stop).await;
 }

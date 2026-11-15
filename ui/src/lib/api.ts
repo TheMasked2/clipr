@@ -1,32 +1,218 @@
+// Typed client for the clipr web API. Mirrors docs/api.md and crates/core/src/config.rs.
+
 export type State = 'idle' | 'buffering' | 'recording';
 
 export interface Status {
   version: string;
   state: State;
   game: string | null;
+  encoder: string | null;
+  error: string | null;
+  recording_since: number | null;
   uptime_secs: number;
+  /** The user paused the replay buffer. */
+  paused: boolean;
 }
 
-export type ServerEvent = { type: 'status' } & Status;
+export type ClipKind = 'clip' | 'recording';
 
-export async function getStatus(): Promise<Status> {
-  const r = await fetch('/api/status');
-  if (!r.ok) throw new Error(`GET /api/status: ${r.status}`);
-  return (await r.json()) as Status;
+export interface Clip {
+  id: string;
+  title: string;
+  game: string;
+  kind: ClipKind;
+  size_bytes: number;
+  created: number;
+  duration_secs: number | null;
+  width: number | null;
+  height: number | null;
+  favorite: boolean;
+  shelves: string[];
+  markers: number[];
+  url: string;
+  thumb: string | null;
+  sprite: string | null;
+  sprite_frames: number;
 }
+
+export interface GameInfo {
+  name: string;
+  clips: number;
+  size_bytes: number;
+}
+
+export type Codec = 'h264' | 'hevc' | 'av1';
+export type GameMode = 'auto' | 'always';
+
+/** Video settings that replace `video.*` while one game runs; null keeps the normal value. */
+export interface GameProfile {
+  game: string;
+  fps: number | null;
+  height: number | null;
+  bitrate_kbps: number | null;
+}
+
+export interface Config {
+  web: { port: number; lan: boolean; lan_pin: string };
+  ui: { theme: string; accent: string; setup_done: boolean };
+  general: { start_with_windows: boolean; open_ui_on_start: boolean; auto_update: boolean };
+  privacy: { crash_reports: boolean };
+  replay: { enabled: boolean; clip_secs: number; buffer_secs: number; sound_on_save: boolean };
+  video: { codec: Codec; fps: number; height: number; bitrate_kbps: number; monitor: number };
+  audio: { system: boolean; mic: boolean; mic_volume: number; bitrate_kbps: number };
+  hotkeys: {
+    save_clip: string;
+    save_long_clip: string;
+    toggle_buffer: string;
+    toggle_recording: string;
+    mark: string;
+  };
+  clips: { folder: string; max_age_days: number; max_total_gb: number; min_free_gb: number };
+  games: {
+    mode: GameMode;
+    custom: string[];
+    blocked: string[];
+    auto_record: string[];
+    profiles: GameProfile[];
+  };
+  recording: { max_minutes: number };
+}
+
+export interface SystemInfo {
+  gpus?: { name: string; vendor?: string; encoders?: string[] }[];
+  monitors?: { index: number; name: string; width: number; height: number; primary: boolean }[];
+  known_games?: number;
+}
+
+export interface Disk {
+  free_bytes: number;
+  total_bytes: number;
+  clips_bytes: number;
+}
+
+/** One audio source's current level in dBFS (-60 and below = silence). */
+export interface Level {
+  name: string;
+  db: number;
+}
+
+export type ServerEvent =
+  | ({ type: 'status' } & Status)
+  | { type: 'clip_saved'; clip: Clip }
+  | { type: 'clip_failed'; message: string }
+  | { type: 'library' }
+  | { type: 'levels'; levels: Level[] };
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+let unauthorized: () => void = () => {};
+export function onUnauthorized(fn: () => void): void {
+  unauthorized = fn;
+}
+
+async function request<T>(
+  method: string,
+  url: string,
+  body?: unknown,
+  noLock = false,
+): Promise<T> {
+  let r: Response;
+  try {
+    r = await fetch(url, {
+      method,
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new ApiError(0, 'Cannot reach clipr. Is it running?');
+  }
+  if (r.status === 401 && !noLock) unauthorized();
+  if (!r.ok) {
+    let msg = `${method} ${url} failed (${r.status})`;
+    try {
+      const j = await r.json();
+      if (j && typeof j.error === 'string') msg = j.error;
+    } catch {
+      /* no JSON body */
+    }
+    throw new ApiError(r.status, msg);
+  }
+  if (r.status === 204) return undefined as T;
+  const text = await r.text();
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+const qs = (p: Record<string, string | undefined | false>) => {
+  const u = new URLSearchParams();
+  for (const [k, v] of Object.entries(p)) if (v) u.set(k, v);
+  const s = u.toString();
+  return s ? `?${s}` : '';
+};
+
+export const getStatus = () => request<Status>('GET', '/api/status');
+export const getConfig = () => request<Config>('GET', '/api/config');
+export const putConfig = (c: Config) => request<Config>('PUT', '/api/config', c);
+export const getSystem = () => request<SystemInfo>('GET', '/api/system');
+export const getDisk = () => request<Disk>('GET', '/api/disk');
+export const getGames = () => request<GameInfo[]>('GET', '/api/games');
+export const getShelves = () => request<string[]>('GET', '/api/shelves');
+
+export interface ClipQuery {
+  q?: string;
+  game?: string;
+  shelf?: string;
+  favorite?: boolean;
+  kind?: ClipKind;
+}
+export const listClips = (p: ClipQuery = {}) =>
+  request<Clip[]>(
+    'GET',
+    '/api/clips' +
+      qs({ q: p.q, game: p.game, shelf: p.shelf, favorite: p.favorite ? 'true' : undefined, kind: p.kind }),
+  );
+export const patchClip = (patch: {
+  id: string;
+  title?: string;
+  favorite?: boolean;
+  shelves?: string[];
+}) => request<Clip>('PATCH', '/api/clips', patch);
+export const deleteClip = (id: string) =>
+  request<void>('DELETE', '/api/clips?id=' + encodeURIComponent(id));
+export const trimClip = (id: string, start: number, end: number, replace: boolean) =>
+  request<Clip>('POST', '/api/clips/trim', { id, start, end, replace });
+export const reveal = (id?: string) =>
+  request<void>('POST', '/api/clips/reveal', id ? { id } : {});
+export const cleanup = () =>
+  request<{ removed: number; freed_bytes: number }>('POST', '/api/cleanup');
+
+export const saveClip = (seconds?: number) =>
+  request<void>('POST', '/api/clip', seconds ? { seconds } : undefined);
+export const setBuffer = (on: boolean) => request<void>('POST', '/api/buffer', { on });
+export const setRecording = (on: boolean) => request<void>('POST', '/api/recording', { on });
+export const markMoment = () => request<void>('POST', '/api/mark');
+export const login = (pin: string) => request<void>('POST', '/api/login', { pin }, true);
 
 export interface Connection {
   close(): void;
 }
 
+export interface Handlers {
+  onStatus: (s: Status) => void;
+  onConnected: (up: boolean) => void;
+  onEvent: (e: ServerEvent) => void;
+}
+
 /**
  * Fetches /api/status, opens /api/events and keeps it open, reconnecting with
- * backoff (1s -> 10s). onStatus gets every status; onConnected(false) while down.
+ * backoff (1s -> 10s).
  */
-export function connect(
-  onStatus: (s: Status) => void,
-  onConnected: (up: boolean) => void,
-): Connection {
+export function connect(h: Handlers): Connection {
   let closed = false;
   let ws: WebSocket | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -34,28 +220,28 @@ export function connect(
 
   const retry = () => {
     if (closed) return;
-    onConnected(false);
+    h.onConnected(false);
     timer = setTimeout(open, delay);
     delay = Math.min(delay * 2, 10000);
   };
 
   const open = () => {
     if (closed) return;
-    // Resync via REST, then listen for pushes.
     getStatus()
-      .then((s) => !closed && onStatus(s))
+      .then((s) => !closed && h.onStatus(s))
       .catch(() => {});
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const sock = new WebSocket(`${proto}://${location.host}/api/events`);
     ws = sock;
     sock.onopen = () => {
       delay = 1000;
-      onConnected(true);
+      h.onConnected(true);
     };
     sock.onmessage = (e) => {
       try {
         const m = JSON.parse(e.data) as ServerEvent;
-        if (m.type === 'status') onStatus(m);
+        if (m.type === 'status') h.onStatus(m);
+        else h.onEvent(m);
       } catch {
         /* ignore malformed message */
       }

@@ -9,13 +9,15 @@
 // Release builds are a tray app with no console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod autostart;
+mod control;
 mod engine;
 mod icon;
 mod overlay;
 mod tray;
 mod win;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -48,6 +50,14 @@ fn run() -> Result<()> {
 
     let _log_guard = clipr_core::logging::init(&paths.log_dir())?;
     tracing::info!("clipr {} starting", clipr_core::VERSION);
+    // Release builds have no console: put panics in the log file.
+    std::panic::set_hook(Box::new(|info| {
+        tracing::error!(
+            "panic: {info}
+{}",
+            std::backtrace::Backtrace::force_capture()
+        );
+    }));
 
     let config = Config::load_or_recover(&paths.config_file());
     if !paths.config_file().exists()
@@ -71,12 +81,45 @@ fn run() -> Result<()> {
     let ui_url = format!("http://127.0.0.1:{port}/");
     std::fs::write(paths.port_file(), port.to_string()).context("can't write the port file")?;
     tracing::info!("web UI at {ui_url}");
+    let mut listeners = vec![listener];
+    if config.web.lan {
+        match runtime.block_on(clipr_web::bind_lan(port)) {
+            Ok(lan) => {
+                tracing::info!("web UI open to the local network on port {port} (PIN required)");
+                listeners.push(lan);
+            }
+            Err(e) => tracing::warn!("LAN access is on but the LAN port can't be opened: {e:#}"),
+        }
+    }
 
-    let server = runtime.spawn(clipr_web::serve(
-        listener,
+    let watcher = Arc::new(clipr_games::GameWatcher::new(paths.data_dir.join("games.json")));
+    let (engine, engine_thread) = engine::start(config.clone(), status.clone(), bus.clone(), watcher.clone());
+    control::measure_preset_in_background();
+
+    let library = Arc::new(
+        clipr_library::Library::open(config.clips.dir(), paths.data_dir.join("library.db"))
+            .context("can't open the clip library")?,
+    );
+    let shared_config = Arc::new(Mutex::new(config.clone()));
+    let (hotkeys_tx, hotkeys_rx) = std::sync::mpsc::channel();
+    let control = Arc::new(control::AppControl {
+        engine: engine.clone(),
+        config: shared_config.clone(),
+        config_file: paths.config_file(),
+        library: library.clone(),
+        hotkeys: hotkeys_tx,
+        main_thread: win::current_thread_id(),
+        known_games: Arc::new(move || watcher.list_len()),
+    });
+    let server = runtime.spawn(clipr_web::serve_many(
+        listeners,
         AppState {
             status: status.clone(),
             shutdown: shutdown_rx,
+            control,
+            bus: bus.clone(),
+            thumbs_dir: library.thumbs_dir().to_path_buf(),
+            library,
         },
     ));
 
@@ -86,14 +129,16 @@ fn run() -> Result<()> {
         win::open_url(&ui_url);
     }
 
-    let watcher = Arc::new(clipr_games::GameWatcher::new(paths.data_dir.join("games.json")));
-    let (engine, engine_thread) = engine::start(config.clone(), status.clone(), bus.clone(), watcher);
-
     // The tray lives on this thread until the user quits.
-    let clips = config.clips.clone();
-    let tray_result = tray::run(&runtime, status, &ui_url, &engine, &config.hotkeys, || {
-        clips.dir()
-    });
+    let tray_result = tray::run(
+        &runtime,
+        status,
+        &ui_url,
+        &engine,
+        &config.hotkeys,
+        hotkeys_rx,
+        || shared_config.lock().unwrap().clips.dir(),
+    );
 
     tracing::info!("shutting down");
     engine.send(engine::Command::Stop);

@@ -12,3 +12,15 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+clipr-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+rusqlite.workspace = true
+trash.workspace = true
+windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile.workspace = true

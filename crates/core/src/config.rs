@@ -218,6 +218,39 @@ pub struct GamesConfig {
     pub blocked: Vec<String>,
     /// Start a full recording by itself when one of these games starts (exe names).
     pub auto_record: Vec<String>,
+    /// Video settings that replace `video.*` while a given game runs.
+    pub profiles: Vec<GameProfile>,
+}
+
+/// Video settings for one game. Empty fields keep the `video.*` value.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GameProfile {
+    /// The game's exe (`cs2.exe`) or display name; case doesn't matter.
+    pub game: String,
+    pub fps: Option<u32>,
+    pub height: Option<u32>,
+    pub bitrate_kbps: Option<u32>,
+}
+
+impl GameProfile {
+    fn matches(&self, name: &str, exe: &str) -> bool {
+        let want = self.game.trim();
+        !want.is_empty() && (want.eq_ignore_ascii_case(name.trim()) || want.eq_ignore_ascii_case(exe.trim()))
+    }
+}
+
+impl VideoConfig {
+    /// These settings with the first matching profile's values on top (the game's display name or exe).
+    pub fn for_game(&self, profiles: &[GameProfile], name: &str, exe: &str) -> VideoConfig {
+        let mut v = self.clone();
+        if let Some(p) = profiles.iter().find(|p| p.matches(name, exe)) {
+            v.fps = p.fps.unwrap_or(v.fps);
+            v.height = p.height.unwrap_or(v.height);
+            v.bitrate_kbps = p.bitrate_kbps.unwrap_or(v.bitrate_kbps);
+        }
+        v
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -410,6 +443,46 @@ mod tests {
         assert_eq!(config.web.port, 8000);
         assert!(!config.web.lan);
         assert_eq!(config.ui, UiConfig::default());
+    }
+
+    #[test]
+    fn profile_overrides_only_what_it_sets() {
+        let video = VideoConfig::default();
+        let profiles = vec![
+            GameProfile {
+                game: "  Counter-Strike 2 ".into(),
+                fps: Some(120),
+                ..Default::default()
+            },
+            GameProfile {
+                game: "CS2.EXE".into(),
+                bitrate_kbps: Some(40_000),
+                ..Default::default()
+            },
+            GameProfile::default(),
+        ];
+        // Matches by display name, ignoring case and spaces; the first match wins.
+        let v = video.for_game(&profiles, "counter-strike 2", "cs2.exe");
+        assert_eq!((v.fps, v.height, v.bitrate_kbps), (120, 1080, 15_000));
+        // Matches by exe.
+        let v = video.for_game(&profiles, "Other name", "cs2.exe");
+        assert_eq!((v.fps, v.bitrate_kbps), (60, 40_000));
+        // No match, or an empty profile name: untouched.
+        assert_eq!(video.for_game(&profiles, "Doom", "doom.exe"), video);
+        assert_eq!(video.for_game(&profiles, "", ""), video);
+    }
+
+    #[test]
+    fn profiles_round_trip_through_toml() {
+        let mut config = Config::default();
+        config.games.profiles.push(GameProfile {
+            game: "doom.exe".into(),
+            fps: Some(30),
+            height: None,
+            bitrate_kbps: None,
+        });
+        let text = toml::to_string_pretty(&config).unwrap();
+        assert_eq!(toml::from_str::<Config>(&text).unwrap(), config);
     }
 
     #[test]
