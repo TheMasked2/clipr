@@ -603,7 +603,7 @@ impl Supervisor {
         const GB: u64 = 1 << 30;
         (free < min_gb * GB).then(|| {
             format!(
-                "Not enough disk space: {:.1} GB free, at least {min_gb} GB needed (Settings → Storage)",
+                "Not enough disk space: {:.1} GB free, at least {min_gb} GB needed (Settings → Library)",
                 free as f64 / GB as f64
             )
         })
