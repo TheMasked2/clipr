@@ -8,6 +8,7 @@
 //! The replay buffer outlives pipelines: when a game closes, its last moments can still be saved, until the
 //! next pipeline starts with a fresh buffer.
 
+pub mod preset;
 mod save;
 mod video;
 
@@ -32,6 +33,10 @@ use video::VideoSettings;
 
 /// How long a failed pipeline waits before it's tried again.
 const RETRY_AFTER: Duration = Duration::from_secs(5);
+/// How often the supervisor reconsiders what to capture.
+const TICK: Duration = Duration::from_millis(200);
+/// How often the audio levels are refreshed (the web UI shows them 10 times a second).
+const METER_EVERY: Duration = Duration::from_millis(100);
 /// How often the foreground game is checked.
 const GAME_POLL: Duration = Duration::from_secs(2);
 
@@ -44,12 +49,9 @@ pub enum Command {
     ToggleBuffering,
     Mark,
     /// New settings from the web UI.
-    #[allow(dead_code)] // sent from the web UI (Phase 4) and the recording hotkey (Phase 5)
     Apply(Box<Config>),
     /// Start or stop a full recording.
-    #[allow(dead_code)] // sent from the web UI (Phase 4) and the recording hotkey (Phase 5)
     SetRecording(bool),
-    #[allow(dead_code)] // sent from the web UI (Phase 4) and the recording hotkey (Phase 5)
     ToggleRecording,
     Stop,
 }
@@ -100,11 +102,20 @@ struct Wanted {
 #[derive(Clone)]
 pub struct Engine {
     tx: mpsc::Sender<Command>,
+    levels: Levels,
 }
+
+/// Audio levels in dBFS per source, refreshed by the supervisor ~10 times a second.
+type Levels = Arc<Mutex<Vec<(String, f32)>>>;
 
 impl Engine {
     pub fn send(&self, command: Command) {
         let _ = self.tx.send(command);
+    }
+
+    /// The latest audio levels; empty when no audio is running.
+    pub fn levels(&self) -> Vec<(String, f32)> {
+        self.levels.lock().unwrap().clone()
     }
 }
 
@@ -117,6 +128,8 @@ pub fn start(
 ) -> (Engine, JoinHandle<()>) {
     let (tx, rx) = mpsc::channel();
     watcher.set_config(&config.games);
+    let levels = Levels::default();
+    let shared_levels = levels.clone();
     let thread = std::thread::Builder::new()
         .name("clipr-engine".into())
         .spawn(move || {
@@ -136,11 +149,12 @@ pub fn start(
                 shared: Arc::default(),
                 last_stats: Stats::default(),
                 toast: crate::overlay::start(),
+                levels: shared_levels,
             };
             sup.run(rx);
         })
         .expect("can't start a thread");
-    (Engine { tx }, thread)
+    (Engine { tx, levels }, thread)
 }
 
 struct Pipeline {
@@ -170,6 +184,7 @@ struct Supervisor {
     shared: Arc<Mutex<Shared>>,
     last_stats: Stats,
     toast: crate::overlay::Toast,
+    levels: Levels,
 }
 
 impl Supervisor {
@@ -183,13 +198,22 @@ impl Supervisor {
             )
         };
         let mut stats_at = Instant::now() + Duration::from_secs(10);
+        let mut tick_at = Instant::now();
         loop {
-            match rx.recv_timeout(Duration::from_millis(200)) {
+            match rx.recv_timeout(METER_EVERY) {
                 Ok(Command::Stop) | Err(RecvTimeoutError::Disconnected) => break,
-                Ok(command) => self.handle(command),
+                Ok(command) => {
+                    self.handle(command);
+                    tick_at = Instant::now() + TICK;
+                    self.tick();
+                }
                 Err(RecvTimeoutError::Timeout) => {}
             }
-            self.tick();
+            self.refresh_levels();
+            if Instant::now() >= tick_at {
+                tick_at = Instant::now() + TICK;
+                self.tick();
+            }
             if Instant::now() > stats_at {
                 stats_at = Instant::now() + Duration::from_secs(10);
                 self.check_stats();
@@ -204,6 +228,16 @@ impl Supervisor {
             let _ = unsafe { windows::Win32::Media::MediaFoundation::MFShutdown() };
         }
         tracing::info!("capture engine stopped");
+    }
+
+    fn refresh_levels(&self) {
+        let levels = self
+            .pipeline
+            .as_ref()
+            .and_then(|p| p.audio.as_ref())
+            .map(|a| a.levels())
+            .unwrap_or_default();
+        *self.levels.lock().unwrap() = levels;
     }
 
     fn handle(&mut self, command: Command) {
@@ -300,6 +334,14 @@ impl Supervisor {
             (None, GameMode::Auto) => return None,
         };
         let v = &self.config.video;
+        let profiled;
+        let v = match &self.game {
+            Some(g) if !self.config.games.profiles.is_empty() => {
+                profiled = v.for_game(&self.config.games.profiles, &g.name, &g.exe);
+                &profiled
+            }
+            _ => v,
+        };
         let video = VideoSettings {
             monitor,
             encode: EncodeSettings {
@@ -500,9 +542,14 @@ impl Supervisor {
         let (Some(video_format), false) = (video_format, cut.video.is_empty()) else {
             self.fail(
                 "Nothing to save yet: clipr isn't capturing (no game detected, or the buffer is paused).",
+                "Nothing to save yet",
             );
             return;
         };
+        if let Some(message) = self.low_disk() {
+            self.fail(&message, "Disk almost full");
+            return;
+        }
         let game = self.buffer_game.clone().unwrap_or_else(|| "Desktop".into());
         let reserved = save::clip_path(&self.config.clips.dir(), &game, "");
         let bus = self.bus.clone();
@@ -544,11 +591,29 @@ impl Supervisor {
         self.saves.push(worker);
     }
 
-    fn fail(&self, message: &str) {
+    /// A message when the clips drive has less free space than `clips.min_free_gb` (0 = never).
+    fn low_disk(&self) -> Option<String> {
+        let min_gb = u64::from(self.config.clips.min_free_gb);
+        if min_gb == 0 {
+            return None;
+        }
+        let dir = self.config.clips.dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let free = crate::win::free_bytes(&dir)?;
+        const GB: u64 = 1 << 30;
+        (free < min_gb * GB).then(|| {
+            format!(
+                "Not enough disk space: {:.1} GB free, at least {min_gb} GB needed (Settings → Storage)",
+                free as f64 / GB as f64
+            )
+        })
+    }
+
+    fn fail(&self, message: &str, toast: &str) {
         tracing::warn!("{message}");
         cue(self.config.replay.sound_on_save, false);
         if self.config.replay.toast_on_save {
-            self.toast.show("Nothing to save yet", false);
+            self.toast.show(toast, false);
         }
         self.bus.emit(Event::ClipFailed {
             message: message.into(),

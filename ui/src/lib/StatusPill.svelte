@@ -9,6 +9,7 @@
     if (s.state === 'buffering') {
       return { cls: 'buf', text: s.game ? `● Buffering ${s.game}` : '● Buffering' };
     }
+    if (s.paused) return { cls: 'idle', text: 'Buffer paused' };
     return { cls: 'idle', text: 'Idle' };
   });
 </script>

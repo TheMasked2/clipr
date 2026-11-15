@@ -2,6 +2,7 @@
 
 use anyhow::{Result, bail};
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
+use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentThreadId};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
@@ -161,4 +162,22 @@ pub fn message_loop(mut on_wake: impl FnMut(), mut on_hotkey: impl FnMut(i32)) {
             DispatchMessageW(&msg);
         }
     }
+}
+
+/// Bytes free for this user on the drive holding `path`; `None` if Windows won't say. The folder must
+/// exist.
+pub fn free_bytes(path: &std::path::Path) -> Option<u64> {
+    let dir = wide(&path.to_string_lossy());
+    let mut free = 0u64;
+    // SAFETY: `dir` is a NUL-terminated wide string and `free` a valid out pointer, both alive for the call;
+    // the other two out pointers may be null.
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            dir.as_ptr(),
+            &mut free,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    (ok != 0).then_some(free)
 }

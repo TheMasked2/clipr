@@ -13,14 +13,19 @@ workspace = true
 
 [dependencies]
 clipr-core.workspace = true
+clipr-library.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 mime_guess.workspace = true
 rust-embed.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+windows = { workspace = true, features = ["Win32_Security_Cryptography"] }
 tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-tower.workspace = true
+tempfile.workspace = true
 http-body-util.workspace = true

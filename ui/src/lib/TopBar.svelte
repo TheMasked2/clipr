@@ -17,7 +17,7 @@
       {#each links as l (l.route)}
         <a
           href={l.href}
-          class:active={router.route === l.route}
+          class:active={router.route === l.route || (l.route === 'gallery' && router.route === 'clip')}
           aria-current={router.route === l.route ? 'page' : undefined}>{l.label}</a
         >
       {/each}
