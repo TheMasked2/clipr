@@ -78,6 +78,12 @@ pub struct Resampler {
 }
 
 impl Resampler {
+    /// Forgets the previous input, after a gap in it.
+    pub fn reset(&mut self) {
+        self.pos = 0.0;
+        self.prev = None;
+    }
+
     pub fn new(from_rate: u32, to_rate: u32) -> Self {
         Self {
             step: from_rate as f64 / to_rate as f64,

@@ -209,7 +209,9 @@ impl Supervisor {
     fn handle(&mut self, command: Command) {
         match command {
             Command::SaveClip(secs) => self.save(secs.unwrap_or(self.config.replay.clip_secs)),
-            Command::SaveLongClip => self.save(self.config.replay.buffer_secs),
+            Command::SaveLongClip => {
+                self.save(self.config.replay.buffer_secs.max(self.config.replay.clip_secs))
+            }
             Command::SetBuffering(on) => self.buffering = on,
             Command::ToggleBuffering => self.buffering = !self.buffering,
             Command::Mark => {
@@ -265,6 +267,14 @@ impl Supervisor {
         }
 
         let wanted = self.wanted();
+        let current = self.pipeline.as_ref().map(|p| &p.settings);
+        if let (Some(w), Some(c)) = (&wanted, current)
+            && w.video == c.video
+            && w.audio != c.audio
+        {
+            // Only the sound changed: keep the video (and the buffered footage) running.
+            self.restart_audio(w.audio.clone());
+        }
         let current = self.pipeline.as_ref().map(|p| &p.settings);
         if wanted.as_ref() != current {
             if self.pipeline.is_some() {
@@ -345,6 +355,28 @@ impl Supervisor {
             audio,
             settings,
         });
+    }
+
+    /// Swaps the audio capture of the running pipeline. The buffered audio goes (its tracks may differ);
+    /// the buffered video stays.
+    fn restart_audio(&mut self, config: AudioConfig) {
+        let Some(mut p) = self.pipeline.take() else {
+            return;
+        };
+        if let Some(audio) = p.audio.take() {
+            audio.stop();
+        }
+        {
+            let mut s = self.shared.lock().unwrap();
+            s.audio_formats.clear();
+            if let Some(b) = s.buffer.as_mut() {
+                b.clear_audio();
+            }
+        }
+        p.audio = self.start_audio(&config);
+        p.settings.audio = config;
+        tracing::info!("audio restarted with new settings");
+        self.pipeline = Some(p);
     }
 
     /// Starts audio capture into the buffer. A failure only costs the sound: video keeps going.

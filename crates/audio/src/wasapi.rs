@@ -51,6 +51,7 @@ const APP_CHECK: Duration = Duration::from_secs(3);
 
 /// How long a source that failed to open waits before trying again.
 const RETRY: Duration = Duration::from_secs(3);
+const APP_RETRY: Duration = Duration::from_secs(30);
 
 /// WASAPI buffer length (100 ns units): 150 ms.
 const BUFFER_100NS: i64 = 1_500_000;
@@ -219,11 +220,16 @@ impl Source {
                     .is_some_and(|e| e.code() == AUDCLNT_E_DEVICE_INVALIDATED)
                 {
                     tracing::info!("{}: the device went away, reopening", label(&self.kind));
+                    self.retry_at = now;
                 } else {
-                    tracing::warn!("{}: lost the device: {e:#}", label(&self.kind));
+                    // Back off, so a device that keeps failing can't spin this thread or flood the log.
+                    if !self.failing {
+                        tracing::warn!("{}: lost the device: {e:#}", label(&self.kind));
+                    }
+                    self.failing = true;
+                    self.retry_at = now + Duration::from_secs(1);
                 }
                 self.open = None;
-                self.retry_at = now;
             }
         }
         if let Some(db) = self.meter.take(now) {
@@ -301,7 +307,13 @@ impl Source {
                     tracing::warn!("{} unavailable, will keep trying: {e:#}", label(&self.kind));
                 }
                 self.failing = true;
-                self.retry_at = now + RETRY;
+                // Activating an app's loopback can block this thread for a while: try it less often.
+                let wait = if matches!(self.kind, SourceKind::App(_)) {
+                    APP_RETRY
+                } else {
+                    RETRY
+                };
+                self.retry_at = now + wait;
             }
         }
     }
@@ -404,7 +416,7 @@ fn open_process(pid: u32) -> Result<Open> {
             &handler,
         )
         .context("per-app audio needs Windows 10 version 2004 or newer")?;
-        rx.recv_timeout(Duration::from_secs(5))
+        rx.recv_timeout(Duration::from_secs(2))
             .map_err(|_| anyhow!("Windows didn't answer the per-app audio request"))?;
         let mut result = windows::core::HRESULT(0);
         let mut activated: Option<IUnknown> = None;
@@ -577,6 +589,9 @@ fn read_all(
         let discontinuity = flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY.0 as u32 != 0;
         let samples = match &mut open.resampler {
             Some(r) => {
+                if discontinuity {
+                    r.reset(); // don't blend across the gap
+                }
                 open.resampled.clear();
                 r.process(&open.stereo, &mut open.resampled);
                 &open.resampled

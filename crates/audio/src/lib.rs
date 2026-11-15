@@ -193,7 +193,8 @@ fn gain(percent: u32) -> f32 {
 
 /// Builds each source's capture and processing from the settings.
 fn build_sources(config: &AudioConfig, plan: &Plan, levels: &Arc<Levels>) -> (Vec<Source>, Vec<f32>, i64) {
-    let ms = |ms: i32| ms as i64 * HNS_PER_SEC / 1000;
+    // Offsets beyond ±5 s are typos; clamping them keeps the mixer from padding minutes of silence.
+    let ms = |ms: i32| i64::from(ms.clamp(-5000, 5000)) * HNS_PER_SEC / 1000;
     let mut sources = Vec::new();
     let mut gains = Vec::new();
     let mut earliest_shift = 0i64;

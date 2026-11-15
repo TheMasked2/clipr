@@ -302,12 +302,14 @@ pub fn trim(src: &Path, dst: &Path, start_secs: f64, end_secs: f64) -> Result<()
         }
         let start = (start_secs * 1e7) as i64;
         let end = (end_secs * 1e7) as i64;
-        let position = PROPVARIANT::from(start);
-        reader.SetCurrentPosition(&GUID::zeroed(), &position)?;
+        // A seek lands video on the keyframe at or before `start`, but audio exactly on `start`. Find that
+        // keyframe, then seek to it, so every stream starts at the same moment.
+        reader.SetCurrentPosition(&GUID::zeroed(), &PROPVARIANT::from(start))?;
+        let offset = first_sample_time(&reader, picks[0].0)?.unwrap_or(start);
+        reader.SetCurrentPosition(&GUID::zeroed(), &PROPVARIANT::from(offset))?;
 
         let formats: Vec<&MediaFormat> = picks.iter().map(|p| &p.1).collect();
         let writer = Writer::create(dst, MFTranscodeContainerType_MPEG4, &formats)?;
-        let mut offset: Option<i64> = None;
         let mut done = vec![false; picks.len()];
         while done.iter().any(|d| !d) {
             let (mut actual, mut flags, mut time) = (0u32, 0u32, 0i64);
@@ -332,12 +334,6 @@ pub fn trim(src: &Path, dst: &Path, start_secs: f64, end_secs: f64) -> Result<()
                 done[slot] = true;
                 continue;
             }
-            let is_video = picks[slot].2;
-            let offset = match offset {
-                Some(o) => o,
-                None if is_video => *offset.insert(time),
-                None => continue, // audio before the first picture
-            };
             if time < offset {
                 continue;
             }
@@ -348,6 +344,34 @@ pub fn trim(src: &Path, dst: &Path, start_secs: f64, end_secs: f64) -> Result<()
         writer.finish()?;
     }
     Ok(())
+}
+
+/// The time of the next sample of `stream`, or `None` at its end.
+///
+/// # Safety
+/// `reader` must be a valid source reader with `stream` selected.
+unsafe fn first_sample_time(reader: &IMFSourceReader, stream: u32) -> Result<Option<i64>> {
+    loop {
+        let (mut flags, mut time) = (0u32, 0i64);
+        let mut sample = None;
+        // SAFETY: valid reader and out-pointers (see the function's contract).
+        unsafe {
+            reader.ReadSample(
+                stream,
+                0,
+                None,
+                Some(&mut flags),
+                Some(&mut time),
+                Some(&mut sample),
+            )?
+        };
+        if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+            return Ok(None);
+        }
+        if sample.is_some() {
+            return Ok(Some(time));
+        }
+    }
 }
 
 /// Whether a media type is video (for callers that hold several).

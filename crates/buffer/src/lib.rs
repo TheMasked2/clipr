@@ -103,6 +103,13 @@ impl ReplayBuffer {
         self.bytes = 0;
     }
 
+    /// Drops all audio (its tracks are about to change) but keeps the video.
+    pub fn clear_audio(&mut self) {
+        let held: usize = self.audio.iter().flatten().map(|p| p.data.len()).sum();
+        self.bytes -= held;
+        self.audio.clear();
+    }
+
     /// Memory held by packet data.
     pub fn bytes(&self) -> usize {
         self.bytes
