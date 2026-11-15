@@ -345,9 +345,10 @@ impl Library {
             // An unplugged drive must not wipe the favorites.
             return Ok(report);
         }
-        let entries = walk(&dir)?;
+        // Rows first: one added while walking must not look like a vanished file.
         let existing: HashMap<String, Row> =
             self.all_rows()?.into_iter().map(|r| (r.id.clone(), r)).collect();
+        let entries = walk(&dir)?;
         let mut writes = Vec::new();
         let mut seen = HashSet::new();
         for entry in &entries {
@@ -558,6 +559,7 @@ impl Library {
         favorite: Option<bool>,
         shelves: Option<&[String]>,
     ) -> Result<Clip> {
+        let _guard = lock(&self.inner.scan_lock);
         let mut row = self.row(id)?.ok_or_else(|| not_found(id))?;
         let old_id = row.id.clone();
         if let Some(title) = title {
@@ -622,6 +624,7 @@ impl Library {
 
     /// Moves the clip and its sidecars to the Recycle Bin.
     pub fn trash(&self, id: &str) -> Result<()> {
+        let _guard = lock(&self.inner.scan_lock);
         let path = self.resolve(id)?;
         if self.row(id)?.is_none() && !path.exists() {
             return Err(not_found(id));
@@ -672,7 +675,13 @@ impl Library {
         if cfg.max_age_days == 0 && cfg.max_total_gb == 0 {
             return Ok((0, 0));
         }
-        self.scan()?;
+        // An unplugged drive must not look like an empty library.
+        if !self.clips_dir().is_dir() {
+            return Ok((0, 0));
+        }
+        // Hold the lock until the deletes are done, so a rename or favorite can't slip in between.
+        let _guard = lock(&self.inner.scan_lock);
+        self.scan_locked()?;
         let rows = self.all_rows()?; // newest first
         let now_ms = now_millis();
         let eligible = |r: &Row| !r.favorite && now_ms - r.mtime > RECENT.as_millis() as i64;
@@ -703,6 +712,12 @@ impl Library {
         }
         let (mut removed, mut freed) = (0usize, 0u64);
         for r in doomed {
+            // Re-check the favorite flag at the moment of deleting.
+            let dropped =
+                lock(&self.inner.db).execute("DELETE FROM clips WHERE id = ?1 AND favorite = 0", [&r.id])?;
+            if dropped == 0 {
+                continue;
+            }
             let path = self.path_of(&r.id);
             match fs::remove_file(&path) {
                 Ok(()) => {}
@@ -714,7 +729,6 @@ impl Library {
             }
             let _ = fs::remove_file(markers_path(&path));
             remove_thumbs(&self.inner.thumbs_dir, &r.id);
-            lock(&self.inner.db).execute("DELETE FROM clips WHERE id = ?1", [&r.id])?;
             tracing::info!("cleanup: deleted {} ({} bytes)", r.id, r.size);
             removed += 1;
             freed += r.size.max(0) as u64;
@@ -1019,6 +1033,10 @@ fn clean_title(title: &str, ext: &str) -> Result<String> {
     }
     if t.ends_with('.') {
         return Err(invalid("a title can't end with a dot"));
+    }
+    // Files starting with a dot are skipped by the folder walk.
+    if t.starts_with('.') {
+        return Err(invalid("a title can't start with a dot"));
     }
     let upper = t.split('.').next().unwrap_or(t).to_ascii_uppercase();
     let reserved = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
@@ -1328,6 +1346,34 @@ mod tests {
         assert_eq!(left, ["G/new.mp4", "G/fav.mp4"]);
         assert!(!f.root.join("G/old.mp4").exists());
         assert_eq!(f.lib.cleanup(&ClipsConfig::default()).unwrap(), (0, 0));
+    }
+
+    #[test]
+    fn cleanup_does_nothing_when_the_folder_is_missing() {
+        let f = fixture();
+        put(&f, "G/a.mp4", 10);
+        f.lib.scan().unwrap();
+        fs::remove_dir_all(&f.root).unwrap();
+        let cfg = ClipsConfig {
+            max_age_days: 1,
+            ..ClipsConfig::default()
+        };
+        assert_eq!(f.lib.cleanup(&cfg).unwrap(), (0, 0));
+        // The index keeps its rows, so favorites survive an unplugged drive.
+        assert_eq!(f.lib.list(&ClipFilter::default()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn titles_can_not_start_with_a_dot() {
+        assert!(clean_title(".hidden", "mp4").is_err());
+        assert!(clean_title("  .hidden", "mp4").is_err());
+        assert!(clean_title(".mp4", "mp4").is_err());
+        assert_eq!(clean_title("  fine.name ", "mp4").unwrap(), "fine.name");
+        let f = fixture();
+        put(&f, "G/a.mp4", 10);
+        f.lib.scan().unwrap();
+        assert!(f.lib.update("G/a.mp4", Some(".x"), None, None).is_err());
+        assert!(f.root.join("G/a.mp4").exists());
     }
 
     #[test]

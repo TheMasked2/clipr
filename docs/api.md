@@ -4,6 +4,12 @@ The contract between `crates/web` and `ui/` (`ui/src/lib/api.ts` mirrors it). Ev
 noted. The server listens on `127.0.0.1` only, unless LAN access is on (then every request from another
 machine needs the PIN, see the end).
 
+Requests that change things (everything but `GET`/`HEAD`) must send `Content-Type: application/json` when
+they have a body (`415` otherwise). If a request has an `Origin` header (browsers add it to cross-site
+requests and WebSockets) and it isn't the server's own address (`http://<Host>`), the answer is `403`. A
+request from this machine whose `Host` isn't `127.0.0.1`, `localhost` or `[::1]` also gets `403` (DNS
+rebinding). Other machines get a generic message on `500` (details stay in clipr's log).
+
 ## Live state
 
 - `GET /api/status` → `Status`
@@ -35,7 +41,10 @@ machine needs the PIN, see the end).
   replay video audio hotkeys clips games recording`, serde names as in the Rust structs, enums lowercase).
   `games.profiles` is a list of `{"game","fps","height","bitrate_kbps"}` (numbers may be null = keep
   `video.*`); `game` matches the detected game's name or exe, case-insensitive
-- `PUT /api/config` body: a whole `Config` → `200 Config` (as saved) or `400 {"error":"message"}`
+- `PUT /api/config` body: a whole `Config` → `200 Config` (as saved) or `400 {"error":"message"}`.
+  `clips.folder` must be empty (default) or a full path that isn't a drive root, inside Windows or Program
+  Files, or the whole user profile. From another machine (LAN) `clips.folder` and everything under `web` are
+  read-only: changing them gives `403`
 - `GET /api/system` → `{ "gpus": [{"name","vendor","encoders":["H.264","HEVC","AV1"]}], "monitors":
   [{"index":1,"name","width","height","primary"}], "known_games": 2600 }` (free-form; show what's there)
 
@@ -75,4 +84,5 @@ machine needs the PIN, see the end).
 When `web.lan` is on, the server also listens on the LAN. Requests from any address other than loopback must
 carry the PIN: `POST /api/login {"pin"}` sets an HttpOnly cookie `clipr_session` (random token, valid 30 days);
 without it every LAN request gets `401` and the UI shows a PIN screen. The PIN is `web.lan_pin` (6 digits,
-generated when LAN access is first turned on, shown in Settings). Loopback requests never need it.
+generated when LAN access is first turned on, shown in Settings). Loopback requests never need it. A session ends when `web.lan_pin` changes or `web.lan` is turned off. After
+5 wrong PINs from one address, logins get `429` for a minute.

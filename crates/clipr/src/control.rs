@@ -64,7 +64,18 @@ impl Control for AppControl {
     }
 
     fn set_config(&self, config: Config) -> Result<()> {
-        config.save(&self.config_file)?;
+        // The step that can fail goes first, so a failure changes nothing.
+        let before = self.config();
+        if before.general.start_with_windows != config.general.start_with_windows {
+            crate::autostart::set(config.general.start_with_windows)
+                .context("couldn't change starting with Windows")?;
+        }
+        if let Err(e) = config.save(&self.config_file) {
+            if before.general.start_with_windows != config.general.start_with_windows {
+                let _ = crate::autostart::set(before.general.start_with_windows);
+            }
+            return Err(e);
+        }
         let old = std::mem::replace(&mut *self.config.lock().unwrap(), config.clone());
         if old.hotkeys != config.hotkeys {
             let _ = self.hotkeys.send(config.hotkeys.clone());
@@ -72,10 +83,6 @@ impl Control for AppControl {
         }
         if old.clips.dir() != config.clips.dir() {
             self.library.set_clips_dir(config.clips.dir());
-        }
-        if old.general.start_with_windows != config.general.start_with_windows {
-            crate::autostart::set(config.general.start_with_windows)
-                .context("couldn't change starting with Windows")?;
         }
         self.engine.send(Command::Apply(Box::new(config)));
         Ok(())

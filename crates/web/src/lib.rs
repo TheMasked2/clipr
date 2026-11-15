@@ -133,9 +133,10 @@ pub fn router(state: AppState) -> Router {
         .route("/thumbs/{*name}", get(api::thumb))
         .route("/api/{*rest}", any(api_not_found))
         .fallback(static_file)
-        .with_state(state)
-        .layer(axum::middleware::from_fn_with_state(auth.clone(), auth::guard))
+        .with_state(state.clone())
+        .layer(axum::middleware::from_fn_with_state(state, auth::guard))
         .layer(axum::Extension(auth))
+        .layer(axum::middleware::from_fn(auth::origin_guard))
 }
 
 /// Serves until `shutdown` flips to `true`.

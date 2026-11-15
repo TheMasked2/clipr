@@ -84,8 +84,15 @@ impl<'a> Call<'a> {
     }
     async fn send(self, app: &Router) -> (StatusCode, HeaderMap, String) {
         let mut req = Request::builder().method(self.method).uri(self.uri);
+        let has_type = self
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
         for (k, v) in self.headers {
             req = req.header(k, v);
+        }
+        if self.body.is_some() && !has_type {
+            req = req.header("content-type", "application/json");
         }
         if let Some(peer) = self.peer {
             let addr: SocketAddr = format!("{peer}:50000").parse().unwrap();
@@ -397,7 +404,11 @@ async fn actions_reach_control() {
 #[tokio::test]
 async fn lan_peers_need_the_pin() {
     let env = env();
-    env.control.config.lock().unwrap().web.lan_pin = "123456".into();
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
     let app = router(env.state.clone());
     let lan = "192.168.1.50";
 
@@ -467,7 +478,11 @@ async fn lan_peers_need_the_pin() {
 #[tokio::test]
 async fn wrong_pins_are_rate_limited_per_address() {
     let env = env();
-    env.control.config.lock().unwrap().web.lan_pin = "123456".into();
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
     let app = router(env.state.clone());
     for _ in 0..5 {
         let (code, _, _) = call("POST", "/api/login")
@@ -506,6 +521,333 @@ async fn a_lan_without_a_pin_lets_nobody_in() {
     assert_eq!(code, StatusCode::UNAUTHORIZED);
 }
 
+const HOME: &str = "127.0.0.1:7845";
+
+#[tokio::test]
+async fn cross_origin_writes_are_refused() {
+    let env = env();
+    let app = router(env.state.clone());
+    for (method, uri, body) in [
+        ("POST", "/api/mark", ""),
+        ("POST", "/api/buffer", r#"{"on":true}"#),
+        ("PUT", "/api/config", "{}"),
+        ("DELETE", "/api/clips?id=G/a.mp4", ""),
+    ] {
+        let (code, _, body_out) = call(method, uri)
+            .peer("127.0.0.1")
+            .header("host", HOME)
+            .header("origin", "http://evil.example")
+            .body(body)
+            .send(&app)
+            .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "{method} {uri}: {body_out}");
+        let (code, _, _) = call(method, uri)
+            .peer("127.0.0.1")
+            .header("host", HOME)
+            .header("origin", "null")
+            .body(body)
+            .send(&app)
+            .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "{method} {uri} with a null origin");
+    }
+    // Another port on the same host is another origin too.
+    let (code, _, _) = call("POST", "/api/mark")
+        .peer("127.0.0.1")
+        .header("host", HOME)
+        .header("origin", "http://127.0.0.1:9999")
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    // The WebSocket upgrade is a GET but needs the same check.
+    let (code, _, _) = call("GET", "/api/events")
+        .peer("127.0.0.1")
+        .header("host", HOME)
+        .header("origin", "http://evil.example")
+        .header("upgrade", "websocket")
+        .header("connection", "upgrade")
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    // Plain reads without an Origin are fine.
+    let (code, _, _) = call("GET", "/api/status")
+        .peer("127.0.0.1")
+        .header("host", HOME)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn same_origin_writes_from_the_ui_work() {
+    let env = env();
+    let app = router(env.state.clone());
+    for host in [HOME, "localhost:7845", "[::1]:7845"] {
+        let origin = format!("http://{host}");
+        let (code, _, body) = call("POST", "/api/buffer")
+            .peer("127.0.0.1")
+            .header("host", host)
+            .header("origin", &origin)
+            .header("content-type", "application/json")
+            .body(r#"{"on":true}"#)
+            .send(&app)
+            .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "{host}: {body}");
+        // A bodiless POST, as the UI sends for /api/mark.
+        let (code, _, _) = call("POST", "/api/mark")
+            .peer("127.0.0.1")
+            .header("host", host)
+            .header("origin", &origin)
+            .send(&app)
+            .await;
+        assert_eq!(code, StatusCode::NO_CONTENT, "{host}");
+    }
+}
+
+#[tokio::test]
+async fn unknown_hosts_are_refused_for_local_peers() {
+    let env = env();
+    let app = router(env.state.clone());
+    for host in [
+        "evil.example",
+        "evil.example:7845",
+        "127.0.0.1.evil.example",
+        "localhost.evil.example:1",
+    ] {
+        for uri in ["/api/status", "/"] {
+            let (code, _, _) = call("GET", uri)
+                .peer("127.0.0.1")
+                .header("host", host)
+                .send(&app)
+                .await;
+            assert_eq!(code, StatusCode::FORBIDDEN, "{host} {uri}");
+        }
+    }
+    // A LAN peer uses the PC's address; it still has the PIN to get through.
+    let (code, _, _) = call("GET", "/api/status")
+        .peer("192.168.1.50")
+        .header("host", "192.168.1.5:7845")
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn json_bodies_need_the_json_content_type() {
+    let env = env();
+    let app = router(env.state.clone());
+    for ct in [
+        "text/plain",
+        "application/x-www-form-urlencoded",
+        "multipart/form-data",
+    ] {
+        let (code, _, _) = call("POST", "/api/buffer")
+            .peer("127.0.0.1")
+            .header("host", HOME)
+            .header("content-type", ct)
+            .body(r#"{"on":true}"#)
+            .send(&app)
+            .await;
+        assert_eq!(code, StatusCode::UNSUPPORTED_MEDIA_TYPE, "{ct}");
+    }
+    let (code, _, _) = call("POST", "/api/buffer")
+        .peer("127.0.0.1")
+        .header("host", HOME)
+        .header("content-type", "application/json; charset=utf-8")
+        .body(r#"{"on":true}"#)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn lan_peers_cannot_change_the_folder_or_web_settings() {
+    let env = env();
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
+    let app = router(env.state.clone());
+    let lan = "192.168.1.50";
+    let (_, headers, _) = call("POST", "/api/login")
+        .peer(lan)
+        .header("host", "192.168.1.5:7845")
+        .body(r#"{"pin":"123456"}"#)
+        .send(&app)
+        .await;
+    let cookie = headers[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let put = |config: serde_json::Value| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        async move {
+            call("PUT", "/api/config")
+                .peer(lan)
+                .header("host", "192.168.1.5:7845")
+                .header("cookie", &cookie)
+                .body(&config.to_string())
+                .send(&app)
+                .await
+        }
+    };
+    let mut config = serde_json::to_value(env.control.config()).unwrap();
+    config["video"]["fps"] = 90.into();
+    let (code, _, body) = put(config.clone()).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+
+    let mut bad = config.clone();
+    bad["clips"]["folder"] = r"C:\Users\Public\x".into();
+    let (code, _, body) = put(bad).await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{body}");
+    let mut bad = config.clone();
+    bad["web"]["lan_pin"] = "000000".into();
+    assert_eq!(put(bad).await.0, StatusCode::FORBIDDEN);
+    let mut bad = config.clone();
+    bad["web"]["port"] = 9999.into();
+    assert_eq!(put(bad).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(env.control.config().web.lan_pin, "123456");
+
+    // The PC itself may.
+    let mut ok = config;
+    ok["clips"]["folder"] = env.root.to_string_lossy().into_owned().into();
+    ok["web"]["port"] = 9999.into();
+    let (code, _, body) = call("PUT", "/api/config")
+        .peer("127.0.0.1")
+        .body(&ok.to_string())
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn invalid_clips_folder_is_rejected_over_the_api() {
+    let env = env();
+    let app = router(env.state.clone());
+    let mut config = serde_json::to_value(env.control.config()).unwrap();
+    for folder in [r"C:\", "relative", r"C:\Windows\System32"] {
+        config["clips"]["folder"] = folder.into();
+        let (code, _, body) = call("PUT", "/api/config")
+            .body(&config.to_string())
+            .send(&app)
+            .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{folder}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn sessions_end_when_the_pin_changes_or_lan_goes_off() {
+    let env = env();
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
+    let app = router(env.state.clone());
+    let login = |pin: &'static str| {
+        let app = app.clone();
+        async move {
+            let (code, headers, _) = call("POST", "/api/login")
+                .peer("10.0.0.7")
+                .body(&format!(r#"{{"pin":"{pin}"}}"#))
+                .send(&app)
+                .await;
+            (code, headers)
+        }
+    };
+    let status = |cookie: String| {
+        let app = app.clone();
+        async move {
+            call("GET", "/api/status")
+                .peer("10.0.0.7")
+                .header("cookie", &cookie)
+                .send(&app)
+                .await
+                .0
+        }
+    };
+    let cookie_of = |h: &HeaderMap| {
+        h[header::SET_COOKIE]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_string()
+    };
+
+    let (code, h) = login("123456").await;
+    assert_eq!(code, StatusCode::OK);
+    let first = cookie_of(&h);
+    assert_eq!(status(first.clone()).await, StatusCode::OK);
+
+    // A new PIN kills the old session, even if the PIN later goes back.
+    env.control.config.lock().unwrap().web.lan_pin = "654321".into();
+    assert_eq!(status(first.clone()).await, StatusCode::UNAUTHORIZED);
+    env.control.config.lock().unwrap().web.lan_pin = "123456".into();
+    assert_eq!(status(first).await, StatusCode::UNAUTHORIZED);
+
+    // LAN off ends sessions and blocks logins.
+    let (_, h) = login("123456").await;
+    let second = cookie_of(&h);
+    assert_eq!(status(second.clone()).await, StatusCode::OK);
+    env.control.config.lock().unwrap().web.lan = false;
+    assert_eq!(status(second.clone()).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(login("123456").await.0, StatusCode::UNAUTHORIZED);
+    env.control.config.lock().unwrap().web.lan = true;
+    assert_eq!(status(second).await, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn lan_peers_get_no_error_details() {
+    let env = env();
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
+    // A clip whose file can't be trimmed gives an internal error; MP4 only, so use a missing ffmpeg-less path:
+    // the Noop control fails the trim.
+    put(&env, "G/a.mp4", 10);
+    let app = router(env.state.clone());
+    get_body(app.clone(), "/api/clips").await;
+    let trim = r#"{"id":"G/a.mp4","start":0,"end":5}"#;
+    let (code, _, local) = call("POST", "/api/clips/trim")
+        .peer("127.0.0.1")
+        .body(trim)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::INTERNAL_SERVER_ERROR, "{local}");
+    let (_, headers, _) = call("POST", "/api/login")
+        .peer("10.0.0.7")
+        .body(r#"{"pin":"123456"}"#)
+        .send(&app)
+        .await;
+    let cookie = headers[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let (code, _, remote) = call("POST", "/api/clips/trim")
+        .peer("10.0.0.7")
+        .header("cookie", &cookie)
+        .body(trim)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        json(&remote)["error"].as_str().unwrap().contains("log"),
+        "{remote}"
+    );
+    assert_ne!(json(&remote)["error"], json(&local)["error"]);
+}
+
 #[tokio::test]
 async fn serve_runs_end_to_end_over_a_socket() {
     let env = env();
@@ -516,7 +858,10 @@ async fn serve_runs_end_to_end_over_a_socket() {
     let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     stream
-        .write_all(b"GET /api/clips HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+        .write_all(
+            format!("GET /api/clips HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
         .await
         .unwrap();
     let mut out = String::new();

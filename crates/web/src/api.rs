@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 use axum::Json;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, Request, State};
-use axum::http::{StatusCode, Uri};
+use axum::http::{Extensions, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use clipr_core::config::Config;
 use clipr_library::{Clip, ClipFilter, LibraryError};
@@ -142,6 +142,58 @@ pub async fn system(State(s): State<AppState>) -> Json<Value> {
     Json(s.control.system_info())
 }
 
+/// Lower-cased, backslashes, no trailing slash, no `\\?\` prefix: for comparing paths as text.
+fn norm_path(p: &str) -> String {
+    let p = p.replace('/', "\\");
+    let p = p.strip_prefix("\\\\?\\").unwrap_or(&p);
+    p.trim_end_matches('\\').to_lowercase()
+}
+
+/// The clips folder may be empty (the default) or an absolute path that isn't a drive root or somewhere
+/// Windows or the user's profile lives.
+fn check_clips_folder(folder: &str) -> Result<()> {
+    let folder = folder.trim();
+    if folder.is_empty() {
+        return Ok(());
+    }
+    let path = FsPath::new(folder);
+    if !path.is_absolute() {
+        bail!("The clips folder must be a full path like D:\\Clips");
+    }
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        bail!("The clips folder can't contain ..");
+    }
+    if path.parent().is_none() {
+        bail!("The clips folder can't be a whole drive; pick a folder on it");
+    }
+    let here = norm_path(folder);
+    let inside = |vars: &[&str]| {
+        vars.iter().filter_map(|v| std::env::var(v).ok()).any(|d| {
+            let d = norm_path(&d);
+            !d.is_empty() && (here == d || here.starts_with(&format!("{d}\\")))
+        })
+    };
+    if inside(&[
+        "SystemRoot",
+        "windir",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramW6432",
+    ]) {
+        bail!("The clips folder can't be inside Windows or Program Files");
+    }
+    let profile = std::env::var("USERPROFILE")
+        .map(|p| norm_path(&p))
+        .unwrap_or_default();
+    if !profile.is_empty() && here == profile {
+        bail!("The clips folder can't be your whole user folder; pick a folder inside it");
+    }
+    Ok(())
+}
+
 /// Checks a whole `Config` the way the settings page needs: sane ranges, hotkeys that parse, no two actions on
 /// the same hotkey.
 pub fn validate_config(c: &Config) -> Result<()> {
@@ -190,6 +242,7 @@ pub fn validate_config(c: &Config) -> Result<()> {
     {
         bail!("The LAN PIN must be 6 digits");
     }
+    check_clips_folder(&c.clips.folder)?;
     let accent = c.ui.accent.as_bytes();
     if !(accent.len() == 7 && accent[0] == b'#' && accent[1..].iter().all(u8::is_ascii_hexdigit)) {
         bail!("The accent colour must look like #8B5CF6");
@@ -215,9 +268,19 @@ pub fn validate_config(c: &Config) -> Result<()> {
     Ok(())
 }
 
-pub async fn put_config(State(s): State<AppState>, body: Bytes) -> ApiResult<Json<Config>> {
+pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes) -> ApiResult<Json<Config>> {
     let mut config: Config = parse_json(&body)?;
     validate_config(&config).map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    if auth::is_remote(&ext) {
+        // Where files go and who can reach the API are for the PC's own user to decide.
+        let now = s.control.config();
+        if config.clips.folder != now.clips.folder || config.web != now.web {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "the clips folder and the web settings can only be changed on the PC running clipr",
+            ));
+        }
+    }
     if config.web.lan && config.web.lan_pin.is_empty() {
         config.web.lan_pin = auth::generate_pin();
     }
@@ -380,6 +443,7 @@ pub async fn trim_clip(State(s): State<AppState>, body: Bytes) -> ApiResult<Json
             .collect();
         let finished = if req.replace {
             std::fs::rename(&dst, &src).map_err(|e| {
+                let _ = std::fs::remove_file(&dst);
                 anyhow::anyhow!("couldn't replace the original (is it open in another program?): {e}")
             })?;
             src
@@ -483,6 +547,26 @@ mod tests {
         let mut c = Config::default();
         f(&mut c);
         validate_config(&c)
+    }
+
+    #[test]
+    fn clips_folder_is_checked() {
+        let folder = |f: &str| cfg(|c| c.clips.folder = f.into());
+        assert!(folder("").is_ok());
+        assert!(folder("  ").is_ok());
+        assert!(folder(r"D:\Clips").is_ok());
+        assert!(folder(r"D:\Clips\..\x").is_err());
+        assert!(folder("clips").is_err());
+        assert!(folder(r"\clips").is_err());
+        assert!(folder(r"C:\").is_err());
+        assert!(folder("D:/").is_err());
+        let windir = std::env::var("SystemRoot").unwrap();
+        assert!(folder(&windir).is_err());
+        assert!(folder(&format!(r"{}\Temp", windir.to_lowercase())).is_err());
+        assert!(folder(r"C:\Program Files").is_err());
+        let profile = std::env::var("USERPROFILE").unwrap();
+        assert!(folder(&profile).is_err());
+        assert!(folder(&format!(r"{profile}\Videos\clipr")).is_ok());
     }
 
     #[test]

@@ -49,7 +49,7 @@ pub fn probe<R: Read + Seek>(r: &mut R, len: u64) -> Result<Mp4Info> {
     let mut pos = 0u64;
     let mut moov: Option<Moov> = None;
     let mut frag: HashMap<u32, u64> = HashMap::new();
-    while pos + 8 <= len {
+    while pos.checked_add(8).is_some_and(|end| end <= len) {
         r.seek(SeekFrom::Start(pos))?;
         let mut head = [0u8; 16];
         let n = (len - pos).min(16) as usize;
@@ -66,7 +66,8 @@ pub fn probe<R: Read + Seek>(r: &mut R, len: u64) -> Result<Mp4Info> {
         } else if size == 0 {
             size = len - pos;
         }
-        if size < header || pos + size > len {
+        // Checked: a 64-bit size can be anything. Also guarantees the loop moves forward (size >= 8).
+        if size < header || pos.checked_add(size).is_none_or(|end| end > len) {
             break; // truncated or garbage
         }
         let payload = size - header;
@@ -133,11 +134,12 @@ fn children(buf: &[u8]) -> Vec<([u8; 4], &[u8])> {
         } else if size == 0 {
             size = (buf.len() - p) as u64;
         }
-        if size < header as u64 || p as u64 + size > buf.len() as u64 {
+        let end = usize::try_from(size).ok().and_then(|s| p.checked_add(s));
+        let Some(end) = end.filter(|&e| size >= header as u64 && e <= buf.len()) else {
             break;
-        }
-        out.push((kind, &buf[p + header..p + size as usize]));
-        p += size as usize;
+        };
+        out.push((kind, &buf[p + header..end]));
+        p = end;
     }
     out
 }
@@ -405,5 +407,61 @@ mod tests {
         let d = info.duration_secs.expect("duration");
         assert!((25.0..35.0).contains(&d), "duration {d}");
         assert!(info.width.unwrap() >= 320 && info.height.unwrap() >= 240);
+    }
+
+    fn probe_bytes(bytes: &[u8]) -> Result<Mp4Info> {
+        probe(&mut Cursor::new(bytes), bytes.len() as u64)
+    }
+
+    #[test]
+    fn crafted_sizes_do_not_panic() {
+        // A 64-bit size of u64::MAX at the top level, then inside moov.
+        let mut huge = 1u32.to_be_bytes().to_vec();
+        huge.extend(b"free");
+        huge.extend(u64::MAX.to_be_bytes());
+        assert!(probe_bytes(&huge).is_err());
+
+        let mut inner = 1u32.to_be_bytes().to_vec();
+        inner.extend(b"trak");
+        inner.extend(u64::MAX.to_be_bytes());
+        let moov = boxed(b"moov", &[mvhd(false, 1000, 5000), inner].concat());
+        let info = probe_bytes(&moov).unwrap();
+        assert_eq!(info.duration_secs, Some(5.0));
+
+        // Sizes below the header size, and size 1 without room for the 64-bit field.
+        for head in [[0, 0, 0, 2], [0, 0, 0, 7], [0, 0, 0, 1]] {
+            let mut b = head.to_vec();
+            b.extend(b"moov");
+            b.extend([0u8; 4]);
+            assert!(probe_bytes(&b).is_err());
+        }
+        // Size 1 with a 64-bit size smaller than 16.
+        let mut small = 1u32.to_be_bytes().to_vec();
+        small.extend(b"moov");
+        small.extend(3u64.to_be_bytes());
+        assert!(probe_bytes(&small).is_err());
+        // Size 0 means "to the end"; with nothing after the header it must still end.
+        let mut zero = vec![0, 0, 0, 0];
+        zero.extend(b"mdat");
+        assert!(probe_bytes(&zero).is_err());
+        // Truncated tails and every prefix of a good file.
+        let good = [boxed(b"ftyp", b"isom"), moov].concat();
+        for n in 0..good.len() {
+            let _ = probe_bytes(&good[..n]);
+        }
+        assert!(probe_bytes(&good).is_ok());
+    }
+
+    #[test]
+    fn children_stop_on_bad_sizes() {
+        let mut bad = 0xFFFF_FFFFu32.to_be_bytes().to_vec();
+        bad.extend(b"abcd");
+        assert!(children(&bad).is_empty());
+        let mut big = 1u32.to_be_bytes().to_vec();
+        big.extend(b"abcd");
+        big.extend(u64::MAX.to_be_bytes());
+        assert!(children(&big).is_empty());
+        let ok = [boxed(b"abcd", b"xy"), bad].concat();
+        assert_eq!(children(&ok).len(), 1);
     }
 }

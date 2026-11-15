@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{Extensions, HeaderMap, StatusCode, header};
+use axum::http::{Extensions, HeaderMap, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
@@ -25,10 +25,23 @@ const MAX_SESSIONS: usize = 1000;
 const ATTEMPT_WINDOW: Duration = Duration::from_secs(60);
 const MAX_WRONG_PINS: usize = 5;
 
+/// A login: when it was made and the PIN it was made with.
+struct Session {
+    made: Instant,
+    pin: String,
+}
+
+/// What a login attempt came to.
+enum Attempt {
+    LockedOut,
+    Wrong,
+    Ok,
+}
+
 /// Sessions and login attempts, in memory only.
 #[derive(Default)]
 pub struct Auth {
-    sessions: Mutex<HashMap<String, Instant>>,
+    sessions: Mutex<HashMap<String, Session>>,
     wrong: Mutex<HashMap<IpAddr, Vec<Instant>>>,
 }
 
@@ -73,6 +86,11 @@ fn peer_ip(ext: &Extensions) -> Option<IpAddr> {
         .map(|c| c.0.ip().to_canonical())
 }
 
+/// Is the request from another machine? (No recorded peer counts as local, like in tests.)
+pub fn is_remote(ext: &Extensions) -> bool {
+    peer_ip(ext).is_some_and(|ip| !ip.is_loopback())
+}
+
 fn session_cookie(headers: &HeaderMap) -> Option<&str> {
     headers
         .get_all(header::COOKIE)
@@ -83,10 +101,18 @@ fn session_cookie(headers: &HeaderMap) -> Option<&str> {
 }
 
 impl Auth {
-    fn valid(&self, token: &str) -> bool {
+    /// A session counts only while LAN access is on and the PIN is the one it was made with.
+    fn valid(&self, token: &str, lan: bool, pin: &str) -> bool {
         let mut sessions = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
         match sessions.get(token) {
-            Some(made) if made.elapsed() < SESSION_LIFETIME => true,
+            Some(s) if s.made.elapsed() < SESSION_LIFETIME => {
+                if lan && !pin.is_empty() && s.pin == pin {
+                    true
+                } else {
+                    sessions.remove(token);
+                    false
+                }
+            }
             Some(_) => {
                 sessions.remove(token);
                 false
@@ -95,49 +121,148 @@ impl Auth {
         }
     }
 
-    fn new_session(&self) -> String {
+    fn new_session(&self, pin: &str) -> String {
         let token = random_token();
         let mut sessions = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
-        sessions.retain(|_, made| made.elapsed() < SESSION_LIFETIME);
+        sessions.retain(|_, s| s.made.elapsed() < SESSION_LIFETIME);
         if sessions.len() >= MAX_SESSIONS {
-            if let Some(oldest) = sessions.iter().min_by_key(|(_, t)| **t).map(|(k, _)| k.clone()) {
+            if let Some(oldest) = sessions
+                .iter()
+                .min_by_key(|(_, s)| s.made)
+                .map(|(k, _)| k.clone())
+            {
                 sessions.remove(&oldest);
             }
         }
-        sessions.insert(token.clone(), Instant::now());
+        sessions.insert(
+            token.clone(),
+            Session {
+                made: Instant::now(),
+                pin: pin.to_string(),
+            },
+        );
         token
     }
 
-    /// Has this address got its wrong guesses for the minute used up?
-    fn locked_out(&self, ip: IpAddr) -> bool {
-        let mut wrong = self.wrong.lock().unwrap_or_else(PoisonError::into_inner);
-        let tries = wrong.entry(ip).or_default();
-        tries.retain(|t| t.elapsed() < ATTEMPT_WINDOW);
-        tries.len() >= MAX_WRONG_PINS
-    }
-
-    fn record_wrong(&self, ip: IpAddr) {
+    /// Checks the lockout, runs `correct` and records a miss, all under one lock so parallel guesses can't
+    /// all slip past the limit.
+    fn attempt(&self, ip: IpAddr, correct: impl FnOnce() -> bool) -> Attempt {
         let mut wrong = self.wrong.lock().unwrap_or_else(PoisonError::into_inner);
         wrong.retain(|_, tries| tries.iter().any(|t| t.elapsed() < ATTEMPT_WINDOW));
-        wrong.entry(ip).or_default().push(Instant::now());
+        let tries = wrong.entry(ip).or_default();
+        tries.retain(|t| t.elapsed() < ATTEMPT_WINDOW);
+        if tries.len() >= MAX_WRONG_PINS {
+            return Attempt::LockedOut;
+        }
+        if correct() {
+            return Attempt::Ok;
+        }
+        tries.push(Instant::now());
+        Attempt::Wrong
     }
 }
 
 /// The middleware: lets loopback through, and everyone else only with a valid session (or for UI files and
 /// the login call).
-pub async fn guard(State(auth): State<Arc<Auth>>, req: Request, next: Next) -> Response {
-    let remote = peer_ip(req.extensions()).is_some_and(|ip| !ip.is_loopback());
-    if remote {
+pub async fn guard(
+    State(state): State<AppState>,
+    axum::Extension(auth): axum::Extension<Arc<Auth>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    if is_remote(req.extensions()) {
         let path = req.uri().path();
         let protected =
             path.starts_with("/api/") || path.starts_with("/media/") || path.starts_with("/thumbs/");
         let open = path == "/api/login";
-        let allowed = !protected || open || session_cookie(req.headers()).is_some_and(|t| auth.valid(t));
+        let allowed = !protected || open || {
+            let web = state.control.config().web;
+            session_cookie(req.headers()).is_some_and(|t| auth.valid(t, web.lan, &web.lan_pin))
+        };
         if !allowed {
             return ApiError::new(StatusCode::UNAUTHORIZED, "enter the PIN to continue").into_response();
         }
     }
     next.run(req).await
+}
+
+/// The host name part of a `Host` header value (without the port), lower-cased.
+fn host_name(host: &str) -> String {
+    let name = match host.strip_prefix('[') {
+        Some(rest) => rest.split_once(']').map_or(rest, |(ip, _)| ip),
+        None => host.rsplit_once(':').map_or(host, |(name, _)| name),
+    };
+    name.to_ascii_lowercase()
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host_name(host).as_str(), "127.0.0.1" | "localhost" | "::1")
+}
+
+/// Is `value` a JSON content type (`application/json`, maybe with `; charset=...`)?
+fn is_json(value: &str) -> bool {
+    value
+        .split(';')
+        .next()
+        .is_some_and(|m| m.trim().eq_ignore_ascii_case("application/json"))
+}
+
+fn forbidden(message: &str) -> Response {
+    ApiError::new(StatusCode::FORBIDDEN, message).into_response()
+}
+
+/// The outermost middleware, against web pages on other sites driving the API:
+/// - a request from this machine must name a loopback host (DNS rebinding makes a hostile name resolve to
+///   127.0.0.1);
+/// - a request that changes things, and the WebSocket upgrade, must have an `Origin` (when the browser sends
+///   one, and it always does cross-site) that is this server's own address;
+/// - a body must be JSON, which a page on another site can't send without a CORS preflight.
+///
+/// It also hides error details from other machines.
+pub async fn origin_guard(req: Request, next: Next) -> Response {
+    let remote = is_remote(req.extensions());
+    let headers = req.headers();
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok());
+    if !remote && host.is_some_and(|h| !is_loopback_host(h)) {
+        return forbidden("this address isn't allowed (use 127.0.0.1 or localhost)");
+    }
+    let writes = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    let upgrade = headers.contains_key(header::UPGRADE);
+    if writes || upgrade {
+        if let Some(origin) = headers.get(header::ORIGIN) {
+            let same = match (origin.to_str().ok(), host) {
+                (Some(o), Some(h)) => o.eq_ignore_ascii_case(&format!("http://{h}")),
+                _ => false,
+            };
+            if !same {
+                return forbidden("requests from other sites aren't allowed");
+            }
+        }
+    }
+    if writes {
+        let body_expected = headers.get(header::CONTENT_LENGTH).is_some_and(|v| v != "0")
+            || headers.contains_key(header::TRANSFER_ENCODING);
+        let bad = match headers.get(header::CONTENT_TYPE) {
+            Some(ct) => !ct.to_str().is_ok_and(is_json),
+            None => body_expected,
+        };
+        if bad {
+            return ApiError::new(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "send the body as application/json",
+            )
+            .into_response();
+        }
+    }
+    let response = next.run(req).await;
+    if remote && response.status() == StatusCode::INTERNAL_SERVER_ERROR {
+        return ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "something went wrong (details are in clipr's log)",
+        )
+        .into_response();
+    }
+    response
 }
 
 #[derive(Deserialize)]
@@ -153,24 +278,27 @@ pub async fn login(
 ) -> Result<Response, ApiError> {
     let login: Login = crate::api::parse_json(&body)?;
     let ip = peer_ip(&ext).unwrap_or(IpAddr::from([127, 0, 0, 1]));
-    if auth.locked_out(ip) {
-        let mut response = ApiError::new(
-            StatusCode::TOO_MANY_REQUESTS,
-            "too many wrong PINs, wait a minute",
-        )
-        .into_response();
-        response.headers_mut().insert(
-            header::RETRY_AFTER,
-            ATTEMPT_WINDOW.as_secs().to_string().parse().expect("a number"),
-        );
-        return Ok(response);
+    let web = state.control.config().web;
+    let attempt = auth.attempt(ip, || {
+        web.lan && !web.lan_pin.is_empty() && constant_time_eq(login.pin.trim(), &web.lan_pin)
+    });
+    match attempt {
+        Attempt::LockedOut => {
+            let mut response = ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many wrong PINs, wait a minute",
+            )
+            .into_response();
+            response.headers_mut().insert(
+                header::RETRY_AFTER,
+                ATTEMPT_WINDOW.as_secs().to_string().parse().expect("a number"),
+            );
+            return Ok(response);
+        }
+        Attempt::Wrong => return Err(ApiError::new(StatusCode::UNAUTHORIZED, "wrong PIN")),
+        Attempt::Ok => {}
     }
-    let pin = state.control.config().web.lan_pin;
-    if pin.is_empty() || !constant_time_eq(login.pin.trim(), &pin) {
-        auth.record_wrong(ip);
-        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "wrong PIN"));
-    }
-    let token = auth.new_session();
+    let token = auth.new_session(&web.lan_pin);
     let cookie = format!(
         "{COOKIE}={token}; Max-Age={}; Path=/; HttpOnly; SameSite=Strict",
         SESSION_LIFETIME.as_secs()
@@ -193,6 +321,47 @@ mod tests {
         assert!(!constant_time_eq("123456", "123457"));
         assert!(!constant_time_eq("123456", "12345"));
         assert_ne!(random_token(), random_token());
+    }
+
+    #[test]
+    fn hosts_and_content_types() {
+        for ok in [
+            "127.0.0.1:7845",
+            "localhost",
+            "LOCALHOST:80",
+            "[::1]:7845",
+            "[::1]",
+        ] {
+            assert!(is_loopback_host(ok), "{ok}");
+        }
+        for bad in [
+            "evil.com",
+            "127.0.0.1.evil.com:80",
+            "localhost.evil.com",
+            "[::2]:1",
+            "",
+            "10.0.0.1:7845",
+        ] {
+            assert!(!is_loopback_host(bad), "{bad}");
+        }
+        assert!(is_json("application/json"));
+        assert!(is_json("Application/JSON; charset=utf-8"));
+        assert!(!is_json("text/plain"));
+        assert!(!is_json("application/jsonp"));
+    }
+
+    #[test]
+    fn lockout_is_decided_under_one_lock() {
+        let auth = Auth::default();
+        let ip = IpAddr::from([10, 0, 0, 1]);
+        for _ in 0..MAX_WRONG_PINS {
+            assert!(matches!(auth.attempt(ip, || false), Attempt::Wrong));
+        }
+        // Locked: the check isn't even run, so a right guess can't get through.
+        assert!(matches!(
+            auth.attempt(ip, || panic!("compared while locked")),
+            Attempt::LockedOut
+        ));
     }
 
     #[test]
