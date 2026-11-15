@@ -136,19 +136,21 @@ Saving a 10 s 1080p60 clip takes ~30 ms. The whole app uses ~6 % of one core whi
 Audio processing costs about 2 % of one core. A saved clip's audio starts within 10 ms of its video.
 
 ### Phase 4: Web UI + library
-- [ ] `library`: SQLite index, thumbnail + hover-scrub sprite generated after save (low priority)
-- [ ] Gallery: by game/day, hover scrub, player with track switcher, markers on timeline
-- [ ] Lossless trim (keyframe-snapped, with an option for a precise re-encoded trim), rename, shelves, favorites, search
-- [ ] Auto-cleanup (age / size, never favorites), low-disk guard
-- [ ] Settings: Simple (auto preset + quality slider) / Advanced (encoder, rate control, bitrate, keyframe
+- [x] `library`: SQLite index, thumbnail + hover-scrub sprite generated after save (low priority)
+- [x] Gallery: by game/day, hover scrub, player with track switcher, markers on timeline
+- [x] Lossless trim (keyframe-snapped), rename, shelves, favorites, search (precise re-encoded trim: later)
+- [x] Auto-cleanup (age / size, never favorites), low-disk guard
+- [x] Settings: Simple (auto preset + quality slider) / Advanced (encoder, rate control, bitrate, keyframe
       interval, profile, preset, resolution, scaling, fps, container), with an explanation on every setting
-- [ ] Auto preset: GPU probe + short encode benchmark on first run, biased toward high bitrate
-- [ ] Profiles per game, switched automatically; optional separate quality for full recordings
-- [ ] Audio page: sources, mixer, track matrix, filters
-- [ ] Hotkeys page with conflict detection
-- [ ] First-run step wizard (look → GPU preset → hotkeys → audio → Discord → cloud), all skippable
-- [ ] LAN access opt-in with PIN
-- [ ] Theme: Dark sleek + accent picker
+- [x] Auto preset: GPU probe + short encode benchmark on first run, biased toward high bitrate
+- [x] Profiles per game, switched automatically (separate quality for full recordings: with the second
+      encoder, later)
+- [x] Audio page: sources, mixer with live level meters, track matrix, filters
+- [x] Hotkeys page with conflict detection
+- [x] First-run step wizard (look → GPU preset → hotkeys → audio), all skippable (Discord and cloud steps
+      come with those features)
+- [x] LAN access opt-in with PIN
+- [x] Theme: Dark sleek + accent picker
 
 ### Phase 5: Full recordings
 - [ ] Start/stop by hotkey, tray, UI; auto per game
