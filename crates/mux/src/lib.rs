@@ -1,3 +1,360 @@
-//! MP4 and MKV writers, lossless trim and concat.
+//! Writing clips and recordings to disk without re-encoding, plus lossless trim.
 //!
-//! Placeholder: this crate is filled in by a later phase of `docs/dev-plan.md`.
+//! - [`write_clip`]: a [`Cut`] from the replay buffer → a regular MP4.
+//! - [`LiveWriter`]: a full recording, written as fragmented MP4 while it runs, so a crash keeps
+//!   everything up to the last fragment.
+//! - [`trim`]: copies a time range of an MP4 into a new one, starting at the keyframe before the start.
+//!
+//! All three use Media Foundation's Sink Writer in passthrough mode (the input type equals the output type,
+//! so no encoder is inserted). [`MediaFormat`] carries a stream's media type between threads.
+
+#![cfg(windows)]
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, bail};
+use clipr_buffer::{Cut, Packet};
+use windows::Win32::Media::MediaFoundation::{
+    IMFAttributes, IMFMediaType, IMFSample, IMFSinkWriter, IMFSourceReader, MF_MT_MAJOR_TYPE,
+    MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SINK_WRITER_DISABLE_THROTTLING, MF_SOURCE_READER_ALL_STREAMS,
+    MF_SOURCE_READERF_ENDOFSTREAM, MF_TRANSCODE_CONTAINERTYPE, MF_VERSION, MFCreateAttributes,
+    MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL,
+    MFCreateSourceReaderFromURL, MFGetAttributesAsBlob, MFGetAttributesAsBlobSize, MFInitAttributesFromBlob,
+    MFMediaType_Audio, MFMediaType_Video, MFSTARTUP_FULL, MFSampleExtension_CleanPoint, MFShutdown,
+    MFStartup, MFTranscodeContainerType_FMPEG4, MFTranscodeContainerType_MPEG4,
+};
+use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
+use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
+use windows::core::{GUID, HSTRING};
+
+/// A stream's media type as bytes, so it can cross threads and outlive the encoder that made it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MediaFormat(Vec<u8>);
+
+impl MediaFormat {
+    pub fn from_type(media_type: &IMFMediaType) -> Result<Self> {
+        // SAFETY: valid attribute store; the buffer has the size MF asked for.
+        unsafe {
+            let size = MFGetAttributesAsBlobSize(media_type)?;
+            let mut blob = vec![0u8; size as usize];
+            MFGetAttributesAsBlob(media_type, &mut blob)?;
+            Ok(Self(blob))
+        }
+    }
+
+    pub fn to_type(&self) -> Result<IMFMediaType> {
+        // SAFETY: a fresh media type initialised from a blob MF wrote.
+        unsafe {
+            let t = MFCreateMediaType()?;
+            MFInitAttributesFromBlob(&t, &self.0)?;
+            Ok(t)
+        }
+    }
+}
+
+/// Keeps COM and Media Foundation started for the current thread while it lives.
+struct Mf;
+
+impl Mf {
+    fn start() -> Result<Self> {
+        // SAFETY: plain calls; an already-initialised apartment returns S_FALSE or RPC_E_CHANGED_MODE,
+        // both fine for us (MF objects are free-threaded).
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            MFStartup(MF_VERSION, MFSTARTUP_FULL).context("can't start Media Foundation")?;
+        }
+        Ok(Self)
+    }
+}
+
+impl Drop for Mf {
+    fn drop(&mut self) {
+        // SAFETY: balances MFStartup.
+        let _ = unsafe { MFShutdown() };
+    }
+}
+
+/// Copies an encoder's output sample into a [`Packet`] for the replay buffer.
+pub fn packet_from_sample(sample: &IMFSample) -> Result<Packet> {
+    // SAFETY: valid sample; the locked buffer is read within the lock.
+    unsafe {
+        let pts = sample.GetSampleTime().unwrap_or(0);
+        let duration = sample.GetSampleDuration().unwrap_or(0);
+        let keyframe = sample.GetUINT32(&MFSampleExtension_CleanPoint).unwrap_or(0) != 0;
+        let buffer = sample.ConvertToContiguousBuffer()?;
+        let mut ptr = std::ptr::null_mut();
+        let mut len = 0u32;
+        buffer.Lock(&mut ptr, None, Some(&mut len))?;
+        let data: std::sync::Arc<[u8]> = std::slice::from_raw_parts(ptr, len as usize).into();
+        buffer.Unlock()?;
+        Ok(Packet {
+            pts,
+            duration,
+            keyframe,
+            data,
+        })
+    }
+}
+
+fn sample_from_packet(packet: &Packet, offset: i64) -> Result<IMFSample> {
+    // SAFETY: fresh MF objects; the copy stays inside the locked buffer's length.
+    unsafe {
+        let len = packet.data.len() as u32;
+        let buffer = MFCreateMemoryBuffer(len.max(1))?;
+        let mut ptr = std::ptr::null_mut();
+        buffer.Lock(&mut ptr, None, None)?;
+        std::ptr::copy_nonoverlapping(packet.data.as_ptr(), ptr, packet.data.len());
+        buffer.Unlock()?;
+        buffer.SetCurrentLength(len)?;
+        let sample = MFCreateSample()?;
+        sample.AddBuffer(&buffer)?;
+        sample.SetSampleTime(packet.pts - offset)?;
+        sample.SetSampleDuration(packet.duration)?;
+        if packet.keyframe {
+            sample.SetUINT32(&MFSampleExtension_CleanPoint, 1)?;
+        }
+        Ok(sample)
+    }
+}
+
+/// A Sink Writer with passthrough streams. Writes go to a `.part` file that becomes the real one on finish.
+struct Writer {
+    writer: IMFSinkWriter,
+    part: PathBuf,
+    path: PathBuf,
+    streams: Vec<u32>,
+}
+
+impl Writer {
+    fn create(path: &Path, container: GUID, formats: &[&MediaFormat]) -> Result<Self> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).with_context(|| format!("can't create {}", dir.display()))?;
+        }
+        let mut part = path.as_os_str().to_owned();
+        part.push(".part");
+        let part = PathBuf::from(part);
+        // SAFETY: valid attributes and types; same type in and out makes a passthrough stream.
+        unsafe {
+            let mut attrs: Option<IMFAttributes> = None;
+            MFCreateAttributes(&mut attrs, 3)?;
+            let attrs = attrs.context("no attributes")?;
+            attrs.SetGUID(&MF_TRANSCODE_CONTAINERTYPE, &container)?;
+            attrs.SetUINT32(&MF_SINK_WRITER_DISABLE_THROTTLING, 1)?;
+            attrs.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 0)?;
+            let writer = MFCreateSinkWriterFromURL(&HSTRING::from(part.as_os_str()), None, &attrs)
+                .with_context(|| format!("can't create {}", path.display()))?;
+            let mut streams = Vec::new();
+            for format in formats {
+                let t = format.to_type()?;
+                let stream = writer
+                    .AddStream(&t)
+                    .context("the MP4 writer doesn't accept this format")?;
+                writer.SetInputMediaType(stream, &t, None)?;
+                streams.push(stream);
+            }
+            writer
+                .BeginWriting()
+                .context("can't start writing the video file")?;
+            Ok(Self {
+                writer,
+                part,
+                path: path.to_owned(),
+                streams,
+            })
+        }
+    }
+
+    fn write(&self, stream: usize, sample: &IMFSample) -> Result<()> {
+        // SAFETY: valid writer, stream index and sample.
+        unsafe { self.writer.WriteSample(self.streams[stream], sample) }
+            .context("can't write to the video file")
+    }
+
+    fn finish(self) -> Result<PathBuf> {
+        // SAFETY: valid writer; writes the index and closes the file.
+        unsafe { self.writer.Finalize() }.context("can't finish the video file")?;
+        drop(self.writer);
+        std::fs::rename(&self.part, &self.path)
+            .with_context(|| format!("can't move the finished file to {}", self.path.display()))?;
+        Ok(self.path)
+    }
+}
+
+/// Writes `cut` to an MP4 at `path`, with time 0 at the first video packet.
+pub fn write_clip(path: &Path, video: &MediaFormat, audio: Option<&MediaFormat>, cut: &Cut) -> Result<()> {
+    let Some(start) = cut.start() else {
+        bail!("the replay buffer is empty");
+    };
+    let _mf = Mf::start()?;
+    let formats: Vec<&MediaFormat> = std::iter::once(video).chain(audio).collect();
+    let writer = Writer::create(path, MFTranscodeContainerType_MPEG4, &formats)?;
+    let audio_packets: &[Packet] = if audio.is_some() { &cut.audio } else { &[] };
+    // Interleave by time so the file plays smoothly from the start.
+    let (mut v, mut a) = (0, 0);
+    while v < cut.video.len() || a < audio_packets.len() {
+        let take_video =
+            a >= audio_packets.len() || (v < cut.video.len() && cut.video[v].pts <= audio_packets[a].pts);
+        if take_video {
+            writer.write(0, &sample_from_packet(&cut.video[v], start)?)?;
+            v += 1;
+        } else {
+            let p = &audio_packets[a];
+            a += 1;
+            if p.pts < start {
+                continue; // audio from before the first picture
+            }
+            writer.write(1, &sample_from_packet(p, start)?)?;
+        }
+    }
+    writer.finish()?;
+    Ok(())
+}
+
+/// A full recording, written as fragmented MP4 while it runs.
+pub struct LiveWriter {
+    writer: Writer,
+    has_audio: bool,
+    start: Option<i64>,
+    _mf: Mf,
+}
+
+// SAFETY: the Sink Writer is free-threaded; the writer is only used by one thread at a time (&mut self).
+unsafe impl Send for LiveWriter {}
+
+impl LiveWriter {
+    pub fn create(path: &Path, video: &MediaFormat, audio: Option<&MediaFormat>) -> Result<Self> {
+        let mf = Mf::start()?;
+        let formats: Vec<&MediaFormat> = std::iter::once(video).chain(audio).collect();
+        Ok(Self {
+            writer: Writer::create(path, MFTranscodeContainerType_FMPEG4, &formats)?,
+            has_audio: audio.is_some(),
+            start: None,
+            _mf: mf,
+        })
+    }
+
+    /// The first video packet written must be a keyframe; earlier ones are skipped.
+    pub fn write_video(&mut self, packet: &Packet) -> Result<()> {
+        if self.start.is_none() {
+            if !packet.keyframe {
+                return Ok(());
+            }
+            self.start = Some(packet.pts);
+        }
+        let start = self.start.expect("set above");
+        self.writer.write(0, &sample_from_packet(packet, start)?)
+    }
+
+    pub fn write_audio(&mut self, packet: &Packet) -> Result<()> {
+        match self.start {
+            Some(start) if self.has_audio && packet.pts >= start => {
+                self.writer.write(1, &sample_from_packet(packet, start)?)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Seconds written so far (video).
+    pub fn started(&self) -> bool {
+        self.start.is_some()
+    }
+
+    pub fn finish(self) -> Result<PathBuf> {
+        if self.start.is_none() {
+            bail!("the recording has no video");
+        }
+        self.writer.finish()
+    }
+}
+
+/// Copies `start_secs..end_secs` of the MP4 `src` into `dst` without re-encoding. The copy starts at the
+/// keyframe at or before `start_secs`. `dst` may equal `src` (the original is replaced at the end).
+pub fn trim(src: &Path, dst: &Path, start_secs: f64, end_secs: f64) -> Result<()> {
+    if end_secs <= start_secs {
+        bail!("the end must be after the start");
+    }
+    let _mf = Mf::start()?;
+    // SAFETY: plain MF calls on objects we create; PROPVARIANT is built and dropped by windows-rs.
+    unsafe {
+        let reader: IMFSourceReader = MFCreateSourceReaderFromURL(&HSTRING::from(src.as_os_str()), None)
+            .with_context(|| format!("can't open {}", src.display()))?;
+        reader.SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false)?;
+        // Stream order in the new file: the first video stream, then the first audio stream.
+        let mut picks: Vec<(u32, MediaFormat, bool)> = Vec::new();
+        let (mut have_video, mut have_audio) = (false, false);
+        let mut index = 0u32;
+        while let Ok(t) = reader.GetNativeMediaType(index, 0) {
+            let major = t.GetGUID(&MF_MT_MAJOR_TYPE)?;
+            let video = major == MFMediaType_Video;
+            let audio = major == MFMediaType_Audio;
+            if (video && !have_video) || (audio && !have_audio) {
+                reader.SetStreamSelection(index, true)?;
+                reader.SetCurrentMediaType(index, None, &t)?;
+                picks.push((index, MediaFormat::from_type(&t)?, video));
+                have_video |= video;
+                have_audio |= audio;
+            }
+            index += 1;
+        }
+        picks.sort_by_key(|p| !p.2);
+        if !picks.first().is_some_and(|p| p.2) {
+            bail!("{} has no video", src.display());
+        }
+        let start = (start_secs * 1e7) as i64;
+        let end = (end_secs * 1e7) as i64;
+        let position = PROPVARIANT::from(start);
+        reader.SetCurrentPosition(&GUID::zeroed(), &position)?;
+
+        let formats: Vec<&MediaFormat> = picks.iter().map(|p| &p.1).collect();
+        let writer = Writer::create(dst, MFTranscodeContainerType_MPEG4, &formats)?;
+        let mut offset: Option<i64> = None;
+        let mut done = vec![false; picks.len()];
+        while done.iter().any(|d| !d) {
+            let (mut actual, mut flags, mut time) = (0u32, 0u32, 0i64);
+            let mut sample = None;
+            reader.ReadSample(
+                MF_SOURCE_READER_ALL_STREAMS.0 as u32,
+                0,
+                Some(&mut actual),
+                Some(&mut flags),
+                Some(&mut time),
+                Some(&mut sample),
+            )?;
+            let Some(slot) = picks.iter().position(|p| p.0 == actual) else {
+                continue;
+            };
+            if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
+                done[slot] = true;
+                continue;
+            }
+            let Some(sample) = sample else { continue };
+            if time >= end {
+                done[slot] = true;
+                continue;
+            }
+            let is_video = picks[slot].2;
+            let offset = match offset {
+                Some(o) => o,
+                None if is_video => *offset.insert(time),
+                None => continue, // audio before the first picture
+            };
+            if time < offset {
+                continue;
+            }
+            sample.SetSampleTime(time - offset)?;
+            writer.write(slot, &sample)?;
+        }
+        drop(reader);
+        writer.finish()?;
+    }
+    Ok(())
+}
+
+/// Whether a media type is video (for callers that hold several).
+pub fn is_video(format: &MediaFormat) -> bool {
+    format
+        .to_type()
+        // SAFETY: valid media type.
+        .and_then(|t| unsafe { Ok(t.GetGUID(&MF_MT_MAJOR_TYPE)?) })
+        .is_ok_and(|g| g == MFMediaType_Video)
+}

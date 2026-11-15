@@ -3,10 +3,11 @@
 use anyhow::{Result, bail};
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
 use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentThreadId};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MB_ICONERROR, MB_OK, MSG, MessageBoxW, PostQuitMessage,
-    PostThreadMessageW, SW_SHOWNORMAL, TranslateMessage, WM_APP,
+    PostThreadMessageW, SW_SHOWNORMAL, TranslateMessage, WM_APP, WM_HOTKEY,
 };
 
 /// Posted to the main thread when it should look at its queues (menu clicks, status changes).
@@ -91,8 +92,53 @@ pub fn quit_loop() {
     unsafe { PostQuitMessage(0) };
 }
 
-/// Runs the message loop until [`quit_loop`]. `on_wake` runs for every [`WM_CLIPR_WAKE`].
-pub fn message_loop(mut on_wake: impl FnMut()) {
+/// Registers a system-wide hotkey for this thread; presses arrive in [`message_loop`] as `on_hotkey(id)`.
+/// Fails when another program holds the same combination.
+pub fn register_hotkey(id: i32, key: clipr_core::hotkey::Hotkey) -> Result<()> {
+    let mods = key.mods | clipr_core::hotkey::MOD_NOREPEAT;
+    // SAFETY: null HWND = post WM_HOTKEY to this thread's queue.
+    if unsafe { RegisterHotKey(std::ptr::null_mut(), id, mods, key.vk) } == 0 {
+        // SAFETY: reads this thread's last error.
+        bail!("it's taken by another program (error {})", unsafe {
+            GetLastError()
+        });
+    }
+    Ok(())
+}
+
+pub fn unregister_hotkey(id: i32) {
+    // SAFETY: unregistering an id that isn't registered is harmless.
+    unsafe { UnregisterHotKey(std::ptr::null_mut(), id) };
+}
+
+/// Shows a file selected in Explorer, or opens a folder.
+pub fn reveal(path: &std::path::Path) {
+    let (op, file, params);
+    if path.is_dir() {
+        (op, file, params) = (wide("open"), wide(&path.to_string_lossy()), wide(""));
+    } else {
+        (op, file, params) = (
+            wide("open"),
+            wide("explorer.exe"),
+            wide(&format!("/select,\"{}\"", path.display())),
+        );
+    }
+    // SAFETY: valid NUL-terminated wide strings.
+    unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            op.as_ptr(),
+            file.as_ptr(),
+            params.as_ptr(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+}
+
+/// Runs the message loop until [`quit_loop`]. `on_wake` runs for every [`WM_CLIPR_WAKE`], `on_hotkey` for
+/// every registered hotkey press.
+pub fn message_loop(mut on_wake: impl FnMut(), mut on_hotkey: impl FnMut(i32)) {
     // SAFETY: MSG is plain data; all-zero is a valid initial value.
     let mut msg: MSG = unsafe { std::mem::zeroed() };
     loop {
@@ -103,6 +149,10 @@ pub fn message_loop(mut on_wake: impl FnMut()) {
         }
         if msg.hwnd.is_null() && msg.message == WM_CLIPR_WAKE {
             on_wake();
+            continue;
+        }
+        if msg.message == WM_HOTKEY {
+            on_hotkey(msg.wParam as i32);
             continue;
         }
         // SAFETY: `msg` came from GetMessageW.

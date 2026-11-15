@@ -1,4 +1,4 @@
-//! What clipr is doing right now: idle, buffering a game, or recording.
+//! What clipr is doing right now: idle, buffering, or recording.
 //!
 //! One [`Status`] lives for the whole run. Writers call [`Status::set`]; the tray, the web UI and (later)
 //! Discord Rich Presence subscribe and react to changes.
@@ -26,6 +26,12 @@ pub struct Activity {
     pub state: RecState,
     /// The game being captured, if any.
     pub game: Option<String>,
+    /// The hardware encoder in use, e.g. `AMD HW H.264 Encoder MFT`.
+    pub encoder: Option<String>,
+    /// What went wrong last, for the user (cleared once capture runs again).
+    pub error: Option<String>,
+    /// When the running full recording started, in seconds since the Unix epoch.
+    pub recording_since: Option<u64>,
 }
 
 /// What `/api/status` returns and the WebSocket pushes.
@@ -34,6 +40,9 @@ pub struct StatusSnapshot {
     pub version: String,
     pub state: RecState,
     pub game: Option<String>,
+    pub encoder: Option<String>,
+    pub error: Option<String>,
+    pub recording_since: Option<u64>,
     pub uptime_secs: u64,
 }
 
@@ -81,6 +90,9 @@ impl Status {
             version: crate::VERSION.to_string(),
             state: activity.state,
             game: activity.game,
+            encoder: activity.encoder,
+            error: activity.error,
+            recording_since: activity.recording_since,
             uptime_secs: self.started.elapsed().as_secs(),
         }
     }
@@ -90,7 +102,8 @@ impl Status {
         let activity = self.activity();
         let game = activity.game.as_deref();
         match (activity.state, game) {
-            (RecState::Idle, _) => "Idle: waiting for a game".into(),
+            (RecState::Idle, _) if activity.error.is_some() => "Capture stopped (see the web UI)".into(),
+            (RecState::Idle, _) => "Not buffering".into(),
             (RecState::Buffering, Some(game)) => format!("● Buffering {game}"),
             (RecState::Buffering, None) => "● Buffering".into(),
             (RecState::Recording, Some(game)) => format!("● Recording {game}"),
@@ -109,6 +122,7 @@ mod tests {
         status.set(Activity {
             state: RecState::Buffering,
             game: Some("Valorant".into()),
+            ..Default::default()
         });
         let json = serde_json::to_value(status.snapshot()).unwrap();
         assert_eq!(json["state"], "buffering");
@@ -125,7 +139,7 @@ mod tests {
         assert!(!rx.has_changed().unwrap());
         status.set(Activity {
             state: RecState::Recording,
-            game: None,
+            ..Default::default()
         });
         assert!(rx.has_changed().unwrap());
         rx.mark_unchanged();

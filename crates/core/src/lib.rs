@@ -2,8 +2,10 @@
 //! log files ([`logging`]), and what clipr is doing right now plus the events around it ([`status`],
 //! [`events`]).
 
+pub mod clock;
 pub mod config;
 pub mod events;
+pub mod hotkey;
 pub mod logging;
 pub mod paths;
 pub mod status;
