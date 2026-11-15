@@ -73,13 +73,15 @@ These targets get measured in CI on a perf test and checked by hand on low-end h
 Each phase ends in something runnable. Tick items off here as they land.
 
 ### Phase 0: Foundations
-- [ ] Cargo workspace with the crates above (empty stubs), `rustfmt`, `clippy -D warnings`, GitHub Actions
+- [x] Cargo workspace with the crates above (empty stubs), `rustfmt`, `clippy -D warnings`, GitHub Actions
       (build, test, clippy on Windows)
-- [ ] `LICENSE` (GPL-3.0), contributing notes
-- [ ] `core`: config load/save (TOML), event bus, `tracing` logs in `%LOCALAPPDATA%\clipr\logs`
-- [ ] `clipr`: single instance, tray icon with a placeholder menu, clean shutdown
-- [ ] `web`: axum on `127.0.0.1:<port>`, serves the embedded Svelte "hello" page, opened from tray + desktop shortcut
-- [ ] Svelte project in `ui/` with the theme token system (one theme, accent variable)
+- [x] `LICENSE` (GPL-3.0), contributing notes
+- [x] `core`: config load/save (TOML), event bus, `tracing` logs in `%LOCALAPPDATA%\clipr\logs`
+- [x] `clipr`: single instance, tray icon with a placeholder menu, clean shutdown
+- [x] `web`: axum on `127.0.0.1:<port>`, serves the embedded Svelte "hello" page, opened from the tray; a second launch opens the running copy (the installer adds the shortcut in Phase 7)
+- [x] Svelte project in `ui/` with the theme token system (one theme, accent variable)
+
+Done 2026-11-15. The tray quick actions (Save clip, Start recording) are already in the menu, greyed out until Phase 2.
 
 ### Phase 1: Capture + encode spike (go / no-go for pure Rust)
 - [ ] WGC capture of a window and a monitor into D3D11 textures
