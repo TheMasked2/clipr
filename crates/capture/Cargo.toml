@@ -1,6 +1,6 @@
 [package]
 name = "clipr-capture"
-description = "clipr: Screen capture through Windows Graphics Capture: window and monitor sessions, following the game's monitor, restarting on display-mode changes, HDR detection. Never injects into games."
+description = "clipr: screen capture through Windows Graphics Capture: window and monitor sessions, following the game's monitor, restarting on display-mode changes, HDR detection. Never injects into games."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,3 +12,10 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+clipr-gpu.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+windows-core.workspace = true

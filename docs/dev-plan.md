@@ -84,11 +84,27 @@ Each phase ends in something runnable. Tick items off here as they land.
 Done 2026-11-15. The tray quick actions (Save clip, Start recording) are already in the menu, greyed out until Phase 2.
 
 ### Phase 1: Capture + encode spike (go / no-go for pure Rust)
-- [ ] WGC capture of a window and a monitor into D3D11 textures
-- [ ] GPU colour conversion to NV12
-- [ ] Media Foundation hardware H.264 encode, D3D-backed (no CPU copies)
-- [ ] Write a 30 s MP4 to disk and verify it plays everywhere (Discord, phone, VLC)
-- [ ] Measure FPS impact in a real game on NVIDIA, AMD and Intel
+- [x] WGC capture of a monitor into D3D11 textures (window capture is written but not tested yet)
+- [x] GPU colour conversion to NV12 (D3D11 video processor, BT.709 limited range)
+- [x] Media Foundation hardware H.264, HEVC and AV1 encode, D3D-backed (no CPU copies)
+- [x] Write a 30 s MP4 to disk; decodes cleanly in ffmpeg (Discord, phone and VLC not checked yet)
+- [ ] Measure FPS impact in a real game on NVIDIA, AMD and Intel (only AMD so far, desktop only)
+
+Spike results (RX 9070 XT, 1080p60, 20 Mbps, desktop capture, `cargo run --release -p clipr-encode
+--example spike`): 3–7 % of one CPU core in total, colour conversion ~0.1 ms and encoder push ~0.2–0.3 ms
+per frame, 0 dropped frames, keyframe every 1.0 s, no B-frames. What we learned:
+- **Pick the encoder by PCI device, not by adapter LUID.** A PC with two AMD GPUs has one encoder
+  registration per GPU, and AMD ignores the `MFT_ENUM_ADAPTER_LUID` filter. The registrations carry a
+  `PCI\VEN_..&DEV_..` path, which we match against the adapter's ids. Starting the other GPU's encoder
+  doesn't just stall: it breaks the driver's other encoders for the rest of the process. A one-frame
+  self-test stays as a safety net.
+- **Set codec properties before the media types.** Set after, AMD's H.264 encoder sizes frames as if the
+  stream were 30 fps (double the bitrate at 60 fps).
+- **Use the `MF_LOW_LATENCY` attribute, not `CODECAPI_AVLowLatencyMode`.** The codec API one, set early,
+  makes AMD's H.264 encoder write a corrupt stream.
+- AMD's AV1 encoder treats CBR as a cap (~2 Mbps on a still desktop). Fine for clips; recheck in a game.
+- WGC delivers at most ~60 fps by default. 120/144 fps capture needs `MinUpdateInterval`, which
+  windows-rs 0.61 doesn't expose yet (Phase 2).
 - **Gate:** if MF encoding turns out to be unworkable on one vendor, fall back to calling that vendor's SDK
   directly (NVENC/AMF) behind the same `VideoEncoder` trait. ffmpeg stays a last resort.
 
