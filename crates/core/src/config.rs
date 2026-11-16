@@ -523,7 +523,7 @@ impl Default for DiscordConfig {
 }
 
 /// One Discord channel clips can be posted to.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Webhook {
     /// What the UI calls it, like `#clips`. Unique.
@@ -558,6 +558,18 @@ pub enum PostMode {
     Auto,
     /// New clips aren't posted; sharing a clip by hand still works.
     Off,
+}
+
+// Not derived: the URL is a secret and must never reach a log through `{:?}`.
+impl std::fmt::Debug for Webhook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Webhook")
+            .field("name", &self.name)
+            .field("url", &if self.url.is_empty() { "" } else { "<hidden>" })
+            .field("mode", &self.mode)
+            .field("games", &self.games)
+            .finish()
+    }
 }
 
 impl Webhook {
@@ -741,6 +753,14 @@ mod tests {
         .unwrap();
         assert!(text.contains("mode = \"off\""), "{text}");
         assert_eq!(Config::default().discord.upload_limit_mb, 10);
+        let shown = format!(
+            "{:?}",
+            Webhook {
+                url: "https://discord.com/api/webhooks/1/secret".into(),
+                ..Default::default()
+            }
+        );
+        assert!(!shown.contains("secret"), "{shown}");
     }
 
     #[test]

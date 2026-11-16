@@ -28,7 +28,7 @@ use windows::Win32::Media::MediaFoundation::{
     MFTranscodeContainerType_MPEG4, MFVideoFormat_H264, MFVideoFormat_NV12, MFVideoInterlace_Progressive,
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
+use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
 use windows::core::{GUID, HSTRING};
 
 /// A stream's media type as bytes, so it can cross threads and outlive the encoder that made it.
@@ -57,24 +57,38 @@ impl MediaFormat {
 }
 
 /// Keeps COM and Media Foundation started for the current thread while it lives.
-struct Mf;
+struct Mf {
+    /// Whether our `CoInitializeEx` counted (S_OK or S_FALSE) and needs a `CoUninitialize`.
+    com: bool,
+}
 
 impl Mf {
     fn start() -> Result<Self> {
         // SAFETY: plain calls; an already-initialised apartment returns S_FALSE or RPC_E_CHANGED_MODE,
         // both fine for us (MF objects are free-threaded).
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            MFStartup(MF_VERSION, MFSTARTUP_FULL).context("can't start Media Foundation")?;
+        let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
+        // SAFETY: as above.
+        if let Err(e) = unsafe { MFStartup(MF_VERSION, MFSTARTUP_FULL) } {
+            if com {
+                // SAFETY: balances the successful CoInitializeEx above.
+                unsafe { CoUninitialize() };
+            }
+            return Err(anyhow::Error::from(e).context("can't start Media Foundation"));
         }
-        Ok(Self)
+        Ok(Self { com })
     }
 }
 
 impl Drop for Mf {
     fn drop(&mut self) {
-        // SAFETY: balances MFStartup.
-        let _ = unsafe { MFShutdown() };
+        // SAFETY: balances MFStartup, then the CoInitializeEx that counted, so a thread that runs many trims
+        // or posts doesn't pile up COM references.
+        unsafe {
+            let _ = MFShutdown();
+            if self.com {
+                CoUninitialize();
+            }
+        }
     }
 }
 

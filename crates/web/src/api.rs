@@ -144,8 +144,11 @@ pub async fn get_config(State(s): State<AppState>, ext: Extensions) -> Json<Conf
     Json(config)
 }
 
-pub async fn system(State(s): State<AppState>) -> Json<Value> {
-    Json(s.control.system_info())
+pub async fn system(State(s): State<AppState>, ext: Extensions) -> Json<Value> {
+    let mut info = s.control.system_info();
+    // Whether this UI is another device (webhook URLs are hidden from it).
+    info["remote"] = auth::is_remote(&ext).into();
+    Json(info)
 }
 
 /// Lower-cased, backslashes, no trailing slash, no `\\?\` prefix: for comparing paths as text.
@@ -472,14 +475,23 @@ struct PatchReq {
 
 pub async fn patch_clip(State(s): State<AppState>, body: Bytes) -> ApiResult<Json<Clip>> {
     let req: PatchReq = parse_json(&body)?;
-    let lib = s.library.clone();
+    let old_id = req.id.clone();
+    let st = s.clone();
     let clip = blocking(move || {
-        lib.update(
+        let clip = st.library.update(
             &req.id,
             req.title.as_deref(),
             req.favorite,
             req.shelves.as_deref(),
-        )
+        )?;
+        // A new title renames the file: posts still waiting follow it.
+        if req.title.is_some() {
+            match crate::discord::clip_info(&st.library, &st.thumbs_dir, &clip) {
+                Ok(info) => st.discord.clip_renamed(&old_id, &info),
+                Err(e) => tracing::warn!("can't update Discord posts for a renamed clip: {e:#}"),
+            }
+        }
+        Ok(clip)
     })
     .await?;
     s.library.notify_changed();

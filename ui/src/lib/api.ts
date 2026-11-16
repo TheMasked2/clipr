@@ -134,6 +134,8 @@ export interface SystemInfo {
   gpus?: { name: string; vendor?: string; encoders?: string[] }[];
   monitors?: { index: number; name: string; width: number; height: number; primary: boolean }[];
   known_games?: number;
+  /** This page is open on another device (webhook URLs are hidden from it). */
+  remote?: boolean;
 }
 
 export interface Disk {

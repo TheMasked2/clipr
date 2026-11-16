@@ -262,7 +262,7 @@
   {:else if tab === 'Recording'}
     <Field title="Maximum length (minutes)" hint="Stop a recording after this many minutes. 0 = no limit."><input type="number" min="0" bind:value={draft.recording.max_minutes} /></Field>
   {:else if tab === 'Discord'}
-    <DiscordSettings discord={draft.discord} />
+    <DiscordSettings discord={draft.discord} remote={sys?.remote ?? false} />
   {:else if tab === 'Network'}
     <Field title="Allow access from my local network" hint="Open this page to other devices at home (your phone). They must enter a PIN. Off by default."><Toggle bind:checked={draft.web.lan} label="LAN access" /></Field>
     {#if draft.web.lan}

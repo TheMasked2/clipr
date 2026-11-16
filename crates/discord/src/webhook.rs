@@ -105,9 +105,24 @@ fn payload(post: &Post, video_name: &str) -> Value {
     })
 }
 
+/// One file in a post: bytes already in memory, or a file read straight into the body (a clip can be
+/// hundreds of MB, so it isn't held twice).
+enum Part<'a> {
+    #[cfg_attr(not(test), allow(dead_code))]
+    Bytes(&'a [u8]),
+    File(&'a Path),
+}
+
 /// A `multipart/form-data` body: the JSON payload, then each file as `files[i]`.
-fn multipart(boundary: &str, json: &Value, files: &[(String, &str, Vec<u8>)]) -> Vec<u8> {
-    let mut body = Vec::new();
+fn multipart(boundary: &str, json: &Value, files: &[(String, &str, Part)]) -> Result<Vec<u8>> {
+    let size: u64 = files
+        .iter()
+        .map(|(_, _, p)| match p {
+            Part::Bytes(b) => b.len() as u64,
+            Part::File(f) => std::fs::metadata(f).map_or(0, |m| m.len()),
+        })
+        .sum();
+    let mut body = Vec::with_capacity(usize::try_from(size).unwrap_or(0).saturating_add(4096));
     body.extend_from_slice(
         format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n\
@@ -123,11 +138,19 @@ fn multipart(boundary: &str, json: &Value, files: &[(String, &str, Vec<u8>)]) ->
             )
             .as_bytes(),
         );
-        body.extend_from_slice(data);
+        match data {
+            Part::Bytes(b) => body.extend_from_slice(b),
+            Part::File(path) => {
+                use std::io::Read;
+                std::fs::File::open(path)
+                    .and_then(|mut f| f.read_to_end(&mut body))
+                    .with_context(|| format!("can't read {}", path.display()))?;
+            }
+        }
         body.extend_from_slice(b"\r\n");
     }
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
-    body
+    Ok(body)
 }
 
 fn agent() -> ureq::Agent {
@@ -136,6 +159,8 @@ fn agent() -> ureq::Agent {
         .timeout_global(Some(Duration::from_secs(30 * 60)))
         .timeout_connect(Some(Duration::from_secs(15)))
         .http_status_as_error(false)
+        // The host is checked before sending; don't let an answer send the clip anywhere else.
+        .max_redirects(0)
         .user_agent(format!("clipr/{}", clipr_core::VERSION))
         .build()
         .into()
@@ -145,12 +170,10 @@ fn agent() -> ureq::Agent {
 pub fn post(url: &str, post: &Post) -> Result<()> {
     check_url(url)?;
     let video_name = file_name(post.title);
-    let video = std::fs::read(post.video).with_context(|| format!("can't read {}", post.video.display()))?;
-    let mut files = vec![(video_name.clone(), "video/mp4", video)];
-    if let Some(thumb) = post.thumb
-        && let Ok(data) = std::fs::read(thumb)
-    {
-        files.push(("thumb.jpg".into(), "image/jpeg", data));
+    let mut files = vec![(video_name.clone(), "video/mp4", Part::File(post.video))];
+    // The thumbnail is made after the clip is saved; post without it if it isn't there (yet).
+    if let Some(thumb) = post.thumb.filter(|t| t.is_file()) {
+        files.push(("thumb.jpg".into(), "image/jpeg", Part::File(thumb)));
     }
     let has_thumb = files.len() > 1;
     let body_json = payload(
@@ -161,7 +184,7 @@ pub fn post(url: &str, post: &Post) -> Result<()> {
         &video_name,
     );
     let boundary = format!("clipr{:016x}", rand_u64());
-    let body = multipart(&boundary, &body_json, &files);
+    let body = multipart(&boundary, &body_json, &files)?;
     send(url, &format!("multipart/form-data; boundary={boundary}"), &body)
 }
 
@@ -290,8 +313,9 @@ mod tests {
         let body = multipart(
             "B",
             &json!({"a": 1}),
-            &[("c.mp4".into(), "video/mp4", b"DATA".to_vec())],
-        );
+            &[("c.mp4".into(), "video/mp4", Part::Bytes(b"DATA"))],
+        )
+        .unwrap();
         let text = String::from_utf8(body).unwrap();
         assert!(text.starts_with("--B\r\nContent-Disposition: form-data; name=\"payload_json\""));
         assert!(

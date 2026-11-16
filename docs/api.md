@@ -78,19 +78,22 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 ## Discord
 
 Channels are `discord.webhooks` in the config (`name`, `url`, `mode`: `ask|auto|off`, `games`). Webhook URLs
-are secrets: `GET`/`PUT /api/config` from a LAN device return them as `""`, and a LAN device may only send
-`""` (keep the saved URL) or the saved URL itself; adding or changing a URL from there is `403`.
+are secrets: `GET`/`PUT /api/config` from a LAN device return them as `""` (and `GET /api/system` says
+`"remote": true`). A LAN device may send `""` for a saved channel (keep its URL) or for a new one (no URL yet);
+setting, changing or renaming its way to a URL is `403`.
 
 - `GET /api/discord/posts` → jobs, newest first:
   ```jsonc
   [{ "id": 3, "webhook": "#clips", "state": "ask|queued|posting|posted|skipped|failed",
      "now": false,                       // posts even while a game runs (shared by hand, or answered)
      "error": "..." | null, "created": 1763215402,
-     "clip": { "id", "title", "game", "duration_secs", "size_bytes", "kind", "path", "thumb" } }]
+     "clip": { "id", "title", "game", "duration_secs", "size_bytes", "kind" } }]
   ```
   A new clip (not a recording) becomes a job for every webhook whose mode isn't `off` and whose `games` list is
   empty or names the clip's game: `ask` jobs wait, `auto` jobs are posted once no game runs (or right away
-  with `discord.post_during_game`). The last 50 finished jobs are kept.
+  with `discord.post_during_game`). A post that already started finishes even if a game starts meanwhile.
+  The last 50 finished jobs are kept. Renaming a clip updates the posts still waiting for it. `clip` has no
+  local paths here.
 - `POST /api/discord/share` body `{"id": "<clip id>", "webhook": "#clips"}` → `{"job": 4}`; posted right away
 - `POST /api/discord/answer` body `{"job": 3, "yes": true}` → `204`. Yes on an `ask` or `failed` job posts it
   now; no on an `ask`, `queued` or `failed` job skips it.

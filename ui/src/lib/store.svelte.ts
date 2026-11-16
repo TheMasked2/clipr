@@ -26,13 +26,17 @@ export const app = $state<{
 
 // Tell the user when a post lands or fails (not for posts that were already done when the page loaded).
 let postsLoaded = false;
+let postsAsked = 0;
 export async function loadPosts(): Promise<void> {
+  const ask = ++postsAsked;
   let jobs: Job[];
   try {
     jobs = await getPosts();
   } catch {
     return;
   }
+  // An older answer that arrives after a newer one would show stale states.
+  if (ask !== postsAsked) return;
   if (postsLoaded) {
     const before = new Map(app.posts.map((j) => [j.id, j.state]));
     for (const j of jobs) {

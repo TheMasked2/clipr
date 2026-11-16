@@ -23,6 +23,9 @@ const KEEP_FINISHED: usize = 50;
 /// How often a waiting job checks whether the game has closed.
 const RECHECK: Duration = Duration::from_secs(5);
 
+/// Room left under the upload limit for the thumbnail and the message itself.
+const POST_OVERHEAD: u64 = 256 * 1024;
+
 /// What clipr knows about a clip when it queues it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClipInfo {
@@ -119,6 +122,12 @@ impl Poster {
         config: impl Fn() -> DiscordConfig + Send + Sync + 'static,
         in_game: impl Fn() -> bool + Send + Sync + 'static,
     ) -> Self {
+        // Smaller copies left by a crash or a kill mid-post: nothing refers to them any more.
+        if let Ok(dir) = std::fs::read_dir(&work_dir) {
+            for entry in dir.flatten() {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
         let poster = Self::load(file, work_dir, config, in_game);
         let worker = poster.clone();
         std::thread::Builder::new()
@@ -202,13 +211,30 @@ impl Poster {
     /// The user shares `clip` to `webhook` by hand: it's posted right away, game or not.
     pub fn share(&self, clip: ClipInfo, webhook: &str) -> Result<u64> {
         let config = (self.inner.config)();
-        if !config.webhooks.iter().any(|w| w.name == webhook) {
-            bail!("There's no Discord channel called {webhook:?} in the settings");
+        match config.webhooks.iter().find(|w| w.name == webhook) {
+            None => bail!("There's no Discord channel called {webhook:?} in the settings"),
+            Some(w) if w.url.trim().is_empty() => {
+                bail!("{webhook} has no webhook URL yet; add it in Settings → Discord")
+            }
+            Some(_) => {}
         }
         let mut s = self.lock();
         let id = Self::push(&mut s, clip, webhook.to_string(), JobState::Queued, true);
         self.save_and_wake(s);
         Ok(id)
+    }
+
+    /// A clip was renamed (its id and path change): jobs that haven't run yet follow it.
+    pub fn clip_renamed(&self, old_id: &str, clip: &ClipInfo) {
+        let mut s = self.lock();
+        let mut changed = false;
+        for job in s.jobs.iter_mut().filter(|j| j.clip.id == old_id && !j.finished()) {
+            job.clip = clip.clone();
+            changed = true;
+        }
+        if changed {
+            self.save_and_wake(s);
+        }
     }
 
     /// Answers an `Ask` job (`true`: post it), or retries a failed one (`true`).
@@ -299,7 +325,13 @@ impl Poster {
 
     fn run(&self) {
         while let Some(job) = self.take() {
-            let result = self.post(&job);
+            // A panic in the encoder or the upload must not stop the queue for good.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.post(&job)))
+                .unwrap_or_else(|_| {
+                    Err(anyhow::anyhow!(
+                        "clipr hit an internal error while posting; try again"
+                    ))
+                });
             let mut s = self.lock();
             if let Some(j) = s.jobs.iter_mut().find(|j| j.id == job.id) {
                 match result {
@@ -330,7 +362,7 @@ impl Poster {
         if !clip.path.is_file() {
             bail!("The clip isn't there any more");
         }
-        let limit = u64::from(config.upload_limit_mb.max(1)) * 1_000_000;
+        let limit = (u64::from(config.upload_limit_mb.max(1)) * 1_000_000).saturating_sub(POST_OVERHEAD);
         let size = std::fs::metadata(&clip.path).map_or(clip.size_bytes, |m| m.len());
         let small = self.inner.work_dir.join(format!("discord-{}.mp4", job.id));
         let video = if size <= limit {
@@ -456,6 +488,38 @@ mod tests {
         let job = p.jobs().into_iter().find(|j| j.id == id).unwrap();
         assert!(job.now && job.state == JobState::Queued);
         assert!(p.share(clip("VALORANT", "clip"), "nope").is_err());
+    }
+
+    #[test]
+    fn waiting_posts_follow_a_renamed_clip_and_blank_urls_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut blank = hook("blank", PostMode::Ask, &[]);
+        blank.url.clear();
+        let p = poster(dir.path(), vec![hook("ask", PostMode::Ask, &[]), blank]);
+        assert!(
+            p.share(clip("VALORANT", "clip"), "blank")
+                .unwrap_err()
+                .to_string()
+                .contains("no webhook URL")
+        );
+        p.clip_saved(&clip("VALORANT", "clip"));
+        let mut done = clip("VALORANT", "clip");
+        done.title = "done".into();
+        let done_id = p.share(done, "ask").unwrap();
+        p.answer(done_id, false).unwrap();
+
+        let mut renamed = clip("VALORANT", "clip");
+        renamed.id = "VALORANT/ace.mp4".into();
+        renamed.title = "ace".into();
+        p.clip_renamed("VALORANT/a.mp4", &renamed);
+        let jobs = p.jobs();
+        let waiting = jobs.iter().find(|j| j.state == JobState::Ask).unwrap();
+        assert_eq!(
+            (waiting.clip.id.as_str(), waiting.clip.title.as_str()),
+            ("VALORANT/ace.mp4", "ace")
+        );
+        let finished = jobs.iter().find(|j| j.id == done_id).unwrap();
+        assert_eq!(finished.clip.title, "done", "finished posts keep what was posted");
     }
 
     #[test]

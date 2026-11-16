@@ -982,12 +982,35 @@ async fn discord_settings_are_checked_and_urls_stay_on_the_pc() {
     );
     let mut added = seen.clone();
     added["discord"]["webhooks"] =
-        serde_json::json!([seen["discord"]["webhooks"][0], { "name": "new", "url": "" }]);
+        serde_json::json!([seen["discord"]["webhooks"][0], { "name": "new", "url": HOOK }]);
     assert_eq!(
         lan_call("PUT", "/api/config", Some(added.to_string())).await.0,
         StatusCode::FORBIDDEN
     );
     assert_eq!(env.control.config().discord.webhooks.len(), 1);
+    // A renamed channel is a new one with a URL from elsewhere: no.
+    let mut renamed = seen.clone();
+    renamed["discord"]["webhooks"][0]["name"] = "#other".into();
+    renamed["discord"]["webhooks"][0]["url"] = HOOK.into();
+    assert_eq!(
+        lan_call("PUT", "/api/config", Some(renamed.to_string())).await.0,
+        StatusCode::FORBIDDEN
+    );
+    // A new channel without a URL is fine; its URL is added on the PC.
+    added["discord"]["webhooks"][1]["url"] = "".into();
+    let (code, _, body) = lan_call("PUT", "/api/config", Some(added.to_string())).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let saved = env.control.config().discord.webhooks;
+    assert_eq!(
+        (saved.len(), saved[0].url.as_str(), saved[1].url.as_str()),
+        (2, HOOK, "")
+    );
+
+    // The UI can tell it's on another device.
+    let (_, _, body) = lan_call("GET", "/api/system", None).await;
+    assert_eq!(json(&body)["remote"], true);
+    let (_, _, body) = call("GET", "/api/system").send(&app).await;
+    assert_eq!(json(&body)["remote"], false);
 }
 
 #[tokio::test]

@@ -7,7 +7,8 @@
   import ListEditor from './ListEditor.svelte';
 
   // The Discord channels clips go to, and when. `discord` is the settings draft, changed in place.
-  let { discord }: { discord: DiscordConfig } = $props();
+  // `remote`: this page is open on another device, which never sees or sets webhook URLs.
+  let { discord, remote }: { discord: DiscordConfig; remote: boolean } = $props();
 
   const MODES: { v: PostMode; name: string; text: string }[] = [
     { v: 'ask', name: 'Ask', text: 'New clips wait on the Home page for your yes.' },
@@ -20,9 +21,9 @@
     { v: 500, t: '500 MB (Nitro)' },
   ];
 
-  // Other devices get the URLs blanked: a saved webhook with an empty URL is kept as it is on the PC.
+  // Other devices get the URLs blanked: a saved webhook with an empty URL is kept as it is on the PC. Its
+  // name is how the PC finds the URL, so other devices can't rename it.
   const savedNames = $derived(new Set((app.config?.discord.webhooks ?? []).map((w) => w.name)));
-  const remote = $derived((app.config?.discord.webhooks ?? []).some((w) => !w.url));
 
   let testing = $state<number | null>(null);
   let results = $state<Record<number, { ok: boolean; text: string }>>({});
@@ -57,24 +58,24 @@
   New Webhook → Copy Webhook URL, and paste it here. Anyone with the URL can post to that channel, so keep it to yourself.
 </p>
 {#if remote}
-  <div class="banner warn">Webhook URLs stay on the PC running clipr. Add or change them there; here you can change the rest.</div>
+  <div class="banner warn">Webhook URLs stay on the PC running clipr: paste or change them there. Here you can add channels and change when they post.</div>
 {/if}
 
 {#each discord.webhooks as w, i (i)}
   <div class="hook">
     <div class="head">
-      <input type="text" class="name" bind:value={w.name} maxlength="50" placeholder="#clips" aria-label="Channel name" />
+      <input type="text" class="name" bind:value={w.name} maxlength="50" placeholder="#clips" aria-label="Channel name" disabled={remote && savedNames.has(w.name)} />
       <button onclick={() => test(i)} disabled={testing !== null || (!w.url.trim() && !savedNames.has(w.name))}>{testing === i ? 'Sending…' : 'Test'}</button>
       <button aria-label="Remove {w.name}" onclick={() => remove(i)}>×</button>
     </div>
-    <input
+    {#if !remote}<input
       type="password"
       autocomplete="off"
       spellcheck="false"
       bind:value={w.url}
-      placeholder={!w.url && savedNames.has(w.name) && remote ? 'Saved on the PC' : 'https://discord.com/api/webhooks/…'}
+      placeholder="https://discord.com/api/webhooks/…"
       aria-label="Webhook URL for {w.name}"
-    />
+    />{:else if !savedNames.has(w.name)}<p class="muted small">Paste this channel's webhook URL on the PC running clipr.</p>{/if}
     {#if results[i]}<p class="small" class:okt={results[i].ok} class:errt={!results[i].ok}>{results[i].text}</p>{/if}
     <div class="row modes">
       {#each MODES as m (m.v)}

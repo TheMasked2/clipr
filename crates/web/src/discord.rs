@@ -6,7 +6,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{Extensions, StatusCode};
 use clipr_core::config::{Config, DiscordConfig};
-use clipr_discord::{ClipInfo, Job, webhook};
+use clipr_discord::{ClipInfo, webhook};
 use clipr_library::{Clip, Library};
 use serde::Deserialize;
 
@@ -28,8 +28,22 @@ pub(crate) fn clip_info(library: &Library, thumbs_dir: &std::path::Path, clip: &
     })
 }
 
-pub async fn posts(State(s): State<AppState>) -> Json<Vec<Job>> {
-    Json(s.discord.jobs())
+/// The jobs, newest first, without the clips' local paths (the UI links clips by id).
+pub async fn posts(State(s): State<AppState>) -> Json<Vec<serde_json::Value>> {
+    let jobs = s
+        .discord
+        .jobs()
+        .into_iter()
+        .map(|j| {
+            let mut v = serde_json::to_value(j).unwrap_or_default();
+            if let Some(clip) = v.get_mut("clip").and_then(|c| c.as_object_mut()) {
+                clip.remove("path");
+                clip.remove("thumb");
+            }
+            v
+        })
+        .collect();
+    Json(jobs)
 }
 
 #[derive(Deserialize)]
@@ -124,6 +138,8 @@ pub(crate) fn keep_urls(ext: &Extensions, now: &DiscordConfig, new: &mut Discord
             .map(|o| o.url.as_str());
         match saved {
             Some(url) if w.url.is_empty() || w.url == url => w.url = url.to_string(),
+            // A new channel without a URL is harmless: the URL is added on the PC.
+            None if w.url.is_empty() => {}
             _ => {
                 return Err(ApiError::new(
                     StatusCode::FORBIDDEN,
