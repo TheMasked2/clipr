@@ -27,6 +27,7 @@ pub struct Config {
     pub clips: ClipsConfig,
     pub games: GamesConfig,
     pub recording: RecordingConfig,
+    pub discord: DiscordConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -498,6 +499,79 @@ pub struct PrivacyConfig {
     pub crash_reports: bool,
 }
 
+/// Where clips go on Discord, and when.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiscordConfig {
+    /// Channels to post to, each through a webhook (Server Settings → Integrations → Webhooks).
+    pub webhooks: Vec<Webhook>,
+    /// Post while a game runs. Off: posts wait until the game closes, so an upload never costs frames.
+    pub post_during_game: bool,
+    /// Your Discord upload limit in MB: 10 (free), 50 (Nitro Basic) or 500 (Nitro). A bigger clip is sent
+    /// as a smaller copy that fits (the clip itself is never changed).
+    pub upload_limit_mb: u32,
+}
+
+impl Default for DiscordConfig {
+    fn default() -> Self {
+        Self {
+            webhooks: Vec::new(),
+            post_during_game: false,
+            upload_limit_mb: 10,
+        }
+    }
+}
+
+/// One Discord channel clips can be posted to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Webhook {
+    /// What the UI calls it, like `#clips`. Unique.
+    pub name: String,
+    /// The webhook URL Discord gives you (`https://discord.com/api/webhooks/...`). Anyone with it can post
+    /// to the channel, so it's never logged.
+    pub url: String,
+    /// What happens to a new clip: ask first, post it, or nothing (sharing by hand still works).
+    pub mode: PostMode,
+    /// Only clips of these games (names as clipr shows them). Empty = every game.
+    pub games: Vec<String>,
+}
+
+impl Default for Webhook {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            url: String::new(),
+            mode: PostMode::Ask,
+            games: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PostMode {
+    /// Every new clip waits for a yes in the UI.
+    #[default]
+    Ask,
+    /// Every new clip is posted (after the game, unless posting during games is on).
+    Auto,
+    /// New clips aren't posted; sharing a clip by hand still works.
+    Off,
+}
+
+impl Webhook {
+    /// Whether new clips of `game` go to this webhook at all (`Off` never does).
+    pub fn wants(&self, game: &str) -> bool {
+        self.mode != PostMode::Off
+            && (self.games.is_empty()
+                || self
+                    .games
+                    .iter()
+                    .any(|g| g.trim().eq_ignore_ascii_case(game.trim())))
+    }
+}
+
 impl Config {
     /// Reads the file, or returns the defaults if it doesn't exist yet.
     pub fn load(path: &Path) -> Result<Self> {
@@ -645,6 +719,28 @@ mod tests {
 
         fs::write(&path, "[audio]\nnoise_suppression = true\n").unwrap();
         assert!(Config::load(&path).unwrap().audio.filters.is_empty());
+    }
+
+    #[test]
+    fn webhooks_match_games_and_modes() {
+        let mut w = Webhook {
+            name: "#clips".into(),
+            url: "https://discord.com/api/webhooks/1/x".into(),
+            mode: PostMode::Auto,
+            games: vec![],
+        };
+        assert!(w.wants("VALORANT"));
+        w.games = vec!["valorant ".into()];
+        assert!(w.wants("VALORANT") && !w.wants("Minecraft"));
+        w.mode = PostMode::Off;
+        assert!(!w.wants("VALORANT"));
+        let text = toml::to_string(&DiscordConfig {
+            webhooks: vec![w],
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(text.contains("mode = \"off\""), "{text}");
+        assert_eq!(Config::default().discord.upload_limit_mb, 10);
     }
 
     #[test]

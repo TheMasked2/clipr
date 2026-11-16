@@ -79,6 +79,7 @@ clipr-encode = { path = "crates/encode" }
 clipr-games = { path = "crates/games" }
 clipr-library = { path = "crates/library" }
 clipr-mux = { path = "crates/mux" }
+clipr-discord = { path = "crates/discord" }
 tower-http = { version = "0.6", features = ["fs"] }
 ureq = { version = "3", features = ["json"] }
 trash = "5"

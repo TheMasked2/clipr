@@ -5,6 +5,7 @@
   import { fmtBytes, fmtTime } from '../lib/format';
   import ClipCard from '../lib/ClipCard.svelte';
   import Wizard from '../lib/Wizard.svelte';
+  import DiscordPosts from '../lib/DiscordPosts.svelte';
 
   let clips = $state<api.Clip[]>([]);
   let disk = $state<api.Disk | null>(null);
@@ -98,6 +99,8 @@
     </div>
   </div>
 </section>
+
+<DiscordPosts />
 
 <div class="row head">
   <h2>Newest clips</h2>

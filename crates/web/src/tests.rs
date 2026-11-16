@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Request, header};
+use clipr_core::config::DiscordConfig;
 use clipr_core::status::{Activity, RecState};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
@@ -34,6 +35,12 @@ fn env() -> Env {
         control: control.clone(),
         bus: Bus::new(),
         thumbs_dir: library.thumbs_dir().to_path_buf(),
+        discord: clipr_discord::Poster::start(
+            tmp.path().join("discord.json"),
+            tmp.path().join("discord-tmp"),
+            DiscordConfig::default,
+            || false,
+        ),
         library: Arc::new(library),
     };
     Env {
@@ -874,4 +881,155 @@ async fn serve_runs_end_to_end_over_a_socket() {
         .unwrap()
         .unwrap()
         .unwrap();
+}
+
+const HOOK: &str =
+    "https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz_-0123456789";
+
+#[tokio::test]
+async fn discord_settings_are_checked_and_urls_stay_on_the_pc() {
+    let env = env();
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
+    let app = router(env.state.clone());
+    let local_put = |config: serde_json::Value| {
+        let app = app.clone();
+        async move {
+            call("PUT", "/api/config")
+                .body(&config.to_string())
+                .send(&app)
+                .await
+        }
+    };
+    let mut config = serde_json::to_value(env.control.config()).unwrap();
+    config["discord"]["webhooks"] = serde_json::json!([{ "name": " #clips ", "url": HOOK, "mode": "auto" }]);
+    let (code, _, body) = local_put(config.clone()).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(env.control.config().discord.webhooks[0].name, "#clips");
+    assert_eq!(
+        json(&body)["discord"]["webhooks"][0]["url"],
+        HOOK,
+        "the PC sees its URLs"
+    );
+
+    for bad in [
+        serde_json::json!([{ "name": "a", "url": "https://evil.example/api/webhooks/1/abcdefghijklmnopqrstuvwxyz" }]),
+        serde_json::json!([{ "name": "a", "url": HOOK }, { "name": "A", "url": HOOK }]),
+        serde_json::json!([{ "name": "", "url": HOOK }]),
+    ] {
+        let mut c = config.clone();
+        c["discord"]["webhooks"] = bad;
+        let (code, _, body) = local_put(c).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
+    }
+    let mut c = config.clone();
+    c["discord"]["upload_limit_mb"] = 0.into();
+    assert_eq!(local_put(c).await.0, StatusCode::BAD_REQUEST);
+
+    // Another device with the PIN: no URLs out, none in.
+    let lan = "192.168.1.50";
+    let (_, headers, _) = call("POST", "/api/login")
+        .peer(lan)
+        .header("host", "192.168.1.5:7845")
+        .body(r#"{"pin":"123456"}"#)
+        .send(&app)
+        .await;
+    let cookie = headers[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let lan_call = |method: &'static str, uri: &'static str, body: Option<String>| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        async move {
+            let c = call(method, uri)
+                .peer(lan)
+                .header("host", "192.168.1.5:7845")
+                .header("cookie", &cookie);
+            match body {
+                Some(b) => c.body(&b).send(&app).await,
+                None => c.send(&app).await,
+            }
+        }
+    };
+    let (code, _, body) = lan_call("GET", "/api/config", None).await;
+    assert_eq!(code, StatusCode::OK);
+    let mut seen = json(&body);
+    assert_eq!(seen["discord"]["webhooks"][0]["url"], "");
+    assert!(!body.contains("abcdefghijklmnop"), "{body}");
+
+    seen["discord"]["webhooks"][0]["mode"] = "ask".into();
+    let (code, _, body) = lan_call("PUT", "/api/config", Some(seen.to_string())).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(
+        env.control.config().discord.webhooks[0].url,
+        HOOK,
+        "a blank URL keeps the saved one"
+    );
+    assert_eq!(json(&body)["discord"]["webhooks"][0]["url"], "");
+
+    let mut changed = seen.clone();
+    changed["discord"]["webhooks"][0]["url"] = HOOK.replace("123456789012345678", "999").into();
+    assert_eq!(
+        lan_call("PUT", "/api/config", Some(changed.to_string())).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let mut added = seen.clone();
+    added["discord"]["webhooks"] =
+        serde_json::json!([seen["discord"]["webhooks"][0], { "name": "new", "url": "" }]);
+    assert_eq!(
+        lan_call("PUT", "/api/config", Some(added.to_string())).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(env.control.config().discord.webhooks.len(), 1);
+}
+
+#[tokio::test]
+async fn discord_queue_endpoints() {
+    let env = env();
+    put(&env, "Game/a.mp4", 1000);
+    let app = router(env.state.clone());
+    let (code, body) = get_body(app.clone(), "/api/clips").await;
+    assert_eq!(code, StatusCode::OK);
+    let id = json(&body)[0]["id"].as_str().unwrap().to_string();
+
+    let (code, body) = get_body(app.clone(), "/api/discord/posts").await;
+    assert_eq!((code, body.as_str()), (StatusCode::OK, "[]"));
+
+    let share = |b: String| {
+        let app = app.clone();
+        async move { call("POST", "/api/discord/share").body(&b).send(&app).await }
+    };
+    let (code, _, body) = share(serde_json::json!({ "id": "nope", "webhook": "#clips" }).to_string()).await;
+    assert_eq!(code, StatusCode::NOT_FOUND, "{body}");
+    // This server's queue has no channels set up.
+    let (code, _, body) = share(serde_json::json!({ "id": id, "webhook": "#clips" }).to_string()).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        json(&body)["error"].as_str().unwrap().contains("#clips"),
+        "{body}"
+    );
+
+    let (code, _, _) = call("POST", "/api/discord/answer")
+        .body(r#"{"job":7,"yes":true}"#)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    // A URL that isn't Discord's is refused before anything is sent.
+    let (code, _, body) = call("POST", "/api/discord/test")
+        .body(r#"{"url":"https://example.com/hook"}"#)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
+    let (code, _, _) = call("POST", "/api/discord/test")
+        .body(r#"{"name":"missing"}"#)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
 }

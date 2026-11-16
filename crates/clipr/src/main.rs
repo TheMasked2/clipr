@@ -119,6 +119,18 @@ fn run() -> Result<()> {
             control,
             bus: bus.clone(),
             thumbs_dir: library.thumbs_dir().to_path_buf(),
+            discord: clipr_discord::Poster::start(
+                paths.data_dir.join("discord-queue.json"),
+                paths.data_dir.join("discord-tmp"),
+                {
+                    let config = shared_config.clone();
+                    move || config.lock().unwrap().discord.clone()
+                },
+                {
+                    let status = status.clone();
+                    move || status.activity().game.is_some()
+                },
+            ),
             library,
         },
     ));

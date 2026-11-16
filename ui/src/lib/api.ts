@@ -99,6 +99,35 @@ export interface Config {
     profiles: GameProfile[];
   };
   recording: { max_minutes: number };
+  discord: DiscordConfig;
+}
+
+export type PostMode = 'ask' | 'auto' | 'off';
+
+export interface Webhook {
+  name: string;
+  /** Blank on other devices: only the PC running clipr sees webhook URLs. */
+  url: string;
+  mode: PostMode;
+  games: string[];
+}
+
+export interface DiscordConfig {
+  webhooks: Webhook[];
+  post_during_game: boolean;
+  upload_limit_mb: number;
+}
+
+export type JobState = 'ask' | 'queued' | 'posting' | 'posted' | 'skipped' | 'failed';
+
+export interface Job {
+  id: number;
+  clip: { id: string; title: string; game: string; duration_secs: number | null; size_bytes: number; kind: ClipKind };
+  webhook: string;
+  state: JobState;
+  now: boolean;
+  error: string | null;
+  created: number;
 }
 
 export interface SystemInfo {
@@ -124,7 +153,8 @@ export type ServerEvent =
   | { type: 'clip_saved'; clip: Clip }
   | { type: 'clip_failed'; message: string }
   | { type: 'library' }
-  | { type: 'levels'; levels: Level[] };
+  | { type: 'levels'; levels: Level[] }
+  | { type: 'discord' };
 
 export class ApiError extends Error {
   status: number;
@@ -219,6 +249,14 @@ export const saveClip = (seconds?: number) =>
 export const setBuffer = (on: boolean) => request<void>('POST', '/api/buffer', { on });
 export const setRecording = (on: boolean) => request<void>('POST', '/api/recording', { on });
 export const markMoment = () => request<void>('POST', '/api/mark');
+export const getPosts = () => request<Job[]>('GET', '/api/discord/posts');
+export const shareClip = (id: string, webhook: string) =>
+  request<{ job: number }>('POST', '/api/discord/share', { id, webhook });
+export const answerPost = (job: number, yes: boolean) =>
+  request<void>('POST', '/api/discord/answer', { job, yes });
+/** Sends a test message: a URL typed in, or a saved webhook by name. */
+export const testWebhook = (w: { url?: string; name?: string }) =>
+  request<void>('POST', '/api/discord/test', w);
 export const login = (pin: string) => request<void>('POST', '/api/login', { pin }, true);
 
 export interface Connection {
