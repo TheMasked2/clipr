@@ -191,7 +191,13 @@ fn check_audio(a: &AudioConfig) -> Result<()> {
         clipr_core::hotkey::parse(&ptt).map_err(|e| anyhow::anyhow!("Push-to-talk key: {e}"))?;
     }
     // Filters of an app that was removed are kept (and unused), so adding it back brings them back.
-    for filters in a.filters.values() {
+    if a.filters.len() > 32 {
+        bail!("Too many sources with filters");
+    }
+    for (source, filters) in &a.filters {
+        if source.trim().is_empty() || source.len() > 100 || source.trim() != source {
+            bail!("Filters are set for a source with no proper name: {source:?}");
+        }
         if filters.len() > 16 {
             bail!("A source can have at most 16 filters");
         }

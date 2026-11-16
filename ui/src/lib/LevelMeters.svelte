@@ -8,9 +8,11 @@
   const CLIP_HOLD_MS = 2000;
   const pct = (db: number) => Math.round((Math.min(0, Math.max(FLOOR, db)) - FLOOR) * (100 / -FLOOR));
 
-  // Levels arrive 10 times a second, so this re-evaluates often enough to let the badge expire.
+  // Updated on every levels message (10 a second), which also lets the badge expire. When levels stop the
+  // store clears them, and the meters (with their badges) go away.
+  let clipping = $state<Set<string>>(new Set());
   const lastClip = new Map<string, number>();
-  const clipping = $derived.by(() => {
+  $effect(() => {
     const now = Date.now();
     const on = new Set<string>();
     for (const l of app.levels) {
@@ -18,7 +20,7 @@
       const at = lastClip.get(l.name);
       if (at !== undefined && now - at < CLIP_HOLD_MS) on.add(l.name);
     }
-    return on;
+    clipping = on;
   });
 </script>
 

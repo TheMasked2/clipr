@@ -220,6 +220,7 @@ fn build_sources(config: &AudioConfig, plan: &Plan, levels: &Arc<Levels>) -> (Ve
             shift_100ns: ms(offset_ms) - delay,
             chain: None,
             ptt: None,
+            last_end: None,
         };
         if mic {
             processing.ptt = match ptt_vk(&config.push_to_talk) {

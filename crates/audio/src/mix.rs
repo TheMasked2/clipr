@@ -13,7 +13,7 @@ pub const HNS_PER_SEC: i64 = 10_000_000;
 
 /// A source whose data lands more than this many frames (20 ms) from where its QPC says it should be is
 /// moved to the QPC position instead of being appended seamlessly.
-const RESYNC_FRAMES: i64 = (RATE as i64) / 50;
+pub(crate) const RESYNC_FRAMES: i64 = (RATE as i64) / 50;
 
 /// The timeline frame (rounded) that a time on the shared clock falls on, given the timeline start.
 pub fn frame_at(start_100ns: i64, time_100ns: i64) -> i64 {

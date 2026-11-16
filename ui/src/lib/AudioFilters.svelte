@@ -58,7 +58,7 @@
     {
       kind: 'limiter',
       name: 'Limiter',
-      text: 'Never lets a peak past the ceiling, so shouting or a loud explosion does not distort. Put it last.',
+      text: 'Never lets a peak past the ceiling, so shouting or a loud explosion does not distort. Put it last, and keep the source volume at 100 % or lower: the volume applies after the filters.',
       params: [
         { key: 'ceiling_db', label: 'Ceiling', min: -30, max: 0, step: 1, unit: 'dB' },
         { key: 'release_ms', label: 'Release', min: 1, max: 5000, step: 10, unit: 'ms' },
@@ -92,6 +92,8 @@
   }
   function remove(i: number) {
     audio.filters[source]?.splice(i, 1);
+    // No empty list left behind: the form stays unchanged after adding and removing a filter.
+    if (audio.filters[source]?.length === 0) delete audio.filters[source];
   }
   // Params are read and written by name; the kind decides which exist.
   const get = (f: AudioFilter, key: string) => (f as unknown as Record<string, number>)[key];

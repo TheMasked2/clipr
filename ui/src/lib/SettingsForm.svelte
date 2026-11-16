@@ -80,10 +80,12 @@
   );
   const addProfile = () => draft.games.profiles.push({ game: '', fps: null, height: null, bitrate_kbps: null });
   // The sources that can have filters: their keys match the server's (`system`, `mic`, the app's name).
+  // Apps are only recorded with system audio off or separate tracks on (otherwise they're in the mix).
+  const appsRecorded = $derived(!draft.audio.system || draft.audio.separate_tracks);
   const filterSources = $derived([
     ...(draft.audio.system ? [{ key: 'system', label: 'System audio' }] : []),
     ...(draft.audio.mic ? [{ key: 'mic', label: 'Microphone' }] : []),
-    ...draft.audio.apps.map((a) => ({ key: a.trim().toLowerCase(), label: a.trim() })),
+    ...(appsRecorded ? draft.audio.apps.map((a) => ({ key: a.trim().toLowerCase(), label: a.trim() })) : []),
   ]);
   const ramMb = $derived(Math.round((draft.video.bitrate_kbps * draft.replay.buffer_secs) / 8 / 1000));
 
@@ -221,6 +223,9 @@
     {:else}
       <p class="muted small">Turn on a source above to give it filters.</p>
     {/each}
+    {#if draft.audio.apps.length && !appsRecorded}
+      <p class="muted small">The apps above are part of system audio right now, so they get its filters. Turn on Separate tracks to give each app its own.</p>
+    {/if}
     <h3 class="sub">Quality</h3>
     <Field title="Audio quality (AAC)" hint="AAC bitrate in kbit/s per track. 160 is plenty for game audio.">
       <select bind:value={draft.audio.bitrate_kbps}>{#each [96, 128, 160, 192] as b (b)}<option value={b}>{b} kbps</option>{/each}</select>

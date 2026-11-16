@@ -117,7 +117,9 @@ pub struct AudioConfig {
     /// can turn voice chat down later in an editor.
     pub separate_tracks: bool,
     /// Filters per source, applied in order, like OBS: the key is `system`, `mic`, or an app's exe name
-    /// (`discord.exe`). Every source starts with none.
+    /// (`discord.exe`). Every source starts with none. An entry clipr can't read (an unknown kind from a newer
+    /// version, a missing value) is skipped with a warning instead of failing the whole file.
+    #[serde(deserialize_with = "lenient_filters")]
     pub filters: BTreeMap<String, Vec<AudioFilter>>,
     /// Record the microphone only while this key is held (your voice-chat push-to-talk key, like `V` or
     /// `Mouse4`). Empty = always on.
@@ -159,6 +161,34 @@ pub struct AudioFilter {
 
 fn yes() -> bool {
     true
+}
+
+fn lenient_filters<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeMap<String, Vec<AudioFilter>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Entry {
+        Good(AudioFilter),
+        Bad(serde::de::IgnoredAny),
+    }
+    let raw = BTreeMap::<String, Vec<Entry>>::deserialize(d)?;
+    Ok(raw
+        .into_iter()
+        .map(|(source, entries)| {
+            let good = entries
+                .into_iter()
+                .filter_map(|e| match e {
+                    Entry::Good(f) => Some(f),
+                    Entry::Bad(_) => {
+                        tracing::warn!("skipping an audio filter of {source} that clipr can't read");
+                        None
+                    }
+                })
+                .collect();
+            (source, good)
+        })
+        .collect())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -570,6 +600,24 @@ mod tests {
         let json = serde_json::to_value(&config.audio.filters).unwrap();
         assert_eq!(json["mic"][0]["kind"], "noise_suppression");
         assert_eq!(json["mic"][1]["enabled"], false);
+    }
+
+    #[test]
+    fn a_bad_filter_is_skipped_not_the_whole_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = "[web]\nport = 9000\n\n[[audio.filters.mic]]\nkind = \"gain\"\ndb = -3\n\n\
+                    [[audio.filters.mic]]\nkind = \"reverb\"\nroom = 5\n\n[[audio.filters.mic]]\nkind = \"limiter\"\n";
+        fs::write(&path, text).unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.web.port, 9000, "the rest of the file is kept");
+        let mic = &config.audio.filters[MIC_SOURCE];
+        assert_eq!(
+            mic.len(),
+            1,
+            "the unknown kind and the limiter with missing values are skipped"
+        );
+        assert_eq!(mic[0].kind, FilterKind::Gain { db: -3 });
     }
 
     #[test]

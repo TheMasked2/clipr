@@ -321,6 +321,8 @@ pub fn ptt_vk(name: &str) -> anyhow::Result<Option<i32>> {
 
 /// One source's processing: its enabled filters in order, then the push-to-talk fade.
 pub struct SourceChain {
+    /// The enabled filters' settings, to rebuild them after a gap.
+    kinds: Vec<FilterKind>,
     filters: Vec<Box<dyn Filter>>,
     /// Average to mono before filtering (the microphone).
     mono: bool,
@@ -331,12 +333,16 @@ pub struct SourceChain {
 
 impl SourceChain {
     pub fn new(filters: &[AudioFilter], mono: bool) -> Self {
+        let kinds: Vec<FilterKind> = filters
+            .iter()
+            .filter(|f| f.enabled)
+            // Noise suppression at 0 % changes nothing but would still delay the source by 20 ms.
+            .filter(|f| !matches!(f.kind, FilterKind::NoiseSuppression { strength: 0 }))
+            .map(|f| f.kind.clone())
+            .collect();
         Self {
-            filters: filters
-                .iter()
-                .filter(|f| f.enabled)
-                .map(|f| build(&f.kind))
-                .collect(),
+            filters: kinds.iter().map(build).collect(),
+            kinds,
             mono,
             ptt_gain: 1.0,
             buf: Vec::new(),
@@ -351,6 +357,14 @@ impl SourceChain {
     /// How many frames later than its input the output is (noise suppression works in 10 ms frames).
     pub fn delay_frames(&self) -> usize {
         self.filters.iter().map(|f| f.delay_frames()).sum()
+    }
+
+    /// Pushes out what the filters still hold (the last [`SourceChain::delay_frames`] frames of the sound so
+    /// far), appending them to `out` as stereo, then starts the filters fresh. For a gap in the input.
+    pub fn flush(&mut self, open: bool, out: &mut Vec<f32>) {
+        let zeros = vec![0.0f32; self.delay_frames() * 2];
+        self.process(&zeros, open, out);
+        self.filters = self.kinds.iter().map(build).collect();
     }
 
     /// Runs interleaved stereo `input` through the chain, appending the same number of stereo frames to
@@ -669,6 +683,30 @@ mod tests {
                 "strength {strength}: onset at {first}, want ~{want}"
             );
         }
+    }
+
+    #[test]
+    fn flush_returns_the_held_tail_then_starts_fresh() {
+        let mut chain = SourceChain::new(&[on(defaults("noise_suppression"))], false);
+        let t = tone(0.3, 4800);
+        let input: Vec<f32> = t.iter().flat_map(|&s| [s, s]).collect();
+        let mut out = Vec::new();
+        chain.process(&input, true, &mut out);
+        let mut tail = Vec::new();
+        chain.flush(true, &mut tail);
+        assert_eq!(tail.len(), 960 * 2, "exactly the delay");
+        assert!(rms(&tail) > 0.05, "the end of the tone, not silence");
+        // After the flush the chain starts from silence again: no old sound comes out.
+        let mut next = Vec::new();
+        chain.process(&vec![0.0; 960 * 2], true, &mut next);
+        assert!(peak(&next) < 1e-3, "{}", peak(&next));
+    }
+
+    #[test]
+    fn zero_strength_suppression_is_skipped() {
+        let chain = SourceChain::new(&[on(FilterKind::NoiseSuppression { strength: 0 })], false);
+        assert!(chain.is_empty());
+        assert_eq!(chain.delay_frames(), 0);
     }
 
     #[test]
