@@ -163,9 +163,8 @@ begin
        mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES) then
   begin
     RemoveOwnFiles(Settings, ['config.toml', 'config.toml.tmp', 'config.toml.broken'], []);
-    RemoveOwnFiles(Data,
-      ['library.db', 'library.db-wal', 'library.db-shm', 'games.json', 'games.json.tmp', 'clipr.port',
-       'discord-queue.json', 'discord-queue.json.tmp'],
-      ['logs', 'thumbs', 'discord-tmp', 'update']);
+    { No line here may start with '[': Inno reads that as a section header, even in code. }
+    RemoveOwnFiles(Data, ['library.db', 'library.db-wal', 'library.db-shm', 'games.json', 'games.json.tmp',
+      'clipr.port', 'discord-queue.json', 'discord-queue.json.tmp'], ['logs', 'thumbs', 'discord-tmp', 'update']);
   end;
 end;
