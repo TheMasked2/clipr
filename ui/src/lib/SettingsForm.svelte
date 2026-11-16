@@ -13,6 +13,7 @@
   import HotkeyInput from './HotkeyInput.svelte';
   import VideoSimple from './VideoSimple.svelte';
   import LevelMeters from './LevelMeters.svelte';
+  import AudioFilters from './AudioFilters.svelte';
 
   let { initial }: { initial: Config } = $props();
 
@@ -78,6 +79,12 @@
     }),
   );
   const addProfile = () => draft.games.profiles.push({ game: '', fps: null, height: null, bitrate_kbps: null });
+  // The sources that can have filters: their keys match the server's (`system`, `mic`, the app's name).
+  const filterSources = $derived([
+    ...(draft.audio.system ? [{ key: 'system', label: 'System audio' }] : []),
+    ...(draft.audio.mic ? [{ key: 'mic', label: 'Microphone' }] : []),
+    ...draft.audio.apps.map((a) => ({ key: a.trim().toLowerCase(), label: a.trim() })),
+  ]);
   const ramMb = $derived(Math.round((draft.video.bitrate_kbps * draft.replay.buffer_secs) / 8 / 1000));
 
   const codecs: { v: Config['video']['codec']; name: string; text: string; enc: string }[] = [
@@ -183,16 +190,39 @@
     <Field title="Buffer length (seconds)" hint={`How much the buffer keeps in memory; "save long clip" saves all of it. Estimated RAM use at your bitrate: about ${ramMb} MB.`}><input type="number" min="1" max="3600" bind:value={draft.replay.buffer_secs} /></Field>
     <Field title="Sound on save" hint="Play a short sound when a clip is saved."><Toggle bind:checked={draft.replay.sound_on_save} label="Sound on save" /></Field>
   {:else if tab === 'Audio'}
-    <Field title="Live levels" hint="What each source is picking up right now, from -60 to 0 dB. Shows while the buffer runs; save to apply changes." stacked><LevelMeters /></Field>
+    <Field title="Live levels" hint="What each source picks up right now, before its filters, from -60 to 0 dB. CLIP means the source is already distorting before clipr gets it: lower its level in Windows. Shows while the buffer runs; save to apply changes." stacked><LevelMeters /></Field>
+    <h3 class="sub">Sources</h3>
     <Field title="System audio" hint="Record what you hear (game, voice chat, music): the default output device."><Toggle bind:checked={draft.audio.system} label="System audio" /></Field>
-    <Field title="Microphone" hint="Record your default microphone, mixed into the same track."><Toggle bind:checked={draft.audio.mic} label="Microphone" /></Field>
-    <Field title="Microphone volume" hint="0–200 %. 100 % leaves it unchanged.">
+    <Field title="System audio volume" hint="0–200 %. 100 % leaves it unchanged.">
+      <div class="vol">
+        <input type="range" min="0" max="200" step="5" bind:value={draft.audio.system_volume} disabled={!draft.audio.system} aria-label="System audio volume" />
+        <span class="pctv">{draft.audio.system_volume}%</span>
+      </div>
+    </Field>
+    <Field title="Microphone" hint="Record your default microphone."><Toggle bind:checked={draft.audio.mic} label="Microphone" /></Field>
+    <Field title="Microphone volume" hint="0–200 %, applied after the mic's filters. 100 % leaves it unchanged.">
       <div class="vol">
         <input type="range" min="0" max="200" step="5" bind:value={draft.audio.mic_volume} disabled={!draft.audio.mic} aria-label="Microphone volume" />
         <span class="pctv">{draft.audio.mic_volume}%</span>
       </div>
     </Field>
-    <Field title="Audio quality (AAC)" hint="AAC bitrate in kbit/s. 160 is plenty for game audio.">
+    <Field title="Push-to-talk key" hint="Record the mic only while this key is held: your voice chat's push-to-talk key, like V or Mouse4. Empty = always on.">
+      <input type="text" bind:value={draft.audio.push_to_talk} placeholder="V, Mouse4, Mouse5…" disabled={!draft.audio.mic} aria-label="Push-to-talk key" />
+    </Field>
+    <Field title="Push-to-talk release (ms)" hint="Keep the mic open this long after you let go, so the end of a word isn't cut off."><input type="number" min="0" max="5000" step="10" bind:value={draft.audio.ptt_release_ms} disabled={!draft.audio.mic || !draft.audio.push_to_talk.trim()} /></Field>
+    <Field title="Apps on their own track" hint="Record these programs separately (up to 4), like discord.exe, so you can mute voice chat later in an editor. With system audio on, this needs Separate tracks (the app is already in the mix). Needs Windows 10 2004 or newer." stacked><ListEditor bind:items={draft.audio.apps} placeholder="discord.exe" /></Field>
+    <Field title="Separate tracks" hint="Also write every source on its own track. Track 1 is always the full mix, so clips still play normally."><Toggle bind:checked={draft.audio.separate_tracks} label="Separate tracks" /></Field>
+    <Field title="Microphone offset (ms)" hint="Shift the mic in time if it's out of sync with the video. Positive = later."><input type="number" min="-5000" max="5000" step="5" bind:value={draft.audio.mic_offset_ms} /></Field>
+    <Field title="System audio offset (ms)" hint="Shift system audio in time. Positive = later."><input type="number" min="-5000" max="5000" step="5" bind:value={draft.audio.system_offset_ms} /></Field>
+    <h3 class="sub">Filters</h3>
+    <p class="muted small note">Like OBS: each source starts with no filters. Add the ones you want; they run top to bottom.</p>
+    {#each filterSources as src (src.key)}
+      <Field title={src.label} stacked><AudioFilters audio={draft.audio} source={src.key} label={src.label} /></Field>
+    {:else}
+      <p class="muted small">Turn on a source above to give it filters.</p>
+    {/each}
+    <h3 class="sub">Quality</h3>
+    <Field title="Audio quality (AAC)" hint="AAC bitrate in kbit/s per track. 160 is plenty for game audio.">
       <select bind:value={draft.audio.bitrate_kbps}>{#each [96, 128, 160, 192] as b (b)}<option value={b}>{b} kbps</option>{/each}</select>
     </Field>
   {:else if tab === 'Hotkeys'}
@@ -277,6 +307,7 @@
   section { padding-top: 0.5rem; padding-bottom: 0.5rem; }
   .seg { display: flex; gap: 0.4rem; padding: 0.8rem 0 0.2rem; }
   .note { margin: 0.8rem 0 0; }
+  .sub { margin: 1.4rem 0 0.2rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
   .profiles { display: flex; flex-direction: column; gap: 0.5rem; width: 100%; }
   .profile { display: flex; flex-wrap: wrap; gap: 0.4rem; }
   .profile input[type='number'] { width: 6.5rem; }

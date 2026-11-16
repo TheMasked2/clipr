@@ -9,7 +9,7 @@ use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{Extensions, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use clipr_core::config::Config;
+use clipr_core::config::{AudioConfig, Config, FilterKind};
 use clipr_library::{Clip, ClipFilter, LibraryError};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -149,6 +149,98 @@ fn norm_path(p: &str) -> String {
     p.trim_end_matches('\\').to_lowercase()
 }
 
+/// The audio settings beyond the volume: sources, timing, push-to-talk and every filter.
+fn check_audio(a: &AudioConfig) -> Result<()> {
+    let int = |name: &str, v: i64, lo: i64, hi: i64| -> Result<()> {
+        if (lo..=hi).contains(&v) {
+            Ok(())
+        } else {
+            bail!("{name} must be between {lo} and {hi}")
+        }
+    };
+    int("System audio volume", a.system_volume.into(), 0, 200)?;
+    int("Microphone offset", a.mic_offset_ms.into(), -5000, 5000)?;
+    int("System audio offset", a.system_offset_ms.into(), -5000, 5000)?;
+    int("Push-to-talk release", a.ptt_release_ms.into(), 0, 5000)?;
+    if a.apps.len() > 4 {
+        bail!("Record at most 4 apps on their own tracks");
+    }
+    for app in &a.apps {
+        let app = app.trim();
+        if app.is_empty() || app.contains(['/', '\\', ':']) {
+            bail!("An app must be a program name like discord.exe, not {app:?}");
+        }
+    }
+    let ptt = a
+        .push_to_talk
+        .rsplit('+')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if ![
+        "mouse4",
+        "mouse5",
+        "mousemiddle",
+        "mouse3",
+        "xbutton1",
+        "xbutton2",
+    ]
+    .contains(&ptt.as_str())
+    {
+        clipr_core::hotkey::parse(&ptt).map_err(|e| anyhow::anyhow!("Push-to-talk key: {e}"))?;
+    }
+    // Filters of an app that was removed are kept (and unused), so adding it back brings them back.
+    for filters in a.filters.values() {
+        if filters.len() > 16 {
+            bail!("A source can have at most 16 filters");
+        }
+        for f in filters {
+            match f.kind {
+                FilterKind::NoiseSuppression { strength } => {
+                    int("Noise suppression strength", strength.into(), 0, 100)?
+                }
+                FilterKind::NoiseGate {
+                    open_db,
+                    close_db,
+                    attack_ms,
+                    hold_ms,
+                    release_ms,
+                } => {
+                    int("Gate open level", open_db.into(), -96, 0)?;
+                    int("Gate close level", close_db.into(), -96, 0)?;
+                    // A close level above the open level is treated as equal to it (see the gate).
+                    int("Gate attack", attack_ms.into(), 1, 500)?;
+                    int("Gate hold", hold_ms.into(), 0, 5000)?;
+                    int("Gate release", release_ms.into(), 1, 5000)?;
+                }
+                FilterKind::Compressor {
+                    threshold_db,
+                    ratio,
+                    attack_ms,
+                    release_ms,
+                    makeup_db,
+                } => {
+                    int("Compressor threshold", threshold_db.into(), -60, 0)?;
+                    int("Compressor ratio", ratio.into(), 1, 20)?;
+                    int("Compressor attack", attack_ms.into(), 1, 500)?;
+                    int("Compressor release", release_ms.into(), 1, 5000)?;
+                    int("Compressor output gain", makeup_db.into(), -30, 30)?;
+                }
+                FilterKind::Limiter {
+                    ceiling_db,
+                    release_ms,
+                } => {
+                    int("Limiter ceiling", ceiling_db.into(), -30, 0)?;
+                    int("Limiter release", release_ms.into(), 1, 5000)?;
+                }
+                FilterKind::Gain { db } => int("Gain", db.into(), -30, 30)?,
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The clips folder may be empty (the default) or an absolute path that isn't a drive root or somewhere
 /// Windows or the user's profile lives.
 fn check_clips_folder(folder: &str) -> Result<()> {
@@ -231,6 +323,7 @@ pub fn validate_config(c: &Config) -> Result<()> {
         }
     }
     in_range("Microphone volume", c.audio.mic_volume, 0, 200)?;
+    check_audio(&c.audio)?;
     if ![96, 128, 160, 192].contains(&c.audio.bitrate_kbps) {
         bail!("Audio bitrate must be 96, 128, 160 or 192");
     }
@@ -637,6 +730,56 @@ mod tests {
         assert!(cfg(|c| c.video.height = 100).is_err());
         assert!(cfg(|c| c.video.height = 4321).is_err());
         assert!(cfg(|c| c.audio.mic_volume = 201).is_err());
+        assert!(cfg(|c| c.audio.apps.push(r"C:\x\discord.exe".into())).is_err());
+        assert!(cfg(|c| c.audio.push_to_talk = "Banana".into()).is_err());
+        assert!(cfg(|c| c.audio.push_to_talk = "Mouse4".into()).is_ok());
+        let filter = |kind| clipr_core::config::AudioFilter { enabled: true, kind };
+        let gate = |open_db, close_db| FilterKind::NoiseGate {
+            open_db,
+            close_db,
+            attack_ms: 10,
+            hold_ms: 150,
+            release_ms: 100,
+        };
+        assert!(
+            cfg(|c| {
+                c.audio.filters.insert("mic".into(), vec![filter(gate(-30, -40))]);
+            })
+            .is_ok()
+        );
+        assert!(
+            cfg(|c| {
+                c.audio.filters.insert("mic".into(), vec![filter(gate(-40, -30))]);
+            })
+            .is_ok(),
+            "the gate treats it as equal to the open level"
+        );
+        assert!(
+            cfg(|c| {
+                c.audio
+                    .filters
+                    .insert("mic".into(), vec![filter(FilterKind::Gain { db: 31 })]);
+            })
+            .is_err()
+        );
+        assert!(
+            cfg(|c| {
+                c.audio
+                    .filters
+                    .insert("spotify.exe".into(), vec![filter(FilterKind::Gain { db: 0 })]);
+            })
+            .is_ok(),
+            "a removed app's filters are kept"
+        );
+        assert!(
+            cfg(|c| {
+                c.audio.apps.push("Discord.exe".into());
+                c.audio
+                    .filters
+                    .insert("discord.exe".into(), vec![filter(FilterKind::Gain { db: -6 })]);
+            })
+            .is_ok()
+        );
         assert!(cfg(|c| c.audio.bitrate_kbps = 100).is_err());
         assert!(cfg(|c| c.audio.bitrate_kbps = 192).is_ok());
         assert!(cfg(|c| c.web.lan_pin = "12ab".into()).is_err());
