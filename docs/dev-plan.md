@@ -179,7 +179,9 @@ A capture restart (new monitor or video settings) finishes the file and continue
 - [x] Every audio setting on the Audio page (volumes, push-to-talk, apps, separate tracks, offsets)
 - [x] CLIP badge on the level meters when a source's raw input reaches full scale
 - [ ] Live before/after preview of a source's filters on the Audio page (listen back, or a post-filter meter)
-- [ ] Inno Setup installer + portable zip, start with Windows (optional)
+- [x] Inno Setup installer (`installer/clipr.iss`: per user by default, Start menu, optional desktop icon,
+      asks to quit a running clipr, uninstall keeps clips and asks about settings) + portable zip, both built
+      by `scripts/package.ps1` and in CI. Start with Windows is a setting (Phase 2)
 - [ ] Opt-in updater (GitHub releases, only applies when no game runs and nothing is recording)
 - [ ] Opt-in crash reports
 - [ ] User docs: setup, Discord bot tutorial, every setting explained
