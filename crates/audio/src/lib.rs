@@ -9,8 +9,7 @@
 //! fills gaps (loopback delivers nothing while nothing plays), and mixed audio is encoded up to ~30 ms
 //! before now, so a clip saved at any time has audio up to near its end.
 //!
-//! The microphone goes through a chain (noise suppression, gate, compressor, push-to-talk, volume), see
-//! [`chain`]. Devices that fail to open or disappear are retried, and the default device is followed when
+//! Every source runs its own filter chain (the user's filters, like OBS; none by default), see [`chain`]. Devices that fail to open or disappear are retried, and the default device is followed when
 //! it changes; the timeline carries on with silence meanwhile.
 
 mod aac;
@@ -27,14 +26,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clipr_core::clock::now_100ns;
-use clipr_core::config::AudioConfig;
+use clipr_core::config::{AudioConfig, MIC_SOURCE, SYSTEM_SOURCE};
 use windows::Win32::Media::MediaFoundation::{
     IMFMediaType, MF_VERSION, MFSTARTUP_FULL, MFShutdown, MFStartup,
 };
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
 
 use crate::aac::AacEncoder;
-use crate::chain::{ChainSettings, MicChain, Ptt, ptt_vk};
+use crate::chain::{Ptt, SourceChain, ptt_vk};
 use crate::levels::Levels;
 use crate::mix::{HNS_PER_SEC, RATE, Timeline, time_at};
 use crate::plan::{Plan, SourceKind};
@@ -128,7 +127,7 @@ impl AudioCapture {
     }
 
     /// Each source's peak level over the last ~100 ms in dBFS (-100 = silence), measured on the device's
-    /// own signal before the microphone chain. Cheap enough to call ten times a second.
+    /// own signal before any filters. Cheap enough to call ten times a second.
     pub fn levels(&self) -> Vec<(String, f32)> {
         self.levels.snapshot()
     }
@@ -199,41 +198,46 @@ fn build_sources(config: &AudioConfig, plan: &Plan, levels: &Arc<Levels>) -> (Ve
     let mut gains = Vec::new();
     let mut earliest_shift = 0i64;
     for (lane, kind) in plan.sources.iter().enumerate() {
+        let (key, offset_ms, volume) = match kind {
+            SourceKind::System => (
+                SYSTEM_SOURCE.to_string(),
+                config.system_offset_ms,
+                config.system_volume,
+            ),
+            SourceKind::Mic => (MIC_SOURCE.to_string(), config.mic_offset_ms, config.mic_volume),
+            SourceKind::App(exe) => (exe.to_ascii_lowercase(), 0, 100),
+        };
+        let filters = config
+            .filters
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(&key))
+            .map_or(&[][..], |(_, f)| f.as_slice());
+        let mic = matches!(kind, SourceKind::Mic);
+        let chain = SourceChain::new(filters, mic);
+        // The chain's output lags its input; place it that much earlier to line up again.
+        let delay = chain.delay_frames() as i64 * HNS_PER_SEC / RATE as i64;
         let mut processing = Processing {
-            shift_100ns: 0,
+            shift_100ns: ms(offset_ms) - delay,
             chain: None,
             ptt: None,
+            last_end: None,
         };
-        let mut lane_gain = 1.0;
-        match kind {
-            SourceKind::System => {
-                processing.shift_100ns = ms(config.system_offset_ms);
-                lane_gain = gain(config.system_volume);
-            }
-            SourceKind::Mic => {
-                let chain = MicChain::new(&ChainSettings {
-                    suppress: config.noise_suppression,
-                    gate_db: config.noise_gate.then_some(config.gate_threshold_db as f32),
-                    compressor: config.compressor,
-                    volume: gain(config.mic_volume),
-                });
-                // The chain's output lags its input; place it that much earlier to line up again.
-                let delay = chain.delay_frames() as i64 * HNS_PER_SEC / RATE as i64;
-                processing.shift_100ns = ms(config.mic_offset_ms) - delay;
-                processing.chain = Some(chain);
-                processing.ptt = match ptt_vk(&config.push_to_talk) {
-                    Ok(vk) => vk.map(|vk| PttKey {
-                        vk,
-                        state: Ptt::new(config.ptt_release_ms),
-                    }),
-                    Err(e) => {
-                        tracing::warn!("ignoring the push-to-talk key: {e:#}");
-                        None
-                    }
-                };
-            }
-            SourceKind::App(_) => {}
+        if mic {
+            processing.ptt = match ptt_vk(&config.push_to_talk) {
+                Ok(vk) => vk.map(|vk| PttKey {
+                    vk,
+                    state: Ptt::new(config.ptt_release_ms),
+                }),
+                Err(e) => {
+                    tracing::warn!("ignoring the push-to-talk key: {e:#}");
+                    None
+                }
+            };
         }
+        if !chain.is_empty() || processing.ptt.is_some() {
+            processing.chain = Some(chain);
+        }
+        let lane_gain = gain(volume);
         earliest_shift = earliest_shift.min(processing.shift_100ns);
         gains.push(lane_gain);
         sources.push(Source::new(kind.clone(), lane, processing, levels.clone(), lane));

@@ -173,6 +173,12 @@ A capture restart (new monitor or video settings) finishes the file and continue
 - [ ] Rich Presence (optional)
 
 ### Phase 7: Ship v1.0
+- [x] Audio filters per source, like OBS: every source (system, mic, each app) has its own ordered list of
+      filters, none by default: noise suppression (strength 0-100 %), noise gate (open/close levels, attack,
+      hold, release), compressor, limiter, gain. Each can be switched off, reordered or removed
+- [x] Every audio setting on the Audio page (volumes, push-to-talk, apps, separate tracks, offsets)
+- [x] CLIP badge on the level meters when a source's raw input reaches full scale
+- [ ] Live before/after preview of a source's filters on the Audio page (listen back, or a post-filter meter)
 - [ ] Inno Setup installer + portable zip, start with Windows (optional)
 - [ ] Opt-in updater (GitHub releases, only applies when no game runs and nothing is recording)
 - [ ] Opt-in crash reports

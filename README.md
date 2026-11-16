@@ -55,7 +55,9 @@ and fetched from your phone with bot commands.
 - ✅ A **track matrix** of up to 6 tracks: every source gets a checkbox per track, and track 1 is the mix.
   So you can mute your mic or Discord afterwards.
 - ✅ Mixer: per-source volume, mute, live level meters and sync offset.
-- ✅ Mic filters: noise suppression (RNNoise), noise gate, compressor, gain.
+- ✅ Audio filters per source, like OBS (none by default): noise suppression (RNNoise, adjustable
+  strength), noise gate, compressor, limiter, gain. The meters flag CLIP when a source is already
+  distorting before clipr gets it.
 - ✅ Audio encoder settings: AAC or Opus, bitrate per track, sample rate.
 
 ### Clipping triggers and feedback

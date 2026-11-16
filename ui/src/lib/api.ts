@@ -52,6 +52,15 @@ export interface GameProfile {
   bitrate_kbps: number | null;
 }
 
+/** One audio filter, like an OBS filter. Levels in dBFS, times in ms. */
+export type FilterKind =
+  | { kind: 'noise_suppression'; strength: number }
+  | { kind: 'noise_gate'; open_db: number; close_db: number; attack_ms: number; hold_ms: number; release_ms: number }
+  | { kind: 'compressor'; threshold_db: number; ratio: number; attack_ms: number; release_ms: number; makeup_db: number }
+  | { kind: 'limiter'; ceiling_db: number; release_ms: number }
+  | { kind: 'gain'; db: number };
+export type AudioFilter = { enabled: boolean } & FilterKind;
+
 export interface Config {
   web: { port: number; lan: boolean; lan_pin: string };
   ui: { theme: string; accent: string; setup_done: boolean };
@@ -59,7 +68,21 @@ export interface Config {
   privacy: { crash_reports: boolean };
   replay: { enabled: boolean; clip_secs: number; buffer_secs: number; sound_on_save: boolean };
   video: { codec: Codec; fps: number; height: number; bitrate_kbps: number; monitor: number };
-  audio: { system: boolean; mic: boolean; mic_volume: number; bitrate_kbps: number };
+  audio: {
+    system: boolean;
+    system_volume: number;
+    mic: boolean;
+    mic_volume: number;
+    apps: string[];
+    separate_tracks: boolean;
+    /** Filters per source: `system`, `mic`, or an app's exe name, in the order they run. */
+    filters: Record<string, AudioFilter[]>;
+    push_to_talk: string;
+    ptt_release_ms: number;
+    mic_offset_ms: number;
+    system_offset_ms: number;
+    bitrate_kbps: number;
+  };
   hotkeys: {
     save_clip: string;
     save_long_clip: string;

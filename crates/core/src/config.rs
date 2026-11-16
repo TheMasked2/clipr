@@ -3,6 +3,7 @@
 //! Every field has a default, so a missing file, a missing section or an unknown old key never stops clipr
 //! from starting. The web UI edits the same struct; hand edits keep working too.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -115,14 +116,11 @@ pub struct AudioConfig {
     /// Also write every source on its own track (track 1 is always the full mix; up to 6 tracks), so you
     /// can turn voice chat down later in an editor.
     pub separate_tracks: bool,
-    /// Remove background noise (fans, keyboard) from the microphone (RNNoise).
-    pub noise_suppression: bool,
-    /// Mute the microphone while you're not talking.
-    pub noise_gate: bool,
-    /// The gate opens above this level, in dBFS (-60 quiet room … -30 loud room).
-    pub gate_threshold_db: i32,
-    /// Even out loud and quiet speech on the microphone.
-    pub compressor: bool,
+    /// Filters per source, applied in order, like OBS: the key is `system`, `mic`, or an app's exe name
+    /// (`discord.exe`). Every source starts with none. An entry clipr can't read (an unknown kind from a newer
+    /// version, a missing value) is skipped with a warning instead of failing the whole file.
+    #[serde(deserialize_with = "lenient_filters")]
+    pub filters: BTreeMap<String, Vec<AudioFilter>>,
     /// Record the microphone only while this key is held (your voice-chat push-to-talk key, like `V` or
     /// `Mouse4`). Empty = always on.
     pub push_to_talk: String,
@@ -134,6 +132,150 @@ pub struct AudioConfig {
     pub system_offset_ms: i32,
     /// AAC bitrate per track in kbit/s: 96, 128, 160 or 192.
     pub bitrate_kbps: u32,
+    /// Beta 1's fixed mic filters, read once so [`AudioConfig::migrate`] can turn them into filters.
+    #[serde(rename = "noise_gate", skip_serializing)]
+    pub legacy_noise_gate: Option<bool>,
+    #[serde(rename = "gate_threshold_db", skip_serializing)]
+    pub legacy_gate_threshold_db: Option<i32>,
+    #[serde(rename = "compressor", skip_serializing)]
+    pub legacy_compressor: Option<bool>,
+    /// Beta 1 had noise suppression on by default; it isn't carried over (filters start off now).
+    #[serde(rename = "noise_suppression", skip_serializing)]
+    pub legacy_noise_suppression: Option<bool>,
+}
+
+/// The [`AudioConfig::filters`] key for system audio.
+pub const SYSTEM_SOURCE: &str = "system";
+/// The [`AudioConfig::filters`] key for the microphone.
+pub const MIC_SOURCE: &str = "mic";
+
+/// One audio filter. Levels are in dBFS, times in ms.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioFilter {
+    /// Off keeps the filter and its settings but skips it.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(flatten)]
+    pub kind: FilterKind,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn lenient_filters<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<BTreeMap<String, Vec<AudioFilter>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Entry {
+        Good(AudioFilter),
+        Bad(serde::de::IgnoredAny),
+    }
+    let raw = BTreeMap::<String, Vec<Entry>>::deserialize(d)?;
+    Ok(raw
+        .into_iter()
+        .map(|(source, entries)| {
+            let good = entries
+                .into_iter()
+                .filter_map(|e| match e {
+                    Entry::Good(f) => Some(f),
+                    Entry::Bad(_) => {
+                        tracing::warn!("skipping an audio filter of {source} that clipr can't read");
+                        None
+                    }
+                })
+                .collect();
+            (source, good)
+        })
+        .collect())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FilterKind {
+    /// RNNoise: removes steady background noise (fans, hum, keyboard). `strength` 0-100 % blends the
+    /// cleaned sound with the original.
+    NoiseSuppression { strength: u32 },
+    /// Mutes the source while it's quiet: opens above `open_db`, closes below `close_db` after `hold_ms`.
+    NoiseGate {
+        open_db: i32,
+        close_db: i32,
+        attack_ms: u32,
+        hold_ms: u32,
+        release_ms: u32,
+    },
+    /// Evens out loud and quiet parts: above `threshold_db`, every `ratio` dB in gives 1 dB out.
+    Compressor {
+        threshold_db: i32,
+        ratio: u32,
+        attack_ms: u32,
+        release_ms: u32,
+        makeup_db: i32,
+    },
+    /// Never lets a peak past `ceiling_db`.
+    Limiter { ceiling_db: i32, release_ms: u32 },
+    /// Turns the source up or down.
+    Gain { db: i32 },
+}
+
+impl FilterKind {
+    /// What a newly added filter starts with, by its `kind` name.
+    pub fn defaults(name: &str) -> Option<Self> {
+        Some(match name {
+            "noise_suppression" => Self::NoiseSuppression { strength: 100 },
+            "noise_gate" => Self::NoiseGate {
+                open_db: -32,
+                close_db: -40,
+                attack_ms: 10,
+                hold_ms: 150,
+                release_ms: 100,
+            },
+            "compressor" => Self::Compressor {
+                threshold_db: -20,
+                ratio: 3,
+                attack_ms: 5,
+                release_ms: 80,
+                makeup_db: 4,
+            },
+            "limiter" => Self::Limiter {
+                ceiling_db: -1,
+                release_ms: 100,
+            },
+            "gain" => Self::Gain { db: 0 },
+            _ => return None,
+        })
+    }
+}
+
+impl AudioConfig {
+    /// Turns beta 1's fixed mic gate and compressor, if they were switched on, into mic filters.
+    pub fn migrate(&mut self) {
+        let gate = self.legacy_noise_gate.take() == Some(true);
+        let threshold = self.legacy_gate_threshold_db.take().unwrap_or(-45);
+        let compressor = self.legacy_compressor.take() == Some(true);
+        self.legacy_noise_suppression = None;
+        if self.filters.contains_key(MIC_SOURCE) || !(gate || compressor) {
+            return;
+        }
+        let mut mic = Vec::new();
+        if gate {
+            mic.push(AudioFilter {
+                enabled: true,
+                kind: FilterKind::NoiseGate {
+                    open_db: threshold,
+                    close_db: threshold,
+                    attack_ms: 10,
+                    hold_ms: 150,
+                    release_ms: 100,
+                },
+            });
+        }
+        if compressor {
+            mic.extend(FilterKind::defaults("compressor").map(|kind| AudioFilter { enabled: true, kind }));
+        }
+        self.filters.insert(MIC_SOURCE.into(), mic);
+    }
 }
 
 impl Default for AudioConfig {
@@ -145,15 +287,16 @@ impl Default for AudioConfig {
             mic_volume: 100,
             apps: Vec::new(),
             separate_tracks: false,
-            noise_suppression: true,
-            noise_gate: false,
-            gate_threshold_db: -45,
-            compressor: false,
+            filters: BTreeMap::new(),
             push_to_talk: String::new(),
             ptt_release_ms: 200,
             mic_offset_ms: 0,
             system_offset_ms: 0,
             bitrate_kbps: 160,
+            legacy_noise_gate: None,
+            legacy_gate_threshold_db: None,
+            legacy_compressor: None,
+            legacy_noise_suppression: None,
         }
     }
 }
@@ -359,7 +502,12 @@ impl Config {
     /// Reads the file, or returns the defaults if it doesn't exist yet.
     pub fn load(path: &Path) -> Result<Self> {
         match fs::read_to_string(path) {
-            Ok(text) => toml::from_str(&text).with_context(|| format!("can't read {}", path.display())),
+            Ok(text) => {
+                let mut config: Self =
+                    toml::from_str(&text).with_context(|| format!("can't read {}", path.display()))?;
+                config.audio.migrate();
+                Ok(config)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e).with_context(|| format!("can't open {}", path.display())),
         }
@@ -414,6 +562,89 @@ mod tests {
         );
         assert_eq!(config.video.codec, VideoCodec::H264);
         assert!(config.clips.dir().ends_with("clipr"));
+    }
+
+    #[test]
+    fn audio_filters_round_trip_and_start_empty() {
+        assert!(
+            AudioConfig::default().filters.is_empty(),
+            "no filter is on by default"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut config = Config::default();
+        let gate = FilterKind::defaults("noise_gate").unwrap();
+        config.audio.filters.insert(
+            MIC_SOURCE.into(),
+            vec![
+                AudioFilter {
+                    enabled: true,
+                    kind: FilterKind::NoiseSuppression { strength: 70 },
+                },
+                AudioFilter {
+                    enabled: false,
+                    kind: gate,
+                },
+            ],
+        );
+        config.audio.filters.insert(
+            "discord.exe".into(),
+            vec![AudioFilter {
+                enabled: true,
+                kind: FilterKind::Gain { db: -6 },
+            }],
+        );
+        config.save(&path).unwrap();
+        assert_eq!(Config::load(&path).unwrap(), config);
+        // The JSON the web UI gets has the same shape.
+        let json = serde_json::to_value(&config.audio.filters).unwrap();
+        assert_eq!(json["mic"][0]["kind"], "noise_suppression");
+        assert_eq!(json["mic"][1]["enabled"], false);
+    }
+
+    #[test]
+    fn a_bad_filter_is_skipped_not_the_whole_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = "[web]\nport = 9000\n\n[[audio.filters.mic]]\nkind = \"gain\"\ndb = -3\n\n\
+                    [[audio.filters.mic]]\nkind = \"reverb\"\nroom = 5\n\n[[audio.filters.mic]]\nkind = \"limiter\"\n";
+        fs::write(&path, text).unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.web.port, 9000, "the rest of the file is kept");
+        let mic = &config.audio.filters[MIC_SOURCE];
+        assert_eq!(
+            mic.len(),
+            1,
+            "the unknown kind and the limiter with missing values are skipped"
+        );
+        assert_eq!(mic[0].kind, FilterKind::Gain { db: -3 });
+    }
+
+    #[test]
+    fn beta_mic_filters_migrate() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let old = "[audio]\nnoise_suppression = true\nnoise_gate = true\ngate_threshold_db = -50\ncompressor = false\n";
+        fs::write(&path, old).unwrap();
+        let config = Config::load(&path).unwrap();
+        let mic = &config.audio.filters[MIC_SOURCE];
+        assert_eq!(
+            mic.len(),
+            1,
+            "only the gate was switched on; suppression was just the old default"
+        );
+        assert!(matches!(mic[0].kind, FilterKind::NoiseGate { open_db: -50, .. }));
+        assert_eq!(config.audio.legacy_noise_gate, None);
+        // Saving drops the old keys.
+        config.save(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            !text.contains("noise_suppression =") && !text.contains("gate_threshold_db"),
+            "{text}"
+        );
+
+        fs::write(&path, "[audio]\nnoise_suppression = true\n").unwrap();
+        assert!(Config::load(&path).unwrap().audio.filters.is_empty());
     }
 
     #[test]

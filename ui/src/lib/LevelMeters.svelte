@@ -2,7 +2,26 @@
   import { app } from './store.svelte';
 
   const FLOOR = -60;
+  /** The meters show the raw input, so a peak this close to 0 dB means it clipped before clipr got it. */
+  const CLIP_DB = -0.5;
+  /** How long CLIP stays lit after the last clipped peak, so a short one is still seen. */
+  const CLIP_HOLD_MS = 2000;
   const pct = (db: number) => Math.round((Math.min(0, Math.max(FLOOR, db)) - FLOOR) * (100 / -FLOOR));
+
+  // Updated on every levels message (10 a second), which also lets the badge expire. When levels stop the
+  // store clears them, and the meters (with their badges) go away.
+  let clipping = $state<Set<string>>(new Set());
+  const lastClip = new Map<string, number>();
+  $effect(() => {
+    const now = Date.now();
+    const on = new Set<string>();
+    for (const l of app.levels) {
+      if (l.db >= CLIP_DB) lastClip.set(l.name, now);
+      const at = lastClip.get(l.name);
+      if (at !== undefined && now - at < CLIP_HOLD_MS) on.add(l.name);
+    }
+    clipping = on;
+  });
 </script>
 
 <div class="meters" aria-label="Audio levels">
@@ -12,7 +31,11 @@
       <div class="bar" role="meter" aria-label={l.name} aria-valuemin={FLOOR} aria-valuemax={0} aria-valuenow={Math.round(l.db)}>
         <div class="fill" class:hot={l.db > -12} class:clip={l.db > -3} style="width: {pct(l.db)}%"></div>
       </div>
-      <span class="db">{l.db <= FLOOR ? '-∞' : Math.round(l.db)} dB</span>
+      {#if clipping.has(l.name)}
+        <span class="badge" title="This source reached full scale: its sound is distorting before clipr records it. Lower its level (for a mic: Windows Sound settings → input volume or boost).">CLIP</span>
+      {:else}
+        <span class="db">{l.db <= FLOOR ? '-∞' : Math.round(l.db)} dB</span>
+      {/if}
     </div>
   {:else}
     <p class="muted small">No audio is being captured right now. Levels show while the buffer runs (for example while a game is on).</p>
@@ -28,5 +51,6 @@
   .fill.hot { background: #f5b942; }
   .fill.clip { background: var(--danger); }
   .db { text-align: right; font-size: 0.8rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .badge { justify-self: end; padding: 0.05rem 0.4rem; border-radius: 0.3rem; background: var(--danger); color: #fff; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; }
   p { margin: 0; }
 </style>

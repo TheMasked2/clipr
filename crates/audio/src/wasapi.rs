@@ -2,7 +2,7 @@
 //! app's audio (process loopback).
 //!
 //! A [`Source`] opens its device lazily, follows the default device (or the app's process) when it
-//! changes, retries after failures, runs the microphone chain, and pushes everything it reads onto the
+//! changes, retries after failures, runs each source's filter chain, and pushes everything it reads onto the
 //! [`Timeline`] with the packet's QPC time.
 
 use std::mem::ManuallyDrop;
@@ -39,8 +39,9 @@ use windows::Win32::System::Variant::VT_BLOB;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::core::{IUnknown, Interface, implement};
 
-use crate::chain::{MicChain, Ptt};
+use crate::chain::{Ptt, SourceChain};
 use crate::levels::{Levels, Meter};
+use crate::mix::RESYNC_FRAMES;
 use crate::mix::{RATE, Resampler, SampleKind, Timeline, to_stereo};
 use crate::plan::SourceKind;
 
@@ -144,8 +145,10 @@ pub struct PttKey {
 pub struct Processing {
     /// Shift on the timeline (positive = later), already including the chain's delay compensation.
     pub shift_100ns: i64,
-    pub chain: Option<MicChain>,
+    pub chain: Option<SourceChain>,
     pub ptt: Option<PttKey>,
+    /// QPC time just after the last packet, to notice gaps (the chain's delayed tail must be flushed).
+    pub last_end: Option<i64>,
 }
 
 pub struct Source {
@@ -599,6 +602,19 @@ fn read_all(
             None => &open.stereo,
         };
         meter.add(samples);
+        let duration = (samples.len() / 2) as i64 * 10_000_000 / RATE as i64;
+        let gap = |end: i64| discontinuity || (qpc - end).abs() > RESYNC_FRAMES * 10_000_000 / RATE as i64;
+        if let (Some(chain), Some(end)) = (&mut processing.chain, processing.last_end)
+            && chain.delay_frames() > 0
+            && gap(end)
+        {
+            // The chain still holds the end of the previous sound. Put it where it belongs (right after
+            // that sound), then start fresh, so it isn't played at the new packet's time.
+            open.processed.clear();
+            chain.flush(ptt_open, &mut open.processed);
+            timeline.push(lane, end + processing.shift_100ns, &open.processed, false);
+        }
+        processing.last_end = Some(qpc + duration);
         let samples = match &mut processing.chain {
             Some(chain) => {
                 open.processed.clear();

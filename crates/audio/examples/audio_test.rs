@@ -1,7 +1,7 @@
 //! Records system audio (plus the microphone, per-app tracks, ...) into an MP4 and checks the packet timing.
 //!
 //! `cargo run -p clipr-audio --example audio_test -- [seconds] [--mic] [--separate] [--app exe]...
-//! [--no-system] [--ptt KEY] [--gate] [--compress] [--no-ns] [--out file.mp4]`
+//! [--no-system] [--ptt KEY] [--filter KIND]... [--out file.mp4]`
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use clipr_audio::{AudioCapture, AudioPacket};
 use clipr_core::clock::now_100ns;
-use clipr_core::config::AudioConfig;
+use clipr_core::config::{AudioConfig, AudioFilter, FilterKind, MIC_SOURCE};
 use windows::Win32::Media::MediaFoundation::{
     IMFAttributes, MF_SINK_WRITER_DISABLE_THROTTLING, MF_VERSION, MFCreateAttributes, MFCreateMemoryBuffer,
     MFCreateSample, MFCreateSinkWriterFromURL, MFSTARTUP_FULL, MFShutdown, MFStartup,
@@ -21,15 +21,19 @@ fn main() -> Result<()> {
     let mut seconds = 10.0f64;
     let mut config = AudioConfig::default();
     let mut out = None;
+    let mut mic_filters = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--mic" => config.mic = true,
             "--separate" => config.separate_tracks = true,
             "--no-system" => config.system = false,
-            "--gate" => config.noise_gate = true,
-            "--compress" => config.compressor = true,
-            "--no-ns" => config.noise_suppression = false,
+            // Mic filters, in the order given: --filter noise_suppression --filter limiter ...
+            "--filter" => {
+                let name = args.next().context("--filter needs a kind")?;
+                let kind = FilterKind::defaults(&name).with_context(|| format!("no filter called {name}"))?;
+                mic_filters.push(AudioFilter { enabled: true, kind });
+            }
             "--app" => config.apps.push(args.next().context("--app needs an exe name")?),
             "--ptt" => config.push_to_talk = args.next().context("--ptt needs a key")?,
             "--out" => out = args.next(),
@@ -40,6 +44,7 @@ fn main() -> Result<()> {
             }
         }
     }
+    config.filters.insert(MIC_SOURCE.into(), mic_filters);
     let out = out.unwrap_or_else(|| "audio_test.mp4".into());
 
     let packets = Arc::new(Mutex::new(Vec::<AudioPacket>::new()));
