@@ -59,7 +59,8 @@ the normal value. Capture restarts when the game changes.
   lives in RAM: the page shows an estimate for your bitrate (two minutes at 15 Mbit/s is about 225 MB).
 - **Sound on save** (on): play a short chime when a clip is saved, or a low tone when saving fails. It plays
   through your speakers, so with system audio on it can be heard in a clip saved right after.
-- **Sound volume** (60 %): how loud the save sound and the mic mute blip play. **Test** plays it at the
+- **Sound volume** (60 %): how loud the save sound and the mic mute blip play (the blip plays even with
+  **Sound on save** off). **Test** plays it at the
   volume on the slider, before you save. 0 % is silent.
 - **Note on save** (on): show a small "Clip saved" note in the top-right corner. It never shows up in your
   clips. Games in exclusive fullscreen hide it, but the sound still plays.
@@ -110,7 +111,8 @@ The meters show while the buffer runs and follow the saved settings.
 ### Game audio
 
 - **Game on its own track** (off): also record only the game's sound (no voice chat, no music) on a track of
-  its own, so you can turn it up or down later in an editor. It follows whichever game clipr detects. Needs
+  its own, so you can turn it up or down later in an editor. It follows whichever game clipr detects (if
+  the game is also listed under **App tracks**, that track has it instead, so it isn't recorded twice). Needs
   Windows 10 version 2004 or newer. The game has its own filter list.
 
 ### App tracks

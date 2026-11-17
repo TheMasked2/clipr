@@ -229,7 +229,7 @@
     <Field title="Clip length (seconds)" hint="How many seconds a saved clip goes back."><input type="number" min="1" max="3600" bind:value={draft.replay.clip_secs} /></Field>
     <Field title="Buffer length (seconds)" hint={`How much the buffer keeps in memory; "save long clip" saves all of it. Estimated RAM use at your bitrate: about ${ramMb} MB.`}><input type="number" min="1" max="3600" bind:value={draft.replay.buffer_secs} /></Field>
     <Field title="Sound on save" hint="Play a short chime when a clip is saved (a low tone if saving fails). It plays through your speakers, so with system audio on it can be heard in a clip saved right after."><Toggle bind:checked={draft.replay.sound_on_save} label="Sound on save" /></Field>
-    <Field title="Sound volume" hint="How loud the save sound and the mic mute blip play. 0 % = silent.">
+    <Field title="Sound volume" hint="How loud the save sound and the mic mute blip play (the blip plays even with Sound on save off). 0 % = silent.">
       <div class="vol">
         <input type="range" min="0" max="100" step="5" bind:value={draft.replay.sound_volume} aria-label="Sound volume" />
         <span class="pctv">{draft.replay.sound_volume}%</span>
@@ -290,7 +290,7 @@
     {/if}
 
     <h3 class="sub">Game audio</h3>
-    <Field title="Game on its own track" hint="Also record only the game's sound (no voice chat, no music) on a track of its own, so you can turn it up or down later in an editor. Follows whichever game clipr detects. Needs Windows 10 2004 or newer."><Toggle bind:checked={draft.audio.game} label="Game audio" /></Field>
+    <Field title="Game on its own track" hint="Also record only the game's sound (no voice chat, no music) on a track of its own, so you can turn it up or down later in an editor. Follows whichever game clipr detects (if the game is also under App tracks, that track has it instead). Needs Windows 10 2004 or newer."><Toggle bind:checked={draft.audio.game} label="Game audio" /></Field>
     {#if draft.audio.game}
       <Field title="Filters" stacked><AudioFilters audio={draft.audio} source="game" label="Game" /></Field>
     {/if}

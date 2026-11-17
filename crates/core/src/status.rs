@@ -34,7 +34,7 @@ pub struct Activity {
     pub recording_since: Option<u64>,
     /// The user paused the buffer (tray, hotkey or web UI).
     pub paused: bool,
-    /// The user muted the microphone in clips (hotkey, tray or web UI).
+    /// The user muted the microphone in clips (the hotkey or the web UI).
     pub mic_muted: bool,
 }
 

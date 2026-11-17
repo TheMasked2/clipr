@@ -108,7 +108,7 @@
       <button onclick={() => run(api.markMoment())}>Mark moment</button>
       {#if hk?.mark}<kbd>{hk.mark}</kbd>{/if}
     </div>
-    {#if app.config?.audio.mic}
+    {#if app.config?.audio.mic || st?.mic_muted}
       <div class="act">
         <button class:warn={st?.mic_muted} onclick={() => run(api.setMicMuted(!st?.mic_muted))}>{st?.mic_muted ? 'Unmute mic' : 'Mute mic'}</button>
         {#if hk?.toggle_mic}<kbd>{hk.toggle_mic}</kbd>{/if}

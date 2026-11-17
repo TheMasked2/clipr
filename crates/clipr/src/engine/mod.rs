@@ -316,8 +316,15 @@ impl Supervisor {
         if now >= self.next_poll {
             self.next_poll = now + GAME_POLL;
             self.game = self.watcher.poll();
-            // The game audio source records whatever game runs now.
-            clipr_audio::set_game_pid(self.game.as_ref().map(|g| g.pid));
+            // The game audio source records whatever game runs now, unless the game is also one of the apps
+            // on their own track: then that track has it, and recording it twice would double it in the mix.
+            let apps = &self.config.audio.apps;
+            clipr_audio::set_game_pid(
+                self.game
+                    .as_ref()
+                    .filter(|g| !apps.iter().any(|a| a.trim().eq_ignore_ascii_case(&g.exe)))
+                    .map(|g| g.pid),
+            );
             if self.pipeline.is_some() {
                 // What's on screen now is what the buffer's newest footage shows.
                 self.buffer_game = self.game.as_ref().map(|g| g.name.clone());
