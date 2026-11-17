@@ -67,8 +67,9 @@ start, for testing.
 
 ## Updates
 
-clipr checks GitHub releases by itself only when `general.auto_update` is on (2 min after start, then every
-6 h); `general.update_beta` adds prereleases. Only an installed copy (Inno Setup's `unins000.exe` next to the
+clipr checks GitHub releases by itself only when `general.auto_update` is on, and then once per start, like
+Steam (15 s after start; a failed check is retried after 1 and 5 min, then not again until the next start);
+`general.update_beta` adds prereleases. Only an installed copy (Inno Setup's `unins000.exe` next to the
 exe) can install; a portable copy links the release page instead.
 For testing, `CLIPR_UPDATE_PRETEND_VERSION=0.0.1` makes the updater compare as that version, so an installed
 copy can "update" to the current release (still sha256-verified).
@@ -145,7 +146,9 @@ setting, changing or renaming its way to a URL is `403`.
 
 ## LAN access (opt-in)
 
-When `web.lan` is on, the server also listens on the LAN. Requests from any address other than loopback must
+When `web.lan` is on, the server also listens on the LAN (`0.0.0.0`, same port). Saving the setting opens or
+closes that listener at once, without a restart; turning it off also ends LAN event streams. If the port can't
+be opened, `GET /api/system` has `"lan_error"` (a message; `null` otherwise). Requests from any address other than loopback must
 carry the PIN: `POST /api/login {"pin"}` sets an HttpOnly cookie `clipr_session` (random token, valid 30 days);
 without it every LAN request gets `401` and the UI shows a PIN screen. The PIN is `web.lan_pin` (6 digits,
 generated when LAN access is first turned on, shown in Settings). Loopback requests never need it. A session ends when `web.lan_pin` changes or `web.lan` is turned off. After

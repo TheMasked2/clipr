@@ -13,12 +13,13 @@ mod tests;
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::Router;
 use axum::extract::State;
+use axum::extract::connect_info::IntoMakeServiceWithConnectInfo;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
@@ -70,6 +71,43 @@ pub struct AppState {
     pub thumbs_dir: PathBuf,
     /// Posts clips to Discord.
     pub discord: clipr_discord::Poster,
+    /// Opens and closes access from the local network as `web.lan` changes.
+    pub lan: Lan,
+}
+
+/// Access from the local network (`web.lan`). [`serve_many`] opens a listener on `0.0.0.0:<port>` while it's on
+/// and closes it when it goes off, so saving the setting applies at once, with no restart. Other machines
+/// still need the PIN, and their open event streams end when access goes off.
+#[derive(Clone)]
+pub struct Lan {
+    port: u16,
+    want: watch::Sender<bool>,
+    /// Why the listener couldn't open (the port is taken on another address, say), while on.
+    error: Arc<Mutex<Option<String>>>,
+}
+
+impl Lan {
+    /// `port` is the one [`bind`] got: the LAN listener uses the same.
+    pub fn new(port: u16, on: bool) -> Self {
+        Self {
+            port,
+            want: watch::Sender::new(on),
+            error: Arc::default(),
+        }
+    }
+
+    pub fn set(&self, on: bool) {
+        self.want.send_if_modified(|v| std::mem::replace(v, on) != on);
+    }
+
+    pub fn is_on(&self) -> bool {
+        *self.want.borrow()
+    }
+
+    /// Why access from the local network is on but not working, if it isn't.
+    pub fn error(&self) -> Option<String> {
+        self.error.lock().unwrap().clone()
+    }
 }
 
 /// Binds `127.0.0.1:<preferred>`, or the next free port after it.
@@ -98,8 +136,7 @@ pub async fn bind(preferred: u16) -> Result<(TcpListener, u16)> {
     })
 }
 
-/// Binds `0.0.0.0:<port>` for LAN access (the app calls this when `web.lan` is on, with the port [`bind`] got).
-/// Serve it together with the loopback listener using [`serve_many`]; other machines need the PIN.
+/// Binds `0.0.0.0:<port>` for LAN access, with the port [`bind`] got. [`serve_many`] does this through [`Lan`].
 pub async fn bind_lan(port: u16) -> Result<TcpListener> {
     TcpListener::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)))
         .await
@@ -157,11 +194,12 @@ pub async fn serve(listener: TcpListener, state: AppState) -> Result<()> {
     serve_many(vec![listener], state).await
 }
 
-/// Like [`serve`], on several listeners at once (loopback plus LAN). Also runs the background jobs: the first
-/// scan, indexing of saved clips (thumbnails), and the hourly cleanup.
+/// Like [`serve`], on several listeners at once. Also serves the local network while `state.lan` is on, and
+/// runs the background jobs: the first scan, indexing of saved clips (thumbnails), and the hourly cleanup.
 pub async fn serve_many(listeners: Vec<TcpListener>, state: AppState) -> Result<()> {
     let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
     let mut tasks: JoinSet<Result<()>> = JoinSet::new();
+    tasks.spawn(serve_lan(app.clone(), state.clone()));
     for listener in listeners {
         let mut shutdown = state.shutdown.clone();
         let app = app.clone();
@@ -267,16 +305,80 @@ async fn api_not_found() -> impl IntoResponse {
     )
 }
 
-async fn events(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| push_events(socket, state))
+async fn events(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    ext: axum::http::Extensions,
+) -> Response {
+    let remote = auth::is_remote(&ext);
+    ws.on_upgrade(move |socket| push_events(socket, state, remote))
 }
 
 async fn send_json(socket: &mut WebSocket, value: &Value) -> bool {
     socket.send(Message::Text(value.to_string().into())).await.is_ok()
 }
 
-/// Status on connect and on every change, plus saved clips, failures, library changes and audio levels.
-async fn push_events(mut socket: WebSocket, state: AppState) {
+/// Serves the local network while `state.lan` is on: opens the listener when it goes on, and closes it (with
+/// the idle connections) when it goes off, until shutdown.
+async fn serve_lan(app: IntoMakeServiceWithConnectInfo<Router, SocketAddr>, state: AppState) -> Result<()> {
+    let lan = state.lan.clone();
+    let mut want = lan.want.subscribe();
+    let mut shutdown = state.shutdown.clone();
+    loop {
+        if *want.borrow_and_update() {
+            match bind_lan(lan.port).await {
+                Ok(listener) => {
+                    *lan.error.lock().unwrap() = None;
+                    tracing::info!(
+                        "web UI open to the local network on port {} (PIN required)",
+                        lan.port
+                    );
+                    let (mut off, mut stop) = (want.clone(), shutdown.clone());
+                    axum::serve(listener, app.clone())
+                        .with_graceful_shutdown(async move {
+                            tokio::select! {
+                                _ = off.wait_for(|on| !*on) => {}
+                                () = stopped(&mut stop) => {}
+                            }
+                        })
+                        .await
+                        .context("local network server stopped")?;
+                    if *shutdown.borrow() {
+                        return Ok(());
+                    }
+                    tracing::info!("web UI closed to the local network");
+                    continue;
+                }
+                Err(e) => {
+                    tracing::warn!("LAN access is on but can't open: {e:#}");
+                    *lan.error.lock().unwrap() = Some(format!("{e:#}"));
+                }
+            }
+        } else {
+            *lan.error.lock().unwrap() = None;
+        }
+        tokio::select! {
+            changed = want.changed() => {
+                if changed.is_err() {
+                    return Ok(());
+                }
+            }
+            () = stopped(&mut shutdown) => return Ok(()),
+        }
+    }
+}
+
+/// Resolves when access from the local network goes off (never, if the switch is gone).
+async fn lan_closed(lan: &mut watch::Receiver<bool>) {
+    if lan.wait_for(|on| !*on).await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
+/// Status on connect and on every change, plus saved clips, failures, library changes and audio levels. A stream
+/// to another device ends when access from the local network goes off.
+async fn push_events(mut socket: WebSocket, state: AppState, remote: bool) {
+    let mut lan = state.lan.want.subscribe();
     let mut changes = state.status.subscribe();
     let mut bus = state.bus.subscribe();
     let mut library = state.library.subscribe();
@@ -355,6 +457,7 @@ async fn push_events(mut socket: WebSocket, state: AppState) {
                 }
             }
             () = stopped(&mut shutdown) => break,
+            () = lan_closed(&mut lan), if remote => break,
             incoming = socket.recv() => match incoming {
                 // The UI doesn't send anything yet; ignore pings/text, stop when it goes away.
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,

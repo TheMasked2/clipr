@@ -62,8 +62,8 @@ Use **Microphone offset (ms)** under Settings → Audio. A positive value moves 
 That's intended: only one clipr runs at a time. Starting it again opens the running copy's page.
 
 **The page doesn't open on my phone.**
-Check that **Allow access from my local network** is on and saved, that you restarted clipr after turning it
-on, that the phone is on the same network, and that Windows Firewall allows clipr. Windows asks the first time the option is on; allow it on private
+Check that **Allow access from my local network** is on and saved (the Network tab warns if the port couldn't
+be opened), that the phone is on the same network, and that Windows Firewall allows clipr. Windows asks the first time the option is on; allow it on private
 networks.
 
 **How do I reset everything?**

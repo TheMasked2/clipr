@@ -55,9 +55,12 @@
     justSaved = false;
     try {
       const c = await saveConfig(clone(draft));
+      const lanChanged = JSON.parse(savedJson).web?.lan !== c.web.lan;
       savedJson = JSON.stringify(c);
       Object.assign(draft, clone(c));
       justSaved = true;
+      // The server opens or closes the network port right after saving; show if it couldn't.
+      if (lanChanged) setTimeout(() => api.getSystem().then((s) => (sys = s)).catch(() => {}), 500);
       setTimeout(() => (justSaved = false), 3000);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -138,7 +141,7 @@
   {#if tab === 'General'}
     <Field title="Start with Windows" hint="Start clipr when Windows starts."><Toggle bind:checked={draft.general.start_with_windows} label="Start with Windows" /></Field>
     <Field title="Open the UI on start" hint="Open this page when you start clipr yourself, so you can see it is running. Never happens when Windows starts it."><Toggle bind:checked={draft.general.open_ui_on_start} label="Open UI on start" /></Field>
-    <Field title="Update automatically" hint="Check GitHub releases every few hours and install a new version by itself, only when no game runs and nothing records. Opt-in, off by default."><Toggle bind:checked={draft.general.auto_update} label="Auto update" /></Field>
+    <Field title="Update automatically" hint="Check GitHub releases once each time clipr starts, like Steam, and install a new version by itself, only when no game runs and nothing records. Opt-in, off by default."><Toggle bind:checked={draft.general.auto_update} label="Auto update" /></Field>
     <Field title="Beta versions" hint="Offer beta versions too, not only full releases."><Toggle bind:checked={draft.general.update_beta} label="Beta versions" /></Field>
     <UpdatePanel remote={sys?.remote ?? false} />
     <Field title="Crash reports" hint="If clipr crashes, keep a report (and a minidump) on this PC and show it on Home next time, so you can send it as a GitHub issue. Your user name, PC name and profile folder are taken out, and nothing is ever sent by itself. Opt-in, off by default."><Toggle bind:checked={draft.privacy.crash_reports} label="Crash reports" /></Field>
@@ -269,7 +272,7 @@
   {:else if tab === 'Discord'}
     <DiscordSettings discord={draft.discord} remote={sys?.remote ?? false} />
   {:else if tab === 'Network'}
-    <Field title="Allow access from my local network" hint="Open this page to other devices at home (your phone). They must enter a PIN. Off by default. Applies after a restart of clipr."><Toggle bind:checked={draft.web.lan} label="LAN access" /></Field>
+    <Field title="Allow access from my local network" hint="Open this page to other devices at home (your phone). They must enter a PIN. Off by default."><Toggle bind:checked={draft.web.lan} label="LAN access" /></Field>
     {#if draft.web.lan}
       <div class="banner warn">Anyone on your network with the PIN can see and delete your clips. Only turn this on on a network you trust. The connection is not encrypted.</div>
     {/if}
@@ -279,6 +282,9 @@
         <div class="pinv">{app.config.web.lan_pin}</div>
         <div class="muted small">Open <code>{lanUrl}</code> on the other device and enter it.</div>
       </div>
+      {#if sys?.lan_error}
+        <div class="banner warn">Other devices can't connect: {sys.lan_error}</div>
+      {/if}
     {:else if draft.web.lan}
       <p class="muted small note">Save to generate the PIN.</p>
     {/if}

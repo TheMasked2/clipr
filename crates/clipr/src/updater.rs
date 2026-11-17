@@ -1,5 +1,6 @@
-//! The updater thread. It checks GitHub releases (by itself only when `general.auto_update` is on: first about
-//! two minutes after start, then every six hours; "Check now" in the UI works either way), downloads the
+//! The updater thread. It checks GitHub releases (by itself only when `general.auto_update` is on, and then
+//! once per start, like Steam: shortly after clipr starts, never again until the next start; "Check now" in
+//! the UI works either way), downloads the
 //! installer with a verified checksum, and applies it only when no game runs and nothing is recording. To
 //! apply, it stores the installer in [`take_pending`] and quits the main loop; `main` shuts everything down
 //! as usual and then starts the installer, which waits for clipr to exit, installs and starts it again.
@@ -17,8 +18,13 @@ use serde_json::{Value, json};
 
 use crate::win;
 
-const FIRST_CHECK: Duration = Duration::from_secs(2 * 60);
-const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// When the startup check runs, counted from start. Right after a boot the network may not be up yet, so a
+/// failed check is tried again at the next time; after the last one, nothing until the next start.
+const STARTUP_CHECKS: [Duration; 3] = [
+    Duration::from_secs(15),
+    Duration::from_secs(60),
+    Duration::from_secs(5 * 60),
+];
 /// How often an update that waits for the game to close looks again.
 const BUSY_RECHECK: Duration = Duration::from_secs(30);
 /// How often the thread looks at the settings when nothing else wakes it (auto-update may get switched on).
@@ -239,29 +245,43 @@ impl Worker {
         }
         // The installer that just updated this copy may still be finishing: retry until it's gone.
         let mut cleaned = self.clean_downloads();
-        let mut next_check = Instant::now() + FIRST_CHECK;
+        // Only with auto-update on at start: switching it on later waits for the next start (or "Check now").
+        let started = Instant::now();
+        let mut startup_checks = if (self.settings)().auto_update {
+            &STARTUP_CHECKS[..]
+        } else {
+            &[][..]
+        };
         loop {
             let auto = (self.settings)().auto_update;
             let want_apply = self.updater.shared.lock().unwrap().want_apply;
+            let next_check = startup_checks.first().map(|&at| started + at);
             let wait = if want_apply {
                 BUSY_RECHECK
-            } else if auto {
-                next_check
-                    .saturating_duration_since(Instant::now())
-                    .min(IDLE_WAKE)
+            } else if let Some(at) = next_check {
+                at.saturating_duration_since(Instant::now()).min(IDLE_WAKE)
             } else {
                 IDLE_WAKE
             };
             match rx.recv_timeout(wait) {
-                Ok(Cmd::Check) => self.check(auto),
+                Ok(Cmd::Check) => {
+                    if self.check(auto) {
+                        startup_checks = &[]; // answered: the startup check isn't needed any more
+                    }
+                }
                 Ok(Cmd::Apply) => self.updater.update(|s| {
                     s.want_apply = true;
                     s.auto_apply = false;
                 }),
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if auto && Instant::now() >= next_check {
-                        next_check = Instant::now() + CHECK_EVERY;
-                        self.check(true);
+                    if next_check.is_some_and(|at| Instant::now() >= at) {
+                        let answered = auto && self.check(true);
+                        // Answered, switched off meanwhile, or the last try: no more checks this run.
+                        startup_checks = if answered || !auto {
+                            &[]
+                        } else {
+                            &startup_checks[1..]
+                        };
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
@@ -305,14 +325,15 @@ impl Worker {
         all
     }
 
-    /// Asks GitHub. With `auto` on, a found update installs by itself when nothing runs.
-    fn check(&self, auto: bool) {
+    /// Asks GitHub. With `auto` on, a found update installs by itself when nothing runs. False when GitHub
+    /// couldn't be reached (true when the check was skipped because one just ran or a download is going).
+    fn check(&self, auto: bool) -> bool {
         {
             let mut s = self.updater.shared.lock().unwrap();
             if s.last_check.is_some_and(|t| t.elapsed() < MIN_CHECK_GAP)
                 || matches!(s.phase, Phase::Downloading | Phase::Installing)
             {
-                return;
+                return true;
             }
             s.phase = Phase::Checking;
             s.error = None;
@@ -346,8 +367,10 @@ impl Worker {
                 tracing::warn!("update check failed: {e:#}");
                 s.phase = Phase::Error;
                 s.error = Some(format!("Couldn't check for updates: {e:#}"));
+                return false;
             }
         }
+        true
     }
 
     /// Downloads the installer if needed, then quits clipr to install it when nothing runs. Returns true

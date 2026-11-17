@@ -141,6 +141,8 @@ export interface SystemInfo {
   known_games?: number;
   /** This page is open on another device (webhook URLs are hidden from it). */
   remote?: boolean;
+  /** Access from the local network is on, but its port couldn't be opened. */
+  lan_error?: string | null;
 }
 
 export interface CrashReport {
