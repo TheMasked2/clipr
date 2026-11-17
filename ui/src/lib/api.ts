@@ -143,6 +143,8 @@ export interface SystemInfo {
   remote?: boolean;
   /** Access from the local network is on, but its port couldn't be opened. */
   lan_error?: string | null;
+  /** This PC's address on the local network. */
+  lan_ip?: string | null;
 }
 
 export interface CrashReport {

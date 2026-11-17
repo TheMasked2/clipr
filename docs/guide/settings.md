@@ -6,7 +6,7 @@ that file resets everything.
 
 - [General](#general) · [Video](#video) · [Replay](#replay) · [Audio](#audio) · [Hotkeys](#hotkeys) ·
   [Games](#games) · [Library](#library) · [Recording](#recording) · [Discord](#discord) ·
-  [Network](#network) · [Look](#look)
+  [Network](#network) · [Appearance](#appearance)
 
 ## General
 
@@ -64,27 +64,55 @@ the normal value. Capture restarts when the game changes.
 
 ## Audio
 
-**Live levels** shows what each source picks up right now, from -60 to 0 dB, before its filters. **CLIP** means
-the source is already distorting before clipr gets it: lower its level in Windows (for a mic: Windows Sound
-settings → input volume or boost). The meters show while the buffer runs.
+The Audio page has a section per source, so everything about the microphone (volume, push-to-talk, filters) is
+in one place.
 
-### Sources
+### Tracks
 
-- **System audio** (on): record what you hear (game, voice chat, music) from your default output device.
-- **System audio volume** (100 %): 0 to 200 %. 100 % leaves it unchanged.
-- **Microphone** (off): record your default microphone.
-- **Microphone volume** (100 %): 0 to 200 %, applied after the mic's filters.
+The top of the page lists the tracks your clips get and what each one holds:
+
+- **Track 1, Mix**: system audio and the microphone together, plus your app tracks when system audio is off
+  (with it on, the apps are already in there). Players and Discord play this track, so clips sound right
+  everywhere.
+- **One track per app** in **App tracks**, always.
+- **Separate tracks** (off): also give system audio and the microphone a track of their own.
+
+Clips hold up to 6 tracks; a source that doesn't fit is still in the mix. The clip page lets you listen to each
+track, and video editors show them all, so you can mute voice chat or your mic afterwards.
+
+**Live levels** shows what each source records right now, after its filters, push-to-talk and volume, from -60
+to 0 dB (hover the number to see the level before the filters). **CLIP** means the source is already distorting
+before clipr gets it: lower its level in Windows (for a mic: Windows Sound settings → input volume or boost).
+The meters show while the buffer runs and follow the saved settings.
+
+### System audio
+
+- **Record system audio** (on): record what you hear (game, voice chat, music) from your default output device.
+- **Volume** (100 %): 0 to 200 %, applied after the filters. 100 % leaves it unchanged.
+- **Filters**: see [Filters](#filters).
+
+### Microphone
+
+- **Record the microphone** (off): record your default microphone.
+- **Volume** (100 %): 0 to 200 %, applied after the mic's filters.
 - **Push-to-talk key** (empty): record the mic only while this key is held, for example the push-to-talk key of
   your voice chat, like `V` or `Mouse4`. Empty means the mic is always recorded.
 - **Push-to-talk release (ms)** (200): keep the mic open this long after you let go, so the end of a word isn't
-  cut off.
-- **Apps on their own track** (none): record these programs separately, up to 4, like `discord.exe`. Then you can
-  mute voice chat later in a video editor. With system audio on, this needs **Separate tracks**, because the
-  app is already part of the mix. Needs Windows 10 version 2004 or newer.
-- **Separate tracks** (off): also write every source on its own track. Track 1 is always the full mix, so clips
-  still play normally everywhere. The clip page lets you listen to each track.
-- **Microphone offset (ms)** (0) and **System audio offset (ms)** (0): shift a source in time if it's out of
-  sync with the video. Positive = later.
+  cut off. Shows once a push-to-talk key is set.
+- **Filters**: see [Filters](#filters).
+
+### App tracks
+
+- **Apps on their own track** (none): record these programs separately, up to 4, like `discord.exe`. Each gets
+  a track of its own, so you can mute voice chat later in a video editor. Needs Windows 10 version 2004 or
+  newer. Each app has its own filter list below it.
+
+### Audio out of sync with the video?
+
+Tucked away at the bottom, because you normally don't need it:
+
+- **Microphone offset (ms)** (0) and **System audio offset (ms)** (0): shift a source in time if it plays early
+  or late in your clips. Positive = later.
 
 ### Filters
 
@@ -131,8 +159,8 @@ it off. A hotkey turns red when two actions share the same combination.
 Games and programs are named by their **exe name**, like `cs2.exe`. To find one, open Task Manager while the game
 runs, right-click it and choose **Go to details**: the highlighted name is the exe.
 
-- **Mode** (Auto): **Auto** buffers only while a known game runs and idles otherwise. **Always** buffers the
-  monitor all the time, game or not.
+- **Mode** (Game only): **Game only** buffers only while a known game runs and does nothing otherwise.
+  **Desktop** buffers your monitor all the time, game or not.
 - **Extra games** (none): games to detect by exe name (`mygame.exe`), on top of the known list.
 - **Blocked programs** (none): exe names never treated as games, even if the known list has them. Use this
   when clipr starts buffering for a program that isn't a game.
@@ -147,7 +175,8 @@ runs, right-click it and choose **Go to details**: the highlighted name is the e
 - **Minimum free space (GB)** (5): stop recording and warn when the clips drive has less than this free.
 - **Clean up now:** runs the age and size limits on the saved settings right away. It also runs every hour.
 
-The Home page shows how much space is free and how much your clips use.
+The Home page shows your newest clip, how many clips you have, how much space is free and how much your
+clips use.
 
 ## Recording
 
@@ -161,13 +190,14 @@ setup and what each option does.
 ## Network
 
 - **Allow access from my local network** (off): open the clipr page to other devices at home, like your phone.
-  They have to enter a PIN, which is shown here after you save, together with the address to open. Anyone on
+  They have to enter a PIN, which is shown here after you save, together with the address to open (this PC's
+  address on your network, like `http://192.168.1.20:7845`). Anyone on
   your network with the PIN can see and delete your clips, and the connection isn't encrypted, so only turn
   this on at home. Turning it on or off works right away.
 - **First port** (7845): the first port to try for the page. If it's taken, clipr uses the next free one.
   Applies after a restart.
 
-## Look
+## Appearance
 
 - **Accent colour** (purple): the one colour used for buttons, highlights and the timeline.
 - **Theme** (Dark sleek): more looks will follow.

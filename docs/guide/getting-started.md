@@ -66,7 +66,7 @@ by game, by clips or recordings, or search by title.
 Open a clip to:
 
 - play it, and switch audio tracks if you recorded several (see
-  [Separate tracks](settings.md#audio)),
+  [Tracks](settings.md#tracks)),
 - **trim** it: drag the two handles on the timeline, then **Save as new clip** or **Replace original**.
   Trimming is lossless and takes a moment, not a re-encode,
 - rename it, mark it as a favorite (★), or put it on **shelves** (your own named collections),
@@ -91,8 +91,8 @@ next time clipr starts, up to about the last second.
 clipr's page can be opened from other devices at home, protected by a PIN:
 
 1. On the PC, open **Settings → Network**, turn on **Allow access from my local network** and click **Save**.
-   It works right away. The Network tab now shows the PIN and the address to open: your PC's IP address and
-   the port, like `http://192.168.1.20:7845` (`ipconfig` in a terminal shows the IPv4 address).
+   It works right away. The Network tab now shows the PIN and the address to open, like
+   `http://192.168.1.20:7845`.
 2. Open that address on your phone and enter the PIN.
 
 Turning it off closes the access at once, and pages open on other devices stop updating.

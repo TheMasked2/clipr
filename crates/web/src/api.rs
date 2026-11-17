@@ -150,7 +150,18 @@ pub async fn system(State(s): State<AppState>, ext: Extensions) -> Json<Value> {
     info["remote"] = auth::is_remote(&ext).into();
     // Access from the local network is on, but its listener couldn't open.
     info["lan_error"] = s.lan.error().into();
+    // The address other devices at home use, for the Network tab.
+    info["lan_ip"] = lan_ip().map(|ip| ip.to_string()).into();
     Json(info)
+}
+
+/// This PC's address on the local network: the one Windows would send from towards the internet. Connecting a
+/// UDP socket only picks the route; nothing is sent.
+fn lan_ip() -> Option<std::net::IpAddr> {
+    let socket = std::net::UdpSocket::bind(("0.0.0.0", 0)).ok()?;
+    socket.connect(("192.0.2.1", 80)).ok()?; // TEST-NET-1: never reached
+    let ip = socket.local_addr().ok()?.ip();
+    (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
 }
 
 // ---- crash reports ------------------------------------------------------------------------------------
