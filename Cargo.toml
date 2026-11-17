@@ -82,6 +82,9 @@ clipr-mux = { path = "crates/mux" }
 clipr-discord = { path = "crates/discord" }
 tower-http = { version = "0.6", features = ["fs"] }
 ureq = { version = "3", features = ["json"] }
+clipr-update = { path = "crates/update" }
+semver = "1"
+sha2 = "0.11"
 trash = "5"
 nnnoiseless = "0.5"
 rusqlite = { version = "0.37", features = ["bundled"] }

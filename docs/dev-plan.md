@@ -186,7 +186,9 @@ A capture restart (new monitor or video settings) finishes the file and continue
 - [x] Inno Setup installer (`installer/clipr.iss`: per user by default, Start menu, optional desktop icon,
       asks to quit a running clipr, uninstall keeps clips and asks about settings) + portable zip, both built
       by `scripts/package.ps1` and in CI. Start with Windows is a setting (Phase 2)
-- [ ] Opt-in updater (GitHub releases, only applies when no game runs and nothing is recording)
+- [x] Opt-in updater (GitHub releases, only applies when no game runs and nothing is recording): checks every
+      6 h when on, "Check now" / "Update now" in Settings → General, beta channel toggle, sha256-verified
+      installer, portable copies get a Download link
 - [ ] Opt-in crash reports
 - [ ] User docs: setup, Discord bot tutorial, every setting explained
 - [ ] Test matrix: NVIDIA / AMD / Intel, HDR on/off, multi-monitor, borderless + fullscreen, laptop iGPU

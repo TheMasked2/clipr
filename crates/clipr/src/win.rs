@@ -8,7 +8,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, Unregister
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetMessageW, MB_ICONERROR, MB_OK, MSG, MessageBoxW, PostQuitMessage,
-    PostThreadMessageW, SW_SHOWNORMAL, TranslateMessage, WM_APP, WM_HOTKEY,
+    PostThreadMessageW, SW_SHOWNORMAL, TranslateMessage, WM_APP, WM_HOTKEY, WM_QUIT,
 };
 
 /// Posted to the main thread when it should look at its queues (menu clicks, status changes).
@@ -91,6 +91,12 @@ pub fn wake(thread_id: u32) {
 pub fn quit_loop() {
     // SAFETY: no preconditions; ends this thread's message loop.
     unsafe { PostQuitMessage(0) };
+}
+
+/// Ends another thread's message loop (like the tray's Quit, from any thread).
+pub fn quit_thread(thread_id: u32) {
+    // SAFETY: posting a plain thread message has no memory-safety preconditions.
+    unsafe { PostThreadMessageW(thread_id, WM_QUIT, 0, 0) };
 }
 
 /// Registers a system-wide hotkey for this thread; presses arrive in [`message_loop`] as `on_hotkey(id)`.

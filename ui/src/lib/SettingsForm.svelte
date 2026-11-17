@@ -15,6 +15,7 @@
   import LevelMeters from './LevelMeters.svelte';
   import AudioFilters from './AudioFilters.svelte';
   import DiscordSettings from './DiscordSettings.svelte';
+  import UpdatePanel from './UpdatePanel.svelte';
 
   let { initial }: { initial: Config } = $props();
 
@@ -137,7 +138,9 @@
   {#if tab === 'General'}
     <Field title="Start with Windows" hint="Start clipr when Windows starts."><Toggle bind:checked={draft.general.start_with_windows} label="Start with Windows" /></Field>
     <Field title="Open the UI on start" hint="Open this page when you start clipr yourself, so you can see it is running. Never happens when Windows starts it."><Toggle bind:checked={draft.general.open_ui_on_start} label="Open UI on start" /></Field>
-    <Field title="Update automatically" hint="Check GitHub releases and update by itself. Opt-in, off by default."><Toggle bind:checked={draft.general.auto_update} label="Auto update" /></Field>
+    <Field title="Update automatically" hint="Check GitHub releases every few hours and install a new version by itself, only when no game runs and nothing records. Opt-in, off by default."><Toggle bind:checked={draft.general.auto_update} label="Auto update" /></Field>
+    <Field title="Beta versions" hint="Offer beta versions too, not only full releases."><Toggle bind:checked={draft.general.update_beta} label="Beta versions" /></Field>
+    <UpdatePanel remote={sys?.remote ?? false} />
     <Field title="Send crash reports" hint="Send anonymous crash reports. Opt-in, off by default."><Toggle bind:checked={draft.privacy.crash_reports} label="Crash reports" /></Field>
   {:else if tab === 'Video'}
     <div class="seg">

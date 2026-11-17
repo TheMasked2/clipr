@@ -313,6 +313,7 @@ dependencies = [
  "clipr-gpu",
  "clipr-library",
  "clipr-mux",
+ "clipr-update",
  "clipr-web",
  "serde",
  "serde_json",
@@ -455,6 +456,16 @@ dependencies = [
 [[package]]
 name = "clipr-update"
 version = "0.1.0-beta.1"
+dependencies = [
+ "anyhow",
+ "clipr-core",
+ "semver",
+ "serde",
+ "sha2",
+ "tempfile",
+ "tracing",
+ "ureq",
+]
 
 [[package]]
 name = "clipr-voice"

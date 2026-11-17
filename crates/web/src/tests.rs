@@ -1056,3 +1056,49 @@ async fn discord_queue_endpoints() {
         .await;
     assert_eq!(code, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn updates_report_check_and_refuse_to_apply_here() {
+    let env = env();
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
+    let app = router(env.state.clone());
+
+    let (code, body) = get_body(app.clone(), "/api/update").await;
+    assert_eq!(code, StatusCode::OK);
+    let status = json(&body);
+    assert_eq!(status["current"], clipr_core::VERSION);
+    assert_eq!(status["state"], "idle");
+
+    let (code, _, _) = call("POST", "/api/update/check").send(&app).await;
+    assert_eq!(code, StatusCode::ACCEPTED);
+
+    // NoopControl can't install: the reason comes back as a conflict.
+    let (code, _, body) = call("POST", "/api/update/apply").send(&app).await;
+    assert_eq!(code, StatusCode::CONFLICT);
+    assert!(json(&body)["error"].is_string());
+
+    // A signed-in LAN device may look, but not install (it would restart clipr under the player).
+    let (_, headers, _) = call("POST", "/api/login")
+        .peer("192.168.1.50")
+        .body(r#"{"pin":"123456"}"#)
+        .send(&app)
+        .await;
+    let set_cookie = headers[header::SET_COOKIE].to_str().unwrap().to_string();
+    let token = set_cookie.split(';').next().unwrap().to_string();
+    let (code, _, _) = call("GET", "/api/update")
+        .peer("192.168.1.50")
+        .header("cookie", &token)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    let (code, _, _) = call("POST", "/api/update/apply")
+        .peer("192.168.1.50")
+        .header("cookie", &token)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+}

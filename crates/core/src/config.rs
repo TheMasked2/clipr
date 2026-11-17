@@ -478,8 +478,10 @@ pub struct GeneralConfig {
     /// Open the web UI when you start clipr yourself, so you can see it's running. Never happens when
     /// Windows starts it (`--background`).
     pub open_ui_on_start: bool,
-    /// Check GitHub releases and update by itself. Opt-in.
+    /// Check GitHub releases and update by itself. Opt-in. "Check now" in the UI works either way.
     pub auto_update: bool,
+    /// Offer beta (prerelease) versions too. On by default while clipr itself is a beta.
+    pub update_beta: bool,
 }
 
 impl Default for GeneralConfig {
@@ -488,6 +490,7 @@ impl Default for GeneralConfig {
             start_with_windows: false,
             open_ui_on_start: true,
             auto_update: false,
+            update_beta: crate::VERSION.contains('-'),
         }
     }
 }
