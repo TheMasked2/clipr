@@ -7,6 +7,7 @@
     { route: 'gallery', label: 'Gallery', href: '#/gallery' },
     { route: 'settings', label: 'Settings', href: '#/settings' },
   ] as const;
+  const GUIDE = 'https://github.com/TheMasked2/clipr/blob/main/docs/guide/README.md';
 </script>
 
 <header>
@@ -21,6 +22,7 @@
           aria-current={router.route === l.route ? 'page' : undefined}>{l.label}</a
         >
       {/each}
+      <a href={GUIDE} target="_blank" rel="noopener noreferrer" title="The user guide, on GitHub">Help</a>
     </nav>
   </div>
 </header>

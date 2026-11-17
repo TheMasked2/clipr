@@ -175,6 +175,7 @@
           {/if}
         </select>
       </Field>
+      <Field title="High priority" hint="Let clipr's capture go first on the GPU and CPU, so a game at uncapped FPS can't make your clips stutter. The game doesn't notice: clipr's GPU work is about 0.1 ms a frame. On by default."><Toggle bind:checked={draft.video.high_priority} label="High priority" /></Field>
     {/if}
     <Field title="Per-game profiles" hint="Use other video settings while a particular game runs. Match by the game's name or exe (cs2.exe), any case. Leave a box empty to keep the normal value above. Capture restarts when the game changes." stacked>
       <div class="profiles">
@@ -195,6 +196,7 @@
     <Field title="Clip length (seconds)" hint="How many seconds a saved clip goes back."><input type="number" min="1" max="3600" bind:value={draft.replay.clip_secs} /></Field>
     <Field title="Buffer length (seconds)" hint={`How much the buffer keeps in memory; "save long clip" saves all of it. Estimated RAM use at your bitrate: about ${ramMb} MB.`}><input type="number" min="1" max="3600" bind:value={draft.replay.buffer_secs} /></Field>
     <Field title="Sound on save" hint="Play a short sound when a clip is saved."><Toggle bind:checked={draft.replay.sound_on_save} label="Sound on save" /></Field>
+    <Field title="Note on save" hint="Show a small &quot;Clip saved&quot; note in the top-right corner. It never shows up in your clips. Games in exclusive fullscreen hide it (the sound still plays)."><Toggle bind:checked={draft.replay.toast_on_save} label="Note on save" /></Field>
   {:else if tab === 'Audio'}
     <Field title="Live levels" hint="What each source picks up right now, before its filters, from -60 to 0 dB. CLIP means the source is already distorting before clipr gets it: lower its level in Windows. Shows while the buffer runs; save to apply changes." stacked><LevelMeters /></Field>
     <h3 class="sub">Sources</h3>

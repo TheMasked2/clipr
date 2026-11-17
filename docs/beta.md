@@ -3,6 +3,9 @@
 Thanks for testing clipr! It records your games in the background and saves the last moments when you
 press a hotkey, like ShadowPlay or Medal, but open source, with no account and no game hooks.
 
+This page is the short version. The [user guide](https://github.com/TheMasked2/clipr/blob/main/docs/guide/README.md) explains everything, including every
+setting.
+
 ## Start
 
 1. Run `clipr-<version>-setup.exe` (it installs for you only, no admin needed, and adds clipr to the Start
