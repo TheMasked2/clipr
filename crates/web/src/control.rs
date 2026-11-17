@@ -37,9 +37,9 @@ pub trait Control: Send + Sync + 'static {
     /// Hardware facts for the settings page: GPUs, encoders, monitors. Free-form JSON.
     fn system_info(&self) -> serde_json::Value;
 
-    /// The current level of each audio source in dBFS (-60 = silence, 0 = full scale). Empty when audio
-    /// isn't running.
-    fn levels(&self) -> Vec<(String, f32)>;
+    /// The current level of each audio source in dBFS (-100 = silence, 0 = full scale), before and after
+    /// its filters. Empty when audio isn't running.
+    fn levels(&self) -> Vec<clipr_core::status::Level>;
 
     /// Crash reports from earlier runs, newest first, for `GET /api/crashes` (see `docs/api.md`). Empty
     /// unless `privacy.crash_reports` is on.
@@ -98,7 +98,7 @@ impl Control for NoopControl {
     fn system_info(&self) -> serde_json::Value {
         serde_json::json!({})
     }
-    fn levels(&self) -> Vec<(String, f32)> {
+    fn levels(&self) -> Vec<clipr_core::status::Level> {
         Vec::new()
     }
 }

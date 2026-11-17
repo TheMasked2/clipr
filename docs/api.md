@@ -22,8 +22,11 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
   `paused` is true while the user has paused the replay buffer (then `state` is `idle`).
 - `GET /api/events` (WebSocket). Server → client messages:
   - `{"type":"status", ...Status}` on connect and on every change
-  - `{"type":"levels","levels":[{"name":"System","db":-23.5}]}` about 10 times a second while audio is
-    running (nothing is sent without audio); `db` is dBFS per source, -60 and below is silence
+  - `{"type":"levels","levels":[{"source":"system","name":"System","db":-23.5,"after":-26.1}]}` about 10
+    times a second while audio is running (nothing is sent without audio). Per source, peak dBFS over the
+    last ~100 ms (-60 and below is silence): `db` as the device delivered it, `after` as it goes into the
+    recording (after the source's filters, push-to-talk and volume). `source` is the source's key in
+    `audio.filters` (`system`, `mic`, or an app's exe name in lower case)
   - `{"type":"clip_saved","clip": Clip}` when a clip or recording was written
   - `{"type":"clip_failed","message":"..."}`
   - `{"type":"library"}` when clips changed some other way (deleted, renamed, cleanup); refetch the list

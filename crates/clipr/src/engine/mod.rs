@@ -25,7 +25,7 @@ use clipr_audio::AudioCapture;
 use clipr_buffer::{Packet, ReplayBuffer, SECOND};
 use clipr_core::config::{AudioConfig, Config, GameMode, VideoCodec};
 use clipr_core::events::{Bus, Event};
-use clipr_core::status::{Activity, RecState, Status};
+use clipr_core::status::{Activity, Level, RecState, Status};
 use clipr_encode::{Codec, EncodeSettings};
 use clipr_games::{Game, GameWatcher};
 use clipr_mux::MediaFormat;
@@ -115,7 +115,7 @@ pub struct Engine {
 }
 
 /// Audio levels in dBFS per source, refreshed by the supervisor ~10 times a second.
-type Levels = Arc<Mutex<Vec<(String, f32)>>>;
+type Levels = Arc<Mutex<Vec<Level>>>;
 
 impl Engine {
     pub fn send(&self, command: Command) {
@@ -123,7 +123,7 @@ impl Engine {
     }
 
     /// The latest audio levels; empty when no audio is running.
-    pub fn levels(&self) -> Vec<(String, f32)> {
+    pub fn levels(&self) -> Vec<Level> {
         self.levels.lock().unwrap().clone()
     }
 }

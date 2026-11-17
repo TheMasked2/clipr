@@ -1,12 +1,11 @@
 <script lang="ts">
   import { app } from './store.svelte';
+  import { FLOOR, fmtDb, pct } from './meter';
 
-  const FLOOR = -60;
   /** The meters show the raw input, so a peak this close to 0 dB means it clipped before clipr got it. */
   const CLIP_DB = -0.5;
   /** How long CLIP stays lit after the last clipped peak, so a short one is still seen. */
   const CLIP_HOLD_MS = 2000;
-  const pct = (db: number) => Math.round((Math.min(0, Math.max(FLOOR, db)) - FLOOR) * (100 / -FLOOR));
 
   // Updated on every levels message (10 a second), which also lets the badge expire. When levels stop the
   // store clears them, and the meters (with their badges) go away.
@@ -34,7 +33,7 @@
       {#if clipping.has(l.name)}
         <span class="badge" title="This source reached full scale: its sound is distorting before clipr records it. Lower its level (for a mic: Windows Sound settings → input volume or boost).">CLIP</span>
       {:else}
-        <span class="db">{l.db <= FLOOR ? '-∞' : Math.round(l.db)} dB</span>
+        <span class="db">{fmtDb(l.db)}</span>
       {/if}
     </div>
   {:else}

@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { AudioFilter, Config, FilterKind } from './api';
   import Toggle from './Toggle.svelte';
+  import FilterMeter from './FilterMeter.svelte';
+  import { app } from './store.svelte';
 
   // One source's filter list, like OBS: nothing by default; add, tune, reorder, switch off or remove.
   let { audio, source, label }: { audio: Config['audio']; source: string; label: string } = $props();
@@ -74,6 +76,13 @@
   const info = (k: Kind) => KINDS.find((x) => x.kind === k)!;
 
   const list = $derived(audio.filters[source] ?? []);
+  // The meter measures the saved filters (the volume too, since it applies after them).
+  const dirty = $derived.by(() => {
+    const saved = app.config?.audio;
+    if (!saved) return false;
+    const vol = (a: Config['audio']) => (source === 'system' ? a.system_volume : source === 'mic' ? a.mic_volume : 100);
+    return JSON.stringify(saved.filters[source] ?? []) !== JSON.stringify(list) || vol(saved) !== vol(audio);
+  });
   let adding = $state<Kind | ''>('');
 
   function add() {
@@ -101,6 +110,7 @@
 </script>
 
 <div class="filters" aria-label="{label} filters">
+  <FilterMeter {source} {label} {dirty} />
   {#each list as f, i (i)}
     {@const k = info(f.kind)}
     <div class="filter" class:off={!f.enabled}>

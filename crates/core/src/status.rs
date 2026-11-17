@@ -118,6 +118,19 @@ impl Status {
     }
 }
 
+/// One audio source's latest peak levels in dBFS, for the UI meters (sent ~10 times a second).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Level {
+    /// The source's key in `audio.filters`: `system`, `mic`, or an app's exe name in lower case.
+    pub source: String,
+    /// The name shown in the UI.
+    pub name: String,
+    /// What the device delivered, before clipr touches it.
+    pub db: f32,
+    /// What goes into the recording: after the source's filters, push-to-talk and volume.
+    pub after: f32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -100,7 +100,7 @@ impl Control for AppControl {
         win::reveal(path);
     }
 
-    fn levels(&self) -> Vec<(String, f32)> {
+    fn levels(&self) -> Vec<clipr_core::status::Level> {
         self.engine.levels()
     }
 

@@ -71,7 +71,7 @@ fn main() -> Result<()> {
             let levels: Vec<String> = capture
                 .levels()
                 .iter()
-                .map(|(n, db)| format!("{n} {db:.0} dB"))
+                .map(|l| format!("{} {:.0} → {:.0} dB", l.name, l.db, l.after))
                 .collect();
             println!("levels: {}", levels.join(", "));
         }

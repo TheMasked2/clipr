@@ -158,6 +158,8 @@ pub struct Source {
     levels: Arc<Levels>,
     level_index: usize,
     meter: Meter,
+    /// The same after the filter chain and push-to-talk.
+    meter_after: Meter,
     epoch: Instant,
     open: Option<Open>,
     /// The process an app source is (or should be) capturing.
@@ -184,6 +186,7 @@ impl Source {
             levels,
             level_index,
             meter: Meter::new(),
+            meter_after: Meter::new(),
             epoch: now,
             open: None,
             pid: None,
@@ -216,7 +219,7 @@ impl Source {
                 timeline,
                 &mut self.processing,
                 open_ptt,
-                &mut self.meter,
+                [&mut self.meter, &mut self.meter_after],
             );
             if let Err(e) = result {
                 if e.downcast_ref::<windows::core::Error>()
@@ -237,6 +240,9 @@ impl Source {
         }
         if let Some(db) = self.meter.take(now) {
             self.levels.set(self.level_index, db);
+        }
+        if let Some(db) = self.meter_after.take(now) {
+            self.levels.set_after(self.level_index, db);
         }
     }
 
@@ -557,7 +563,7 @@ fn read_all(
     timeline: &mut Timeline,
     processing: &mut Processing,
     ptt_open: bool,
-    meter: &mut Meter,
+    [meter, meter_after]: [&mut Meter; 2],
 ) -> Result<()> {
     loop {
         // SAFETY: valid capture client.
@@ -612,6 +618,7 @@ fn read_all(
             // that sound), then start fresh, so it isn't played at the new packet's time.
             open.processed.clear();
             chain.flush(ptt_open, &mut open.processed);
+            meter_after.add(&open.processed);
             timeline.push(lane, end + processing.shift_100ns, &open.processed, false);
         }
         processing.last_end = Some(qpc + duration);
@@ -623,6 +630,7 @@ fn read_all(
             }
             None => samples,
         };
+        meter_after.add(samples);
         timeline.push(lane, qpc + processing.shift_100ns, samples, discontinuity);
     }
 }

@@ -1,5 +1,7 @@
 //! Which sources exist and which tracks mix what, from the user's settings.
 
+use clipr_core::config::{MIC_SOURCE, SYSTEM_SOURCE};
+
 /// A capture source.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceKind {
@@ -12,6 +14,15 @@ pub enum SourceKind {
 }
 
 impl SourceKind {
+    /// The source's key in `audio.filters`: `system`, `mic`, or the app's exe name in lower case.
+    pub fn key(&self) -> String {
+        match self {
+            Self::System => SYSTEM_SOURCE.into(),
+            Self::Mic => MIC_SOURCE.into(),
+            Self::App(exe) => exe.to_ascii_lowercase(),
+        }
+    }
+
     /// The name shown in the UI and used as a track name.
     pub fn label(&self) -> String {
         match self {
