@@ -40,6 +40,21 @@ pub trait Control: Send + Sync + 'static {
     /// The current level of each audio source in dBFS (-60 = silence, 0 = full scale). Empty when audio
     /// isn't running.
     fn levels(&self) -> Vec<(String, f32)>;
+
+    /// The updater's state for `GET /api/update`. Free-form JSON (see `docs/api.md`).
+    fn update_status(&self) -> serde_json::Value {
+        serde_json::json!({ "current": clipr_core::VERSION, "installed": false, "state": "idle" })
+    }
+
+    /// Asks GitHub for a newer release; the answer shows up in [`Control::update_status`].
+    fn check_update(&self) {}
+
+    /// Downloads and installs the update the last check found, which quits and restarts clipr. The error
+    /// (shown to the user) says why it can't right now: a game or recording runs, a portable copy, nothing to
+    /// install.
+    fn apply_update(&self) -> std::result::Result<(), String> {
+        Err("Updates aren't available here.".into())
+    }
 }
 
 /// Does nothing; for tests and for running the web server on its own.

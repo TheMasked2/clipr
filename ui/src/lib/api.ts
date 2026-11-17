@@ -64,7 +64,12 @@ export type AudioFilter = { enabled: boolean } & FilterKind;
 export interface Config {
   web: { port: number; lan: boolean; lan_pin: string };
   ui: { theme: string; accent: string; setup_done: boolean };
-  general: { start_with_windows: boolean; open_ui_on_start: boolean; auto_update: boolean };
+  general: {
+    start_with_windows: boolean;
+    open_ui_on_start: boolean;
+    auto_update: boolean;
+    update_beta: boolean;
+  };
   privacy: { crash_reports: boolean };
   replay: { enabled: boolean; clip_secs: number; buffer_secs: number; sound_on_save: boolean };
   video: { codec: Codec; fps: number; height: number; bitrate_kbps: number; monitor: number };
@@ -136,6 +141,46 @@ export interface SystemInfo {
   known_games?: number;
   /** This page is open on another device (webhook URLs are hidden from it). */
   remote?: boolean;
+}
+
+export type UpdateState =
+  | 'idle'
+  | 'checking'
+  | 'up_to_date'
+  | 'available'
+  | 'downloading'
+  | 'ready'
+  | 'waiting'
+  | 'installing'
+  | 'error';
+
+export interface UpdateAsset {
+  name: string;
+  url: string;
+  size: number;
+}
+
+export interface UpdateInfo {
+  current: string;
+  /** Installed with the installer (only then can clipr update itself). */
+  installed: boolean;
+  state: UpdateState;
+  release: {
+    version: string;
+    page: string;
+    notes: string;
+    published: string | null;
+    prerelease: boolean;
+    setup: UpdateAsset | null;
+    portable: UpdateAsset | null;
+  } | null;
+  checked_at: number | null;
+  error: string | null;
+  progress: { done: number; total: number } | null;
+  /** Why it can't install right now ("a game is running"), or null. */
+  busy: string | null;
+  /** It installs as soon as nothing runs. */
+  will_install: boolean;
 }
 
 export interface Disk {
@@ -215,6 +260,9 @@ export const getConfig = () => request<Config>('GET', '/api/config');
 export const putConfig = (c: Config) => request<Config>('PUT', '/api/config', c);
 export const getSystem = () => request<SystemInfo>('GET', '/api/system');
 export const getDisk = () => request<Disk>('GET', '/api/disk');
+export const getUpdate = () => request<UpdateInfo>('GET', '/api/update');
+export const checkUpdate = () => request<void>('POST', '/api/update/check');
+export const applyUpdate = () => request<void>('POST', '/api/update/apply');
 export const getGames = () => request<GameInfo[]>('GET', '/api/games');
 export const getShelves = () => request<string[]>('GET', '/api/shelves');
 

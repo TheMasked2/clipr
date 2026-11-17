@@ -15,6 +15,7 @@ mod engine;
 mod icon;
 mod overlay;
 mod tray;
+mod updater;
 mod win;
 
 use std::sync::{Arc, Mutex};
@@ -102,6 +103,15 @@ fn run() -> Result<()> {
     );
     let shared_config = Arc::new(Mutex::new(config.clone()));
     let (hotkeys_tx, hotkeys_rx) = std::sync::mpsc::channel();
+    let updater = updater::Updater::start(
+        status.clone(),
+        {
+            let config = shared_config.clone();
+            move || config.lock().unwrap().general.clone()
+        },
+        paths.data_dir.join("updates"),
+        win::current_thread_id(),
+    );
     let control = Arc::new(control::AppControl {
         engine: engine.clone(),
         config: shared_config.clone(),
@@ -109,6 +119,7 @@ fn run() -> Result<()> {
         library: library.clone(),
         hotkeys: hotkeys_tx,
         main_thread: win::current_thread_id(),
+        updater,
         known_games: Arc::new(move || watcher.list_len()),
     });
     let server = runtime.spawn(clipr_web::serve_many(
@@ -169,6 +180,9 @@ fn run() -> Result<()> {
     });
     runtime.shutdown_timeout(Duration::from_secs(1));
     let _ = std::fs::remove_file(paths.port_file());
+    if let Some(setup) = updater::take_pending() {
+        updater::run_installer(&setup, &paths.log_dir());
+    }
     tracing::info!("bye");
     tray_result
 }

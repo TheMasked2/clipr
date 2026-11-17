@@ -151,6 +151,31 @@ pub async fn system(State(s): State<AppState>, ext: Extensions) -> Json<Value> {
     Json(info)
 }
 
+// ---- updates ------------------------------------------------------------------------------------------
+
+pub async fn update_status(State(s): State<AppState>) -> Json<Value> {
+    Json(s.control.update_status())
+}
+
+pub async fn check_update(State(s): State<AppState>) -> StatusCode {
+    s.control.check_update();
+    StatusCode::ACCEPTED
+}
+
+/// Installs the update, which quits and restarts clipr: only from this PC, never from a LAN device.
+pub async fn apply_update(State(s): State<AppState>, ext: Extensions) -> ApiResult<StatusCode> {
+    if auth::is_remote(&ext) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "Updates can only be installed from the PC clipr runs on.",
+        ));
+    }
+    s.control
+        .apply_update()
+        .map_err(|message| ApiError::new(StatusCode::CONFLICT, message))?;
+    Ok(StatusCode::ACCEPTED)
+}
+
 /// Lower-cased, backslashes, no trailing slash, no `\\?\` prefix: for comparing paths as text.
 fn norm_path(p: &str) -> String {
     let p = p.replace('/', "\\");

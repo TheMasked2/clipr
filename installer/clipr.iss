@@ -6,7 +6,8 @@
 ; is offered by Inno's own dialog. Settings (%APPDATA%\clipr) and the library (%LOCALAPPDATA%\clipr) are
 ; separate from the program folder, so an update or reinstall keeps them. Clips are never touched.
 ;
-; clipr's updater runs this with /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /UPDATE after quitting: setup waits for
+; clipr's updater runs this with /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /UPDATE=1 after quitting (Inno's
+; {param:UPDATE} needs the =value form): setup waits for
 ; clipr to finish exiting, installs, and starts clipr again (in the tray).
 
 #ifndef AppVersion

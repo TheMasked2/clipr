@@ -153,7 +153,7 @@ and fetched from your phone with bot commands.
 | `crates/clipr` | The `clipr.exe` binary: tray, single instance, lifecycle |
 | `crates/core` | Config, paths, logging, status, event bus |
 | `crates/web` | Local web server (REST + WebSocket) with the UI embedded |
-| `crates/*` (others) | Placeholders for later phases: capture, gpu, encode, audio, buffer, mux, games, library, discord, cloud, voice, update |
+| `crates/*` (others) | capture, gpu, encode, audio, buffer, mux, games, library, discord, update (see `docs/dev-plan.md`); cloud and voice are placeholders for v1.x |
 | `ui/` | The Svelte web UI, built into `ui/dist` and embedded in the exe |
 | `docs/dev-plan.md` | Phased development plan and milestones |
 | `legacy/ultron/` | [TheMasked2/ultron](https://github.com/TheMasked2/ultron) at `5590c12`, MIT. Voice clipping on OBS: game detection, wake word + STT, installer, updater. Reference only. |

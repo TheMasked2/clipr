@@ -119,6 +119,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/mark", post(api::mark))
         .route("/api/config", get(api::get_config).put(api::put_config))
         .route("/api/system", get(api::system))
+        .route("/api/update", get(api::update_status))
+        .route("/api/update/check", post(api::check_update))
+        .route("/api/update/apply", post(api::apply_update))
         .route(
             "/api/clips",
             get(api::list_clips)

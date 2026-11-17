@@ -21,6 +21,7 @@ pub struct AppControl {
     /// New hotkeys go to the main thread, which owns the registrations.
     pub hotkeys: mpsc::Sender<HotkeyConfig>,
     pub main_thread: u32,
+    pub updater: crate::updater::Updater,
     pub known_games: Arc<dyn Fn() -> usize + Send + Sync>,
 }
 
@@ -98,6 +99,18 @@ impl Control for AppControl {
 
     fn levels(&self) -> Vec<(String, f32)> {
         self.engine.levels()
+    }
+
+    fn update_status(&self) -> serde_json::Value {
+        self.updater.status_json()
+    }
+
+    fn check_update(&self) {
+        self.updater.check();
+    }
+
+    fn apply_update(&self) -> std::result::Result<(), String> {
+        self.updater.apply()
     }
 
     fn system_info(&self) -> serde_json::Value {
