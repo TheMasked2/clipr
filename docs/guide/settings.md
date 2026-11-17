@@ -27,7 +27,8 @@ that file resets everything.
 
 **Preview** at the top shows what clipr captures right now, a few frames a second (Home shows it too, with a
 **Hide** link). It only runs while the buffer or a recording does, and only while a page shows it, so it costs
-nothing otherwise.
+nothing otherwise. Other devices (LAN access) don't get it unless you turn on **Live preview on other devices**
+under Network, because it shows your whole screen.
 
 **Simple** shows three choices:
 

@@ -64,7 +64,8 @@ export type FilterKind =
 export type AudioFilter = { enabled: boolean } & FilterKind;
 
 export interface Config {
-  web: { port: number; lan: boolean; lan_pin: string };
+  /** `lan_preview`: other devices may see the live capture preview (the whole screen). */
+  web: { port: number; lan: boolean; lan_pin: string; lan_preview: boolean };
   ui: { theme: string; accent: string; setup_done: boolean };
   general: {
     start_with_windows: boolean;

@@ -87,6 +87,7 @@ impl Nv12Converter {
             output_size,
             fps,
             target,
+            DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
             DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
         )?;
 
@@ -132,7 +133,7 @@ impl Nv12Converter {
 }
 
 /// A D3D11 video processor set up to scale one input size into `target` of an output of `output_size`, from
-/// full-range RGB into `output_space`.
+/// `input_space` into `output_space`.
 pub(crate) struct Processor {
     pub(crate) video_device: ID3D11VideoDevice,
     pub(crate) video_context: ID3D11VideoContext1,
@@ -147,6 +148,7 @@ impl Processor {
         output_size: (u32, u32),
         fps: u32,
         target: RECT,
+        input_space: DXGI_COLOR_SPACE_TYPE,
         output_space: DXGI_COLOR_SPACE_TYPE,
     ) -> Result<Self> {
         let video_device: ID3D11VideoDevice = gpu.device.cast().context("GPU has no video device")?;
@@ -205,11 +207,7 @@ impl Processor {
             video_context.VideoProcessorSetStreamDestRect(&processor, 0, true, Some(&target));
             video_context.VideoProcessorSetOutputTargetRect(&processor, false, None);
             video_context.VideoProcessorSetOutputBackgroundColor(&processor, false, &black);
-            video_context.VideoProcessorSetStreamColorSpace1(
-                &processor,
-                0,
-                DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
-            );
+            video_context.VideoProcessorSetStreamColorSpace1(&processor, 0, input_space);
             video_context.VideoProcessorSetOutputColorSpace1(&processor, output_space);
         }
 

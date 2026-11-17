@@ -25,11 +25,14 @@ struct Frame {
 struct State {
     watch_until: Option<Instant>,
     latest: Option<Arc<Frame>>,
+    /// Why the GPU can't make snapshots right now (the video thread tries again a little later).
+    error: Option<String>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
     watch_until: None,
     latest: None,
+    error: None,
 });
 
 fn state() -> std::sync::MutexGuard<'static, State> {
@@ -43,26 +46,50 @@ pub fn wanted() -> bool {
 
 /// The video thread's newest snapshot.
 pub fn publish(snapshot: Snapshot) {
-    state().latest = Some(Arc::new(Frame {
+    let mut s = state();
+    s.error = None;
+    s.latest = Some(Arc::new(Frame {
         snapshot,
         jpeg: OnceLock::new(),
     }));
 }
 
-/// The video pipeline stopped: there's nothing to show until it runs again.
-pub fn clear() {
-    state().latest = None;
+/// The GPU couldn't make a snapshot: the page says why instead of waiting forever.
+pub fn fail(error: String) {
+    let mut s = state();
+    s.latest = None;
+    s.error = Some(error);
 }
 
-/// Keeps snapshots coming for a while and returns the newest one as a JPEG (`None` while nothing is
-/// captured, or before the first snapshot arrives).
-pub fn jpeg() -> Option<Arc<Vec<u8>>> {
+/// The video pipeline stopped: there's nothing to show until it runs again.
+pub fn clear() {
+    let mut s = state();
+    s.latest = None;
+    s.error = None;
+}
+
+/// Clears the preview when dropped, so a video thread that ends any way (even a panic) leaves no old frame.
+pub struct ClearOnDrop;
+
+impl Drop for ClearOnDrop {
+    fn drop(&mut self) {
+        clear();
+    }
+}
+
+/// Keeps snapshots coming for a while and returns the newest one as a JPEG: `Ok(None)` while nothing is
+/// captured or before the first snapshot arrives, `Err` with the reason when the GPU can't make them.
+pub fn jpeg() -> Result<Option<Arc<Vec<u8>>>, String> {
     let frame = {
         let mut s = state();
         s.watch_until = Some(Instant::now() + WATCH);
-        s.latest.clone()
-    }?;
-    frame
+        match (&s.latest, &s.error) {
+            (Some(frame), _) => frame.clone(),
+            (None, Some(error)) => return Err(error.clone()),
+            (None, None) => return Ok(None),
+        }
+    };
+    let jpeg = frame
         .jpeg
         .get_or_init(|| {
             let s = &frame.snapshot;
@@ -71,7 +98,8 @@ pub fn jpeg() -> Option<Arc<Vec<u8>>> {
                 .ok()
                 .map(Arc::new)
         })
-        .clone()
+        .clone();
+    Ok(jpeg)
 }
 
 #[cfg(test)]
@@ -82,18 +110,24 @@ mod tests {
     #[test]
     fn asking_starts_snapshots_and_returns_the_newest() {
         clear();
-        assert!(jpeg().is_none());
+        assert_eq!(jpeg(), Ok(None));
         assert!(wanted());
-        publish(Snapshot {
+        let snapshot = || Snapshot {
             width: 4,
             height: 2,
             bgra: vec![128; 4 * 2 * 4],
-        });
-        let a = jpeg().expect("a frame");
+        };
+        publish(snapshot());
+        let a = jpeg().unwrap().expect("a frame");
         assert_eq!(&a[..2], [0xFF, 0xD8]);
         // The same frame isn't encoded twice.
-        assert!(Arc::ptr_eq(&a, &jpeg().unwrap()));
-        clear();
-        assert!(jpeg().is_none());
+        assert!(Arc::ptr_eq(&a, &jpeg().unwrap().unwrap()));
+        // A failure replaces the frame until the next snapshot.
+        fail("no BGRA".into());
+        assert_eq!(jpeg(), Err("no BGRA".into()));
+        publish(snapshot());
+        assert!(jpeg().unwrap().is_some());
+        drop(ClearOnDrop);
+        assert_eq!(jpeg(), Ok(None));
     }
 }

@@ -22,7 +22,7 @@ use windows::Win32::System::Com::StructuredStorage::{
 };
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize, IStream,
-    STREAM_SEEK_CUR, STREAM_SEEK_SET,
+    STREAM_SEEK_END, STREAM_SEEK_SET,
 };
 use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};
 
@@ -385,7 +385,7 @@ pub fn jpeg(w: u32, h: u32, bgra: &[u8]) -> Result<Vec<u8>> {
             let stream = CreateStreamOnHGlobal(HGLOBAL::default(), true)?;
             encode_jpeg(&factory, &stream, w, h, &bgr)?;
             let mut len = 0u64;
-            stream.Seek(0, STREAM_SEEK_CUR, Some(&mut len))?;
+            stream.Seek(0, STREAM_SEEK_END, Some(&mut len))?;
             stream.Seek(0, STREAM_SEEK_SET, None)?;
             let mut out = vec![0u8; usize::try_from(len)?];
             let mut read = 0u32;

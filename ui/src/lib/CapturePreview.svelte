@@ -8,10 +8,12 @@
 
   const KEY = 'clipr.preview.hidden';
   const POLL_MS = 250;
+  const RETRY_MS = 3000;
 
   let src = $state<string | null>(null);
   let hidden = $state(read());
-  let failed = $state(false);
+  // Why there's no picture (the server said, or it can't be reached); empty when there's no problem.
+  let problem = $state('');
 
   const capturing = $derived(app.status?.state === 'buffering' || app.status?.state === 'recording');
 
@@ -43,25 +45,40 @@
     async function poll() {
       if (!alive) return;
       if ((hideable && hidden) || document.hidden || !capturing) {
-        if (!capturing) show(null);
+        // Let the last picture go: it's stale by the time the preview shows again.
+        show(null);
         timer = setTimeout(poll, 1000);
         return;
       }
+      let wait = POLL_MS;
       try {
         const r = await fetch('/api/preview', { cache: 'no-store' });
-        if (!alive) return;
         if (r.status === 200) {
-          show(URL.createObjectURL(await r.blob()));
-          failed = false;
+          const blob = await r.blob();
+          if (!alive) return;
+          show(URL.createObjectURL(blob));
+          problem = '';
         } else if (r.status === 204) {
           show(null);
+          problem = '';
         } else {
-          failed = true;
+          let msg = `The preview isn't available (${r.status}).`;
+          try {
+            const j = await r.json();
+            if (j && typeof j.error === 'string') msg = j.error;
+          } catch {
+            /* no JSON body */
+          }
+          show(null);
+          problem = msg;
+          wait = RETRY_MS;
         }
       } catch {
-        failed = true;
+        show(null);
+        problem = 'Cannot reach clipr. Is it running?';
+        wait = RETRY_MS;
       }
-      if (alive) timer = setTimeout(poll, POLL_MS);
+      if (alive) timer = setTimeout(poll, wait);
     }
     poll();
     return () => {
@@ -87,10 +104,10 @@
         <span class="muted small">
           {#if !capturing}
             Not capturing. The preview shows while the replay buffer or a recording runs.
-          {:else if failed}
-            Can't load the preview.
+          {:else if problem}
+            {problem}
           {:else}
-            Waiting for the screen to change…
+            Starting the preview…
           {/if}
         </span>
       {/if}

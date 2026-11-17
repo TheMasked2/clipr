@@ -1,5 +1,7 @@
-//! Small RGB snapshots of captured frames for the live preview: the GPU scales a frame down, and the CPU reads
-//! the result back a frame later so the video thread never waits on the GPU.
+//! Small RGB snapshots for the live preview, made from the NV12 frames the encoder gets (so the preview shows
+//! exactly what is recorded, and there is always a frame, even on a screen that doesn't change). The GPU
+//! scales the frame down and converts it to RGB; the CPU reads the result back a tick later so the video
+//! thread never waits on the GPU.
 
 use anyhow::{Context, Result, ensure};
 use windows::Win32::Foundation::RECT;
@@ -9,7 +11,8 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11DeviceContext, ID3D11Texture2D, ID3D11VideoProcessorInputView, ID3D11VideoProcessorOutputView,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
+    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709, DXGI_FORMAT,
+    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::DXGI_ERROR_WAS_STILL_DRAWING;
 
@@ -24,7 +27,7 @@ pub struct Snapshot {
     pub bgra: Vec<u8>,
 }
 
-/// Scales frames of one input size to at most `max` (keeping the shape) and reads them back.
+/// Scales NV12 frames of one size (the encoder's) to at most `max`, keeping the shape, and reads them back.
 ///
 /// Call [`start`](Self::start) with a frame, then [`take`](Self::take) on later ticks until it returns the
 /// snapshot. Recreate it when the input size changes.
@@ -62,6 +65,7 @@ impl Snapshotter {
             size,
             30,
             target_rect,
+            DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
             DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
         )?;
         let target = texture(gpu, size, DXGI_FORMAT_B8G8R8A8_UNORM, false)?;
@@ -89,7 +93,7 @@ impl Snapshotter {
         self.pending
     }
 
-    /// Starts a snapshot of `source` (a BGRA texture of [`input_size`](Self::input_size)).
+    /// Starts a snapshot of `source` (an NV12 texture of [`input_size`](Self::input_size)).
     pub fn start(&mut self, source: &ID3D11Texture2D) -> Result<()> {
         let input = self.processor.input_view(&mut self.input_views, source)?;
         self.processor.blt(input, &self.view)?;

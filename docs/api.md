@@ -44,7 +44,8 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `GET /api/preview` → `200` `image/jpeg` (at most 640×360, `Cache-Control: no-store`), or `204` while nothing is
   captured (or before the first snapshot). The live preview: asking keeps clipr taking a snapshot every 200 ms for
   the next 3 seconds, so a page polls it a few times a second while it shows the preview, and clipr stops when it
-  stops asking.
+  stops asking. It shows what goes to the encoder. `503` `{"error"}` when the GPU can't make snapshots (clipr tries
+  again every 10 s). Other devices get `403` unless `web.lan_preview` is on, since it shows the whole screen.
 
 ## Settings
 

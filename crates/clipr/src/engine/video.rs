@@ -18,7 +18,7 @@ use clipr_encode::EncodeSettings;
 use clipr_encode::mf::HwEncoder;
 use clipr_gpu::{Gpu, Nv12Converter, ScaleMode, Snapshotter};
 use clipr_mux::MediaFormat;
-use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
+use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
 use windows::Win32::Graphics::Gdi::HMONITOR;
 
 use super::Shared;
@@ -43,9 +43,8 @@ pub fn spawn(
     std::thread::Builder::new()
         .name("clipr-video".into())
         .spawn(move || {
-            let result = run(settings, &shared, &stop);
-            preview::clear();
-            result
+            let _clear = preview::ClearOnDrop;
+            run(settings, &shared, &stop)
         })
         .expect("can't start a thread")
 }
@@ -150,7 +149,6 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
         }
 
         let frame = latest.lock().unwrap().take();
-        live.tick(&gpu, frame.as_ref());
         if let Some(frame) = frame {
             let input = (frame.width, frame.height);
             // A new size (resolution change, window resize) needs a new converter; the output size stays.
@@ -173,7 +171,9 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
             tick += 1;
             continue;
         }
-        encoder.encode(last.as_ref().expect("checked above"), deadline, &mut on_packet)?;
+        let frame = last.as_ref().expect("checked above");
+        live.tick(&gpu, frame);
+        encoder.encode(frame, deadline, &mut on_packet)?;
         tick += 1;
     }
 
@@ -183,35 +183,37 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
 }
 
 /// The live preview's snapshots (see [`crate::preview`]): one every [`preview::INTERVAL`] while a page
-/// watches, read back a tick later. If the GPU can't make them, the preview stops and capture goes on.
+/// watches, made from the frame the encoder gets and read back a tick later. If the GPU can't make them, the
+/// page is told, capture goes on, and the preview tries again after [`RETRY`].
 #[derive(Default)]
 struct Preview {
     snapshotter: Option<Snapshotter>,
     next: Option<Instant>,
-    broken: bool,
 }
 
+/// How long the preview waits after a GPU failure before it tries again.
+const RETRY: Duration = Duration::from_secs(10);
+
 impl Preview {
-    fn tick(&mut self, gpu: &Gpu, frame: Option<&CapturedFrame>) {
-        if self.broken {
-            return;
-        }
+    fn tick(&mut self, gpu: &Gpu, frame: &ID3D11Texture2D) {
         if let Err(e) = self.try_tick(gpu, frame) {
-            tracing::warn!("the live preview stopped: {e:#}");
-            self.broken = true;
+            let e = format!("{e:#}");
+            tracing::warn!(
+                "the live preview failed (trying again in {} s): {e}",
+                RETRY.as_secs()
+            );
+            preview::fail(e);
             self.snapshotter = None;
+            self.next = Some(Instant::now() + RETRY);
         }
     }
 
-    fn try_tick(&mut self, gpu: &Gpu, frame: Option<&CapturedFrame>) -> Result<()> {
+    fn try_tick(&mut self, gpu: &Gpu, frame: &ID3D11Texture2D) -> Result<()> {
         if let Some(s) = self.snapshotter.as_mut()
             && let Some(snapshot) = s.take()?
         {
             preview::publish(snapshot);
         }
-        let Some(frame) = frame else {
-            return Ok(());
-        };
         let now = Instant::now();
         if self.next.is_some_and(|t| now < t)
             || self.snapshotter.as_ref().is_some_and(Snapshotter::pending)
@@ -219,17 +221,21 @@ impl Preview {
         {
             return Ok(());
         }
-        let input = (frame.width, frame.height);
-        if self.snapshotter.as_ref().map(Snapshotter::input_size) != Some(input) {
-            self.snapshotter = Some(Snapshotter::new(gpu, input, preview::MAX_SIZE)?);
+        let size = texture_size(frame);
+        if self.snapshotter.as_ref().map(Snapshotter::input_size) != Some(size) {
+            self.snapshotter = Some(Snapshotter::new(gpu, size, preview::MAX_SIZE)?);
         }
-        self.snapshotter
-            .as_mut()
-            .expect("just set")
-            .start(&frame.texture)?;
+        self.snapshotter.as_mut().expect("just set").start(frame)?;
         self.next = Some(now + preview::INTERVAL);
         Ok(())
     }
+}
+
+fn texture_size(texture: &ID3D11Texture2D) -> (u32, u32) {
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    // SAFETY: fills a plain descriptor from a valid texture.
+    unsafe { texture.GetDesc(&mut desc) };
+    (desc.Width, desc.Height)
 }
 
 #[cfg(test)]

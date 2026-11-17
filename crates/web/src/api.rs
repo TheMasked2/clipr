@@ -161,12 +161,26 @@ pub async fn test_sound(State(s): State<AppState>, body: Bytes) -> ApiResult<Sta
 }
 
 /// The live preview of what is captured: a small JPEG, or 204 while nothing is captured yet. The page asks
-/// a few times a second while it shows the preview; asking is what keeps snapshots coming.
-pub async fn preview(State(s): State<AppState>) -> ApiResult<Response> {
+/// a few times a second while it shows the preview; asking is what keeps snapshots coming. It shows the whole
+/// screen, so other devices only get it when the PC's user allowed that (`web.lan_preview`).
+pub async fn preview(State(s): State<AppState>, ext: Extensions) -> ApiResult<Response> {
+    if auth::is_remote(&ext) && !s.control.config().web.lan_preview {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "The live preview shows your whole screen, so it only shows on the PC clipr runs on. \
+             To see it here, turn on \"Live preview on other devices\" under Settings → Network on the PC.",
+        ));
+    }
     let control = s.control.clone();
     let jpeg = tokio::task::spawn_blocking(move || control.preview())
         .await
-        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the preview failed"))?;
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the preview failed"))?
+        .map_err(|e| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("The preview isn't available: {e}"),
+            )
+        })?;
     Ok(match jpeg {
         Some(jpeg) => (
             [
