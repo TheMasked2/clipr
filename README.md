@@ -8,9 +8,11 @@ replay buffer, so you can clip a moment with a hotkey (or, later, with your voic
 gallery where you can trim, sort and share them. They can also go to Discord: posted to a channel or your DMs,
 and fetched from your phone with bot commands.
 
-> **Status:** Phase 0 (foundations). There's a tray app with a local web UI, but no recording yet. The full
-> roadmap is in [docs/dev-plan.md](docs/dev-plan.md). To build it yourself, see
-> [CONTRIBUTING.md](CONTRIBUTING.md). The code clipr grew out of is archived in [`legacy/`](legacy/).
+> **Status:** public beta. Replay buffer, full recordings, the gallery, OBS-style audio and Discord webhooks
+> work; download the newest build from [releases](https://github.com/TheMasked2/clipr/releases). The
+> **[user guide](docs/guide/README.md)** covers setup and every setting. The roadmap to v1.0 is in
+> [docs/dev-plan.md](docs/dev-plan.md). To build it yourself, see [CONTRIBUTING.md](CONTRIBUTING.md). The code
+> clipr grew out of is archived in [`legacy/`](legacy/).
 
 ## Principles
 

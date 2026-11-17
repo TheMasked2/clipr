@@ -192,7 +192,9 @@ A capture restart (new monitor or video settings) finishes the file and continue
 - [x] Opt-in crash reports, no server: panics and native exceptions leave a record + minidump; Home shows a
       scrubbed report (no user/PC name, profile paths, LAN IPs) with "Report on GitHub" (pre-filled issue the
       user reviews and sends), Copy, Show dump file, Dismiss. Nothing is sent by itself
-- [ ] User docs: setup, Discord bot tutorial, every setting explained
+- [x] User docs in `docs/guide/`: getting started, every setting explained (with defaults), Discord webhooks,
+      troubleshooting; a Help link in the UI. The last two settings without a UI control got one
+- [ ] Discord bot tutorial in `docs/guide/discord.md` (with the bot)
 - [ ] Test matrix: NVIDIA / AMD / Intel, HDR on/off, multi-monitor, borderless + fullscreen, laptop iGPU
 - [ ] Release v1.0 on GitHub
 

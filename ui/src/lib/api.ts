@@ -71,8 +71,8 @@ export interface Config {
     update_beta: boolean;
   };
   privacy: { crash_reports: boolean };
-  replay: { enabled: boolean; clip_secs: number; buffer_secs: number; sound_on_save: boolean };
-  video: { codec: Codec; fps: number; height: number; bitrate_kbps: number; monitor: number };
+  replay: { enabled: boolean; clip_secs: number; buffer_secs: number; sound_on_save: boolean; toast_on_save: boolean };
+  video: { codec: Codec; fps: number; height: number; bitrate_kbps: number; monitor: number; high_priority: boolean };
   audio: {
     system: boolean;
     system_volume: number;
