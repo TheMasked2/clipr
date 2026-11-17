@@ -36,7 +36,7 @@ impl ApiError {
         }
     }
 
-    fn bad_request(message: impl Into<String>) -> Self {
+    pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }
 }
@@ -60,7 +60,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-type ApiResult<T> = std::result::Result<T, ApiError>;
+pub(crate) type ApiResult<T> = std::result::Result<T, ApiError>;
 
 pub fn parse_json<T: DeserializeOwned>(body: &Bytes) -> ApiResult<T> {
     serde_json::from_slice(body).map_err(|e| ApiError::bad_request(format!("can't read the request: {e}")))
@@ -80,7 +80,9 @@ fn query<T: DeserializeOwned>(uri: &Uri) -> ApiResult<T> {
         .map_err(|e| ApiError::bad_request(format!("bad query: {e}")))
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> ApiResult<T> {
+pub(crate) async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T> + Send + 'static,
+) -> ApiResult<T> {
     match tokio::task::spawn_blocking(f).await {
         Ok(r) => r.map_err(ApiError::from),
         Err(e) => Err(ApiError::new(
@@ -134,12 +136,19 @@ pub async fn mark(State(s): State<AppState>) -> StatusCode {
 
 // ---- settings -----------------------------------------------------------------------------------------
 
-pub async fn get_config(State(s): State<AppState>) -> Json<Config> {
-    Json(s.control.config())
+pub async fn get_config(State(s): State<AppState>, ext: Extensions) -> Json<Config> {
+    let mut config = s.control.config();
+    if auth::is_remote(&ext) {
+        crate::discord::hide_urls(&mut config);
+    }
+    Json(config)
 }
 
-pub async fn system(State(s): State<AppState>) -> Json<Value> {
-    Json(s.control.system_info())
+pub async fn system(State(s): State<AppState>, ext: Extensions) -> Json<Value> {
+    let mut info = s.control.system_info();
+    // Whether this UI is another device (webhook URLs are hidden from it).
+    info["remote"] = auth::is_remote(&ext).into();
+    Json(info)
 }
 
 /// Lower-cased, backslashes, no trailing slash, no `\\?\` prefix: for comparing paths as text.
@@ -342,6 +351,7 @@ pub fn validate_config(c: &Config) -> Result<()> {
         bail!("The LAN PIN must be 6 digits");
     }
     check_clips_folder(&c.clips.folder)?;
+    crate::discord::check(&c.discord)?;
     let accent = c.ui.accent.as_bytes();
     if !(accent.len() == 7 && accent[0] == b'#' && accent[1..].iter().all(u8::is_ascii_hexdigit)) {
         bail!("The accent colour must look like #8B5CF6");
@@ -369,6 +379,11 @@ pub fn validate_config(c: &Config) -> Result<()> {
 
 pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes) -> ApiResult<Json<Config>> {
     let mut config: Config = parse_json(&body)?;
+    for w in &mut config.discord.webhooks {
+        w.name = w.name.trim().to_string();
+        w.url = w.url.trim().to_string();
+    }
+    crate::discord::keep_urls(&ext, &s.control.config().discord, &mut config.discord)?;
     validate_config(&config).map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
     if auth::is_remote(&ext) {
         // Where files go and who can reach the API are for the PC's own user to decide.
@@ -398,6 +413,10 @@ pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes)
         Ok(st.control.config())
     })
     .await?;
+    let mut saved = saved;
+    if auth::is_remote(&ext) {
+        crate::discord::hide_urls(&mut saved);
+    }
     Ok(Json(saved))
 }
 
@@ -456,14 +475,23 @@ struct PatchReq {
 
 pub async fn patch_clip(State(s): State<AppState>, body: Bytes) -> ApiResult<Json<Clip>> {
     let req: PatchReq = parse_json(&body)?;
-    let lib = s.library.clone();
+    let old_id = req.id.clone();
+    let st = s.clone();
     let clip = blocking(move || {
-        lib.update(
+        let clip = st.library.update(
             &req.id,
             req.title.as_deref(),
             req.favorite,
             req.shelves.as_deref(),
-        )
+        )?;
+        // A new title renames the file: posts still waiting follow it.
+        if req.title.is_some() {
+            match crate::discord::clip_info(&st.library, &st.thumbs_dir, &clip) {
+                Ok(info) => st.discord.clip_renamed(&old_id, &info),
+                Err(e) => tracing::warn!("can't update Discord posts for a renamed clip: {e:#}"),
+            }
+        }
+        Ok(clip)
     })
     .await?;
     s.library.notify_changed();

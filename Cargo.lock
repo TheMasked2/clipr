@@ -307,6 +307,7 @@ dependencies = [
  "clipr-buffer",
  "clipr-capture",
  "clipr-core",
+ "clipr-discord",
  "clipr-encode",
  "clipr-games",
  "clipr-gpu",
@@ -374,6 +375,17 @@ dependencies = [
 [[package]]
 name = "clipr-discord"
 version = "0.1.0-beta.1"
+dependencies = [
+ "anyhow",
+ "clipr-core",
+ "clipr-mux",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "ureq",
+]
 
 [[package]]
 name = "clipr-encode"
@@ -455,6 +467,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clipr-core",
+ "clipr-discord",
  "clipr-library",
  "http-body-util",
  "mime_guess",

@@ -27,6 +27,7 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
   - `{"type":"clip_saved","clip": Clip}` when a clip or recording was written
   - `{"type":"clip_failed","message":"..."}`
   - `{"type":"library"}` when clips changed some other way (deleted, renamed, cleanup); refetch the list
+  - `{"type":"discord"}` when the Discord post list changed; refetch `GET /api/discord/posts`
 
 ## Actions
 
@@ -73,6 +74,31 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `POST /api/clips/reveal` body `{"id"}` (or `{}` for the clips folder) → `204`, opens Explorer
 - `POST /api/cleanup` → `{"removed": 3, "freed_bytes": ...}` runs the age/size cleanup now (also runs hourly)
 - `GET /api/disk` → `{"free_bytes", "total_bytes", "clips_bytes"}`
+
+## Discord
+
+Channels are `discord.webhooks` in the config (`name`, `url`, `mode`: `ask|auto|off`, `games`). Webhook URLs
+are secrets: `GET`/`PUT /api/config` from a LAN device return them as `""` (and `GET /api/system` says
+`"remote": true`). A LAN device may send `""` for a saved channel (keep its URL) or for a new one (no URL yet);
+setting, changing or renaming its way to a URL is `403`.
+
+- `GET /api/discord/posts` → jobs, newest first:
+  ```jsonc
+  [{ "id": 3, "webhook": "#clips", "state": "ask|queued|posting|posted|skipped|failed",
+     "now": false,                       // posts even while a game runs (shared by hand, or answered)
+     "error": "..." | null, "created": 1763215402,
+     "clip": { "id", "title", "game", "duration_secs", "size_bytes", "kind" } }]
+  ```
+  A new clip (not a recording) becomes a job for every webhook whose mode isn't `off` and whose `games` list is
+  empty or names the clip's game: `ask` jobs wait, `auto` jobs are posted once no game runs (or right away
+  with `discord.post_during_game`). A post that already started finishes even if a game starts meanwhile.
+  The last 50 finished jobs are kept. Renaming a clip updates the posts still waiting for it. `clip` has no
+  local paths here.
+- `POST /api/discord/share` body `{"id": "<clip id>", "webhook": "#clips"}` → `{"job": 4}`; posted right away
+- `POST /api/discord/answer` body `{"job": 3, "yes": true}` → `204`. Yes on an `ask` or `failed` job posts it
+  now; no on an `ask`, `queued` or `failed` job skips it.
+- `POST /api/discord/test` body `{"url": "..."}` or `{"name": "#clips"}` (a saved one) → `204` after Discord
+  took a short test message, `400` for a URL that isn't a Discord webhook, `502` with Discord's answer
 
 ## Files
 

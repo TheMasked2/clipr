@@ -14,6 +14,7 @@
   import VideoSimple from './VideoSimple.svelte';
   import LevelMeters from './LevelMeters.svelte';
   import AudioFilters from './AudioFilters.svelte';
+  import DiscordSettings from './DiscordSettings.svelte';
 
   let { initial }: { initial: Config } = $props();
 
@@ -22,7 +23,7 @@
   let savedJson = $state(untrack(() => JSON.stringify(initial)));
   const dirty = $derived(JSON.stringify(draft) !== savedJson);
 
-  const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Network', 'Look'] as const;
+  const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Discord', 'Network', 'Look'] as const;
   let tab = $state<(typeof tabs)[number]>('General');
   let advanced = $state(false);
   let saving = $state(false);
@@ -260,6 +261,8 @@
     </Field>
   {:else if tab === 'Recording'}
     <Field title="Maximum length (minutes)" hint="Stop a recording after this many minutes. 0 = no limit."><input type="number" min="0" bind:value={draft.recording.max_minutes} /></Field>
+  {:else if tab === 'Discord'}
+    <DiscordSettings discord={draft.discord} remote={sys?.remote ?? false} />
   {:else if tab === 'Network'}
     <Field title="Allow access from my local network" hint="Open this page to other devices at home (your phone). They must enter a PIN. Off by default."><Toggle bind:checked={draft.web.lan} label="LAN access" /></Field>
     {#if draft.web.lan}

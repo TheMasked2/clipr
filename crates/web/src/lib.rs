@@ -7,6 +7,7 @@
 mod api;
 mod auth;
 mod control;
+mod discord;
 #[cfg(test)]
 mod tests;
 
@@ -67,6 +68,8 @@ pub struct AppState {
     pub library: Arc<Library>,
     /// Where the library writes thumbnails (`library.thumbs_dir()`).
     pub thumbs_dir: PathBuf,
+    /// Posts clips to Discord.
+    pub discord: clipr_discord::Poster,
 }
 
 /// Binds `127.0.0.1:<preferred>`, or the next free port after it.
@@ -128,6 +131,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/shelves", get(api::shelves))
         .route("/api/cleanup", post(api::cleanup))
         .route("/api/disk", get(api::disk))
+        .route("/api/discord/posts", get(discord::posts))
+        .route("/api/discord/share", post(discord::share))
+        .route("/api/discord/answer", post(discord::answer))
+        .route("/api/discord/test", post(discord::test))
         .route("/api/login", post(auth::login))
         .route("/media/{*id}", get(api::media))
         .route("/thumbs/{*name}", get(api::thumb))
@@ -190,7 +197,8 @@ async fn first_scan(state: AppState) -> Result<()> {
     Ok(())
 }
 
-/// Adds every saved clip to the library (and queues its thumbnails) even when no browser is open.
+/// Adds every saved clip to the library (and queues its thumbnails) even when no browser is open, and hands
+/// it to the Discord queue.
 async fn index_saved_clips(state: AppState) -> Result<()> {
     let mut bus = state.bus.subscribe();
     let mut shutdown = state.shutdown.clone();
@@ -198,10 +206,14 @@ async fn index_saved_clips(state: AppState) -> Result<()> {
         tokio::select! {
             event = bus.recv() => match event {
                 Ok(Event::ClipSaved { path }) => {
-                    let library = state.library.clone();
+                    let st = state.clone();
                     let _ = tokio::task::spawn_blocking(move || {
-                        if let Err(e) = library.add_file(&path) {
-                            tracing::warn!("can't add {} to the library: {e:#}", path.display());
+                        match st.library.add_file(&path) {
+                            Ok(clip) => match discord::clip_info(&st.library, &st.thumbs_dir, &clip) {
+                                Ok(info) => st.discord.clip_saved(&info),
+                                Err(e) => tracing::warn!("can't queue {} for Discord: {e:#}", path.display()),
+                            },
+                            Err(e) => tracing::warn!("can't add {} to the library: {e:#}", path.display()),
                         }
                     })
                     .await;
@@ -262,6 +274,7 @@ async fn push_events(mut socket: WebSocket, state: AppState) {
     let mut changes = state.status.subscribe();
     let mut bus = state.bus.subscribe();
     let mut library = state.library.subscribe();
+    let mut posts = state.discord.subscribe();
     let mut shutdown = state.shutdown.clone();
     let mut send_status = true;
     let mut meter = tokio::time::interval(LEVELS_EVERY);
@@ -326,6 +339,15 @@ async fn push_events(mut socket: WebSocket, state: AppState) {
                 tokio::time::sleep(LIBRARY_DEBOUNCE).await;
                 while library.try_recv().is_ok() {}
                 if !send_json(&mut socket, &json!({ "type": "library" })).await {
+                    return;
+                }
+            }
+            changed = posts.recv() => {
+                if matches!(changed, Err(broadcast::error::RecvError::Closed)) {
+                    break;
+                }
+                while posts.try_recv().is_ok() {}
+                if !send_json(&mut socket, &json!({ "type": "discord" })).await {
                     return;
                 }
             }

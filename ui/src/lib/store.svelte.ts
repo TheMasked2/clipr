@@ -1,9 +1,11 @@
 import {
   connect,
   getConfig,
+  getPosts,
   putConfig,
   onUnauthorized,
   type Config,
+  type Job,
   type Level,
   type ServerEvent,
   type Status,
@@ -18,7 +20,35 @@ export const app = $state<{
   config: Config | null;
   /** Live audio levels; empty when audio isn't running. */
   levels: Level[];
-}>({ status: null, connected: false, locked: false, config: null, levels: [] });
+  /** Discord posts, newest first. */
+  posts: Job[];
+}>({ status: null, connected: false, locked: false, config: null, levels: [], posts: [] });
+
+// Tell the user when a post lands or fails (not for posts that were already done when the page loaded).
+let postsLoaded = false;
+let postsAsked = 0;
+export async function loadPosts(): Promise<void> {
+  const ask = ++postsAsked;
+  let jobs: Job[];
+  try {
+    jobs = await getPosts();
+  } catch {
+    return;
+  }
+  // An older answer that arrives after a newer one would show stale states.
+  if (ask !== postsAsked) return;
+  if (postsLoaded) {
+    const before = new Map(app.posts.map((j) => [j.id, j.state]));
+    for (const j of jobs) {
+      const was = before.get(j.id);
+      if (was === j.state) continue;
+      if (j.state === 'posted') toast('ok', `Posted to ${j.webhook}: ${j.clip.title}`);
+      else if (j.state === 'failed') toast('err', `Couldn't post to ${j.webhook}: ${j.error ?? 'unknown error'}`);
+    }
+  }
+  postsLoaded = true;
+  app.posts = jobs;
+}
 
 // The server stops sending levels when audio stops; clear the meters then.
 let levelsTimer: ReturnType<typeof setTimeout> | undefined;
@@ -107,9 +137,11 @@ export function startConnection(): void {
       app.connected = up;
       if (!up) setLevels([]);
       if (up && !app.config) void loadConfig();
+      if (up) void loadPosts();
     },
     onEvent: (e) => {
       if (e.type === 'levels') return setLevels(e.levels);
+      if (e.type === 'discord') return void loadPosts();
       if (e.type === 'clip_saved') {
         const c = e.clip;
         toast(
@@ -125,4 +157,5 @@ export function startConnection(): void {
     },
   });
   void loadConfig();
+  void loadPosts();
 }
