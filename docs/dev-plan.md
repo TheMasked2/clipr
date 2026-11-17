@@ -186,8 +186,8 @@ A capture restart (new monitor or video settings) finishes the file and continue
 - [x] Inno Setup installer (`installer/clipr.iss`: per user by default, Start menu, optional desktop icon,
       asks to quit a running clipr, uninstall keeps clips and asks about settings) + portable zip, both built
       by `scripts/package.ps1` and in CI. Start with Windows is a setting (Phase 2)
-- [x] Opt-in updater (GitHub releases, only applies when no game runs and nothing is recording): checks every
-      6 h when on, "Check now" / "Update now" in Settings → General, beta channel toggle, sha256-verified
+- [x] Opt-in updater (GitHub releases, only applies when no game runs and nothing is recording): checks once
+      per start when on (like Steam; changed from every 6 h in #16), "Check now" / "Update now" in Settings → General, beta channel toggle, sha256-verified
       installer, portable copies get a Download link
 - [x] Opt-in crash reports, no server: panics and native exceptions leave a record + minidump; Home shows a
       scrubbed report (no user/PC name, profile paths, LAN IPs) with "Report on GitHub" (pre-filled issue the

@@ -42,6 +42,7 @@ fn env() -> Env {
             || false,
         ),
         library: Arc::new(library),
+        lan: crate::Lan::new(0, false),
     };
     Env {
         _tmp: tmp,
@@ -1141,4 +1142,41 @@ async fn crash_reports_list_dismiss_and_reveal_rules() {
         .send(&app)
         .await;
     assert_eq!(code, StatusCode::FORBIDDEN);
+}
+
+/// Saving `web.lan` opens and closes the local network listener, no restart needed.
+#[tokio::test]
+async fn lan_access_opens_and_closes_without_a_restart() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut env = env();
+    env.state.lan = Lan::new(port, false);
+    let lan = env.state.lan.clone();
+    // No loopback listener: only the LAN one (0.0.0.0, which loopback reaches too) can answer.
+    let server = tokio::spawn(serve_many(Vec::new(), env.state.clone()));
+
+    let connects = || tokio::net::TcpStream::connect(("127.0.0.1", port));
+    let settle = || tokio::time::sleep(Duration::from_millis(150));
+    settle().await;
+    assert!(connects().await.is_err(), "off at start");
+    lan.set(true);
+    settle().await;
+    assert!(connects().await.is_ok(), "opens when switched on");
+    assert_eq!(lan.error(), None);
+    lan.set(false);
+    settle().await;
+    assert!(connects().await.is_err(), "closes when switched off");
+    lan.set(true);
+    settle().await;
+    assert!(connects().await.is_ok(), "opens again");
+
+    env._tx.send_replace(true);
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }

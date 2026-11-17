@@ -13,8 +13,9 @@ that file resets everything.
 - **Start with Windows** (off): start clipr when you sign in to Windows. It starts quietly in the tray.
 - **Open the UI on start** (on): open the clipr page when you start clipr yourself, so you can see it's running.
   It never opens when Windows starts clipr.
-- **Update automatically** (off): check GitHub releases every few hours and install a new version by itself,
-  only when no game runs and nothing records.
+- **Update automatically** (off): check GitHub releases once each time clipr starts (like Steam) and install a
+  new version by itself, only when no game runs and nothing records. Switching it on takes effect at the next
+  start; **Check now** works any time.
 - **Beta versions** (on in beta builds): offer beta versions too, not only full releases.
 - **Updates panel:** shows your version and the newest one, with **Check now** and **Update now** (or
   **Download** for the portable version). Installing only works on the PC itself, not from your phone.
@@ -162,7 +163,7 @@ setup and what each option does.
 - **Allow access from my local network** (off): open the clipr page to other devices at home, like your phone.
   They have to enter a PIN, which is shown here after you save, together with the address to open. Anyone on
   your network with the PIN can see and delete your clips, and the connection isn't encrypted, so only turn
-  this on at home. Turning it on or off applies after a restart of clipr.
+  this on at home. Turning it on or off works right away.
 - **First port** (7845): the first port to try for the page. If it's taken, clipr uses the next free one.
   Applies after a restart.
 

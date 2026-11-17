@@ -148,6 +148,8 @@ pub async fn system(State(s): State<AppState>, ext: Extensions) -> Json<Value> {
     let mut info = s.control.system_info();
     // Whether this UI is another device (webhook URLs are hidden from it).
     info["remote"] = auth::is_remote(&ext).into();
+    // Access from the local network is on, but its listener couldn't open.
+    info["lan_error"] = s.lan.error().into();
     Json(info)
 }
 
@@ -473,6 +475,7 @@ pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes)
         Ok(st.control.config())
     })
     .await?;
+    s.lan.set(saved.web.lan);
     let mut saved = saved;
     if auth::is_remote(&ext) {
         crate::discord::hide_urls(&mut saved);

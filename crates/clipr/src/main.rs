@@ -85,16 +85,8 @@ fn run() -> Result<()> {
     let ui_url = format!("http://127.0.0.1:{port}/");
     std::fs::write(paths.port_file(), port.to_string()).context("can't write the port file")?;
     tracing::info!("web UI at {ui_url}");
-    let mut listeners = vec![listener];
-    if config.web.lan {
-        match runtime.block_on(clipr_web::bind_lan(port)) {
-            Ok(lan) => {
-                tracing::info!("web UI open to the local network on port {port} (PIN required)");
-                listeners.push(lan);
-            }
-            Err(e) => tracing::warn!("LAN access is on but the LAN port can't be opened: {e:#}"),
-        }
-    }
+    // The server opens and closes access from the local network as the setting changes.
+    let lan = clipr_web::Lan::new(port, config.web.lan);
 
     let watcher = Arc::new(clipr_games::GameWatcher::new(paths.data_dir.join("games.json")));
     let (engine, engine_thread) = engine::start(config.clone(), status.clone(), bus.clone(), watcher.clone());
@@ -128,7 +120,7 @@ fn run() -> Result<()> {
         known_games: Arc::new(move || watcher.list_len()),
     });
     let server = runtime.spawn(clipr_web::serve_many(
-        listeners,
+        vec![listener],
         AppState {
             status: status.clone(),
             shutdown: shutdown_rx,
@@ -148,6 +140,7 @@ fn run() -> Result<()> {
                 },
             ),
             library,
+            lan,
         },
     ));
 

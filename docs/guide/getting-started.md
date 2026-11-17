@@ -91,9 +91,11 @@ next time clipr starts, up to about the last second.
 clipr's page can be opened from other devices at home, protected by a PIN:
 
 1. On the PC, open **Settings → Network**, turn on **Allow access from my local network** and click **Save**.
-   The Network tab now shows the PIN and the address to open (something like `http://192.168.1.20:7845`).
-2. Restart clipr (tray → **Quit clipr**, then start it again): the network access opens when clipr starts.
-3. Open that address on your phone and enter the PIN.
+   It works right away. The Network tab now shows the PIN and the address to open: your PC's IP address and
+   the port, like `http://192.168.1.20:7845` (`ipconfig` in a terminal shows the IPv4 address).
+2. Open that address on your phone and enter the PIN.
+
+Turning it off closes the access at once, and pages open on other devices stop updating.
 
 Anyone on your network with the PIN can see and delete your clips, and the connection isn't encrypted, so only
 do this on a network you trust. A few things only work on the PC itself: pasting a Discord webhook URL,
@@ -102,8 +104,8 @@ changing the clips folder or the Network settings, installing an update, and ope
 ## Updates
 
 **Settings → General** shows your version and can check for a new one. Updates are opt-in: with **Update
-automatically** on, clipr checks GitHub every few hours and installs a new version by itself, but only when no
-game runs and nothing records. Otherwise click **Update now** when you like; it waits while a game runs or a
+automatically** on, clipr checks GitHub once each time it starts, like Steam, and installs a new version by
+itself, but only when no game runs and nothing records. It doesn't check again until the next start. Otherwise click **Update now** when you like; it waits while a game runs or a
 recording is on. Installing takes a few seconds, and clipr starts again by itself.
 
 ## Uninstall
