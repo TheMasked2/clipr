@@ -57,7 +57,7 @@ enum Phase {
     Downloading,
     /// Downloaded and verified.
     Ready,
-    /// Ready, waiting for the game or recording to end.
+    /// An install is wanted, waiting for the game or recording to end (before downloading, too).
     Waiting,
     Installing,
     Error,
@@ -122,6 +122,16 @@ fn busy(status: &Status) -> Option<&'static str> {
     }
 }
 
+/// The version the updater compares releases with. `CLIPR_UPDATE_PRETEND_VERSION` overrides it, so testers
+/// can update an installed copy to the release it already is (a reinstall); anything it finds is still
+/// checksum-verified.
+fn current_version() -> String {
+    std::env::var("CLIPR_UPDATE_PRETEND_VERSION")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| clipr_core::VERSION.to_string())
+}
+
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -161,7 +171,7 @@ impl Updater {
     pub fn status_json(&self) -> Value {
         let s = self.shared.lock().unwrap();
         json!({
-            "current": clipr_core::VERSION,
+            "current": current_version(),
             "installed": self.installed,
             "state": s.phase.name(),
             "release": s.release,
@@ -221,6 +231,12 @@ struct Worker {
 
 impl Worker {
     fn run(self, rx: &mpsc::Receiver<Cmd>) {
+        if current_version() != clipr_core::VERSION {
+            tracing::warn!(
+                "updater pretends to be clipr {} (CLIPR_UPDATE_PRETEND_VERSION)",
+                current_version()
+            );
+        }
         self.clean_downloads();
         let mut next_check = Instant::now() + FIRST_CHECK;
         loop {
@@ -249,12 +265,14 @@ impl Worker {
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
             }
+            let auto_now = (self.settings)().auto_update;
             let apply = {
                 let mut s = self.updater.shared.lock().unwrap();
-                if s.want_apply && s.auto_apply && !(self.settings)().auto_update {
+                if s.want_apply && s.auto_apply && !auto_now {
                     s.want_apply = false;
                     if s.phase == Phase::Waiting {
-                        s.phase = Phase::Ready;
+                        let ready = s.setup.as_ref().is_some_and(|p| p.is_file());
+                        s.phase = if ready { Phase::Ready } else { Phase::Available };
                     }
                 }
                 s.want_apply
@@ -289,7 +307,7 @@ impl Worker {
             s.error = None;
         }
         let beta = (self.settings)().update_beta;
-        let result = clipr_update::check(clipr_core::VERSION, beta);
+        let result = clipr_update::check(&current_version(), beta);
         let mut s = self.updater.shared.lock().unwrap();
         s.last_check = Some(Instant::now());
         s.checked_at = Some(unix_now());
@@ -332,6 +350,11 @@ impl Worker {
             self.updater.update(|s| s.want_apply = false);
             return false;
         };
+        // Not even the download while a game runs: it would compete with the game for the network.
+        if busy(&self.updater.status).is_some() {
+            self.updater.update(|s| s.phase = Phase::Waiting);
+            return false;
+        }
         let path = match setup.filter(|p| p.is_file()) {
             Some(path) => path,
             None => {

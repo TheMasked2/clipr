@@ -82,7 +82,7 @@
           {:else if info.release && info.state === 'downloading' && info.progress}
             <span>Downloading {info.release.version}… {pct(info.progress)} % of {fmtBytes(info.progress.total)}</span>
           {:else if info.release && info.state === 'waiting'}
-            <span>{info.release.version} is ready and installs once nothing is running{info.busy ? ` (${info.busy})` : ''}.</span>
+            <span>{info.release.version} downloads and installs once nothing is running{info.busy ? ` (${info.busy})` : ''}.</span>
           {:else if info.release && info.state === 'installing'}
             <span>Installing {info.release.version}. clipr restarts in a moment…</span>
           {:else if info.release}
@@ -98,9 +98,12 @@
       <div class="actions">
         <button onclick={check} disabled={busy || info.state === 'checking' || info.state === 'downloading' || info.state === 'installing'}>Check now</button>
         {#if info.release && !['downloading', 'waiting', 'installing'].includes(info.state)}
-          {#if info.installed && info.release.setup && !remote}
-            <button class="primary" onclick={install} disabled={busy || info.busy !== null} title={info.busy ? `Can't update while ${info.busy}` : undefined}>Update now</button>
-          {:else if !info.installed}
+          {#if info.installed && info.release.setup}
+            {#if !remote}
+              <button class="primary" onclick={install} disabled={busy || info.busy !== null} title={info.busy ? `Can't update while ${info.busy}` : undefined}>Update now</button>
+            {/if}
+          {:else}
+            <!-- A portable copy, or a release without an installer: get it by hand. -->
             <a class="button primary" href={info.release.page} target="_blank" rel="noopener noreferrer">Download</a>
           {/if}
         {/if}
@@ -112,7 +115,7 @@
     {#if info.release && info.busy && info.installed && !['waiting', 'installing'].includes(info.state)}
       <p class="muted small">Can't update while {info.busy}.</p>
     {/if}
-    {#if remote && info.release && info.installed}
+    {#if remote && info.release?.setup && info.installed}
       <p class="muted small">Install it from the PC running clipr.</p>
     {/if}
     {#if info.release?.notes}

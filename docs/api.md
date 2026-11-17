@@ -60,7 +60,7 @@ exe) can install; a portable copy links the release page instead.
   installing error`. `release`: `null` or `{"version","page","notes","published","prerelease","setup",
   "portable"}` (each asset `null` or `{"name","url","size"}`). `progress`: `{"done","total"}` bytes while
   downloading. `busy`: why it can't install now (`"a game is running"`, `"a recording is running"`) or `null`.
-  `waiting` = downloaded, installs once nothing runs
+  `waiting` = an install is wanted; it downloads (if needed) and installs once nothing runs
 - `POST /api/update/check` → `202`; the answer shows up in `GET /api/update` (repeat checks within 10 s ask
   GitHub once)
 - `POST /api/update/apply` → `202`: downloads the installer, checks its sha256 (GitHub's asset digest, else a
