@@ -24,7 +24,7 @@
   let savedJson = $state(untrack(() => JSON.stringify(initial)));
   const dirty = $derived(JSON.stringify(draft) !== savedJson);
 
-  const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Discord', 'Network', 'Look'] as const;
+  const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Discord', 'Network', 'Appearance'] as const;
   let tab = $state<(typeof tabs)[number]>('General');
   let advanced = $state(false);
   let saving = $state(false);
@@ -84,14 +84,37 @@
     }),
   );
   const addProfile = () => draft.games.profiles.push({ game: '', fps: null, height: null, bitrate_kbps: null });
-  // The sources that can have filters: their keys match the server's (`system`, `mic`, the app's name).
-  // Apps are only recorded with system audio off or separate tracks on (otherwise they're in the mix).
-  const appsRecorded = $derived(!draft.audio.system || draft.audio.separate_tracks);
-  const filterSources = $derived([
-    ...(draft.audio.system ? [{ key: 'system', label: 'System audio' }] : []),
-    ...(draft.audio.mic ? [{ key: 'mic', label: 'Microphone' }] : []),
-    ...(appsRecorded ? draft.audio.apps.map((a) => ({ key: a.trim().toLowerCase(), label: a.trim() })) : []),
-  ]);
+  // The recorded apps (their filter keys match the server's: the exe name in lower case), and the tracks a
+  // clip gets, worked out like the server's plan (crates/audio/src/plan.rs): track 1 is the mix; every app
+  // has its own track; Separate tracks also gives system audio and the mic one. Six tracks at most.
+  // ASCII-only lower case, like the server's key (to_ascii_lowercase).
+  const asciiLower = (s: string) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+  const appList = $derived(
+    draft.audio.apps
+      .map((a) => a.trim())
+      .filter((a, i, all) => a && all.findIndex((b) => asciiLower(b) === asciiLower(a)) === i)
+      .map((a) => ({ key: asciiLower(a), label: a.replace(/\.exe$/i, '') })),
+  );
+  const tracks = $derived.by(() => {
+    const a = draft.audio;
+    const mix = [
+      ...(a.system ? ['System audio'] : []),
+      ...(a.mic ? ['Microphone'] : []),
+      ...(a.system ? [] : appList.map((x) => x.label)),
+    ];
+    if (!mix.length && !appList.length) return [];
+    const own = [
+      // The names the clip page and video editors show.
+      ...(a.separate_tracks && a.system ? ['System'] : []),
+      ...(a.separate_tracks && a.mic ? ['Mic'] : []),
+      ...appList.map((x) => x.label),
+    ];
+    return [{ name: 'Mix', has: mix.join(' + ') || 'nothing' }, ...own.map((o) => ({ name: o, has: o }))].slice(0, 6);
+  });
+  const dropped = $derived(
+    Math.max(0, 1 + (draft.audio.separate_tracks ? +draft.audio.system + +draft.audio.mic : 0) + appList.length - 6),
+  );
+  let syncOpen = $state(false);
   const ramMb = $derived(Math.round((draft.video.bitrate_kbps * draft.replay.buffer_secs) / 8 / 1000));
 
   const codecs: { v: Config['video']['codec']; name: string; text: string; enc: string }[] = [
@@ -123,11 +146,12 @@
     { v: 'playful', t: 'Playful', on: false },
     { v: 'system', t: 'System (light / dark)', on: false },
   ];
-  const lanUrl = $derived(`http://<this PC's IP address>:${location.port || draft.web.port}`);
+  const lanUrl = $derived(`http://${sys?.lan_ip ?? "<this PC's IP address>"}:${location.port || draft.web.port}`);
 </script>
 
 <h1>Settings</h1>
 
+<div class="layout">
 <nav class="tabs" aria-label="Settings sections">
   {#each tabs as t (t)}
     <button class="tab" class:active={tab === t} aria-current={tab === t ? 'page' : undefined} onclick={() => (tab = t)}>{t}</button>
@@ -201,40 +225,64 @@
     <Field title="Sound on save" hint="Play a short sound when a clip is saved."><Toggle bind:checked={draft.replay.sound_on_save} label="Sound on save" /></Field>
     <Field title="Note on save" hint="Show a small &quot;Clip saved&quot; note in the top-right corner. It never shows up in your clips. Games in exclusive fullscreen hide it (the sound still plays)."><Toggle bind:checked={draft.replay.toast_on_save} label="Note on save" /></Field>
   {:else if tab === 'Audio'}
-    <Field title="Live levels" hint="What each source picks up right now, before its filters, from -60 to 0 dB. CLIP means the source is already distorting before clipr gets it: lower its level in Windows. Shows while the buffer runs; save to apply changes." stacked><LevelMeters /></Field>
-    <h3 class="sub">Sources</h3>
-    <Field title="System audio" hint="Record what you hear (game, voice chat, music): the default output device."><Toggle bind:checked={draft.audio.system} label="System audio" /></Field>
-    <Field title="System audio volume" hint="0–200 %. 100 % leaves it unchanged.">
-      <div class="vol">
-        <input type="range" min="0" max="200" step="5" bind:value={draft.audio.system_volume} disabled={!draft.audio.system} aria-label="System audio volume" />
-        <span class="pctv">{draft.audio.system_volume}%</span>
-      </div>
-    </Field>
-    <Field title="Microphone" hint="Record your default microphone."><Toggle bind:checked={draft.audio.mic} label="Microphone" /></Field>
-    <Field title="Microphone volume" hint="0–200 %, applied after the mic's filters. 100 % leaves it unchanged.">
-      <div class="vol">
-        <input type="range" min="0" max="200" step="5" bind:value={draft.audio.mic_volume} disabled={!draft.audio.mic} aria-label="Microphone volume" />
-        <span class="pctv">{draft.audio.mic_volume}%</span>
-      </div>
-    </Field>
-    <Field title="Push-to-talk key" hint="Record the mic only while this key is held: your voice chat's push-to-talk key, like V or Mouse4. Empty = always on.">
-      <input type="text" bind:value={draft.audio.push_to_talk} placeholder="V, Mouse4, Mouse5…" disabled={!draft.audio.mic} aria-label="Push-to-talk key" />
-    </Field>
-    <Field title="Push-to-talk release (ms)" hint="Keep the mic open this long after you let go, so the end of a word isn't cut off."><input type="number" min="0" max="5000" step="10" bind:value={draft.audio.ptt_release_ms} disabled={!draft.audio.mic || !draft.audio.push_to_talk.trim()} /></Field>
-    <Field title="Apps on their own track" hint="Record these programs separately (up to 4), like discord.exe, so you can mute voice chat later in an editor. With system audio on, this needs Separate tracks (the app is already in the mix). Needs Windows 10 2004 or newer." stacked><ListEditor bind:items={draft.audio.apps} placeholder="discord.exe" /></Field>
-    <Field title="Separate tracks" hint="Also write every source on its own track. Track 1 is always the full mix, so clips still play normally."><Toggle bind:checked={draft.audio.separate_tracks} label="Separate tracks" /></Field>
-    <Field title="Microphone offset (ms)" hint="Shift the mic in time if it's out of sync with the video. Positive = later."><input type="number" min="-5000" max="5000" step="5" bind:value={draft.audio.mic_offset_ms} /></Field>
-    <Field title="System audio offset (ms)" hint="Shift system audio in time. Positive = later."><input type="number" min="-5000" max="5000" step="5" bind:value={draft.audio.system_offset_ms} /></Field>
-    <h3 class="sub">Filters</h3>
-    <p class="muted small note">Like OBS: each source starts with no filters. Add the ones you want; they run top to bottom.</p>
-    {#each filterSources as src (src.key)}
-      <Field title={src.label} stacked><AudioFilters audio={draft.audio} source={src.key} label={src.label} /></Field>
+    <h3 class="sub first">Tracks</h3>
+    <p class="muted small note">What each clip records. Players and Discord play track 1; video editors show every track, so you can mute voice chat or your mic afterwards.</p>
+    {#if tracks.length}
+      <ol class="tracks">
+        {#each tracks as t, i (i)}
+          <li><span class="tn">Track {i + 1}</span><strong>{t.name}</strong>{#if i === 0}<span class="muted small">{t.has}</span>{/if}</li>
+        {/each}
+      </ol>
+      {#if dropped}<p class="warnt small">Only 6 tracks fit: the last {dropped === 1 ? 'one is' : `${dropped} are`} left out (still in the mix).</p>{/if}
     {:else}
-      <p class="muted small">Turn on a source above to give it filters.</p>
-    {/each}
-    {#if draft.audio.apps.length && !appsRecorded}
-      <p class="muted small">The apps above are part of system audio right now, so they get its filters. Turn on Separate tracks to give each app its own.</p>
+      <p class="warnt small">No audio: turn on a source below.</p>
     {/if}
+    <Field title="Separate tracks" hint="Also give system audio and the microphone a track of their own. Apps below always get one."><Toggle bind:checked={draft.audio.separate_tracks} label="Separate tracks" /></Field>
+    <Field title="Live levels" hint="What each source records right now, after its filters, from -60 to 0 dB. CLIP means the source is already distorting before clipr gets it: lower its level in Windows. Shows while the buffer runs; save to apply changes." stacked><LevelMeters /></Field>
+
+    <h3 class="sub">System audio</h3>
+    <Field title="Record system audio" hint="Everything you hear (game, voice chat, music): the default output device."><Toggle bind:checked={draft.audio.system} label="System audio" /></Field>
+    {#if draft.audio.system}
+      <Field title="Volume" hint="0–200 %, applied after the filters. 100 % leaves it unchanged.">
+        <div class="vol">
+          <input type="range" min="0" max="200" step="5" bind:value={draft.audio.system_volume} aria-label="System audio volume" />
+          <span class="pctv">{draft.audio.system_volume}%</span>
+        </div>
+      </Field>
+      <Field title="Filters" stacked><AudioFilters audio={draft.audio} source="system" label="System audio" /></Field>
+    {/if}
+
+    <h3 class="sub">Microphone</h3>
+    <Field title="Record the microphone" hint="Your default microphone (Windows Sound settings)."><Toggle bind:checked={draft.audio.mic} label="Microphone" /></Field>
+    {#if draft.audio.mic}
+      <Field title="Volume" hint="0–200 %, applied after the filters. 100 % leaves it unchanged.">
+        <div class="vol">
+          <input type="range" min="0" max="200" step="5" bind:value={draft.audio.mic_volume} aria-label="Microphone volume" />
+          <span class="pctv">{draft.audio.mic_volume}%</span>
+        </div>
+      </Field>
+      <Field title="Push-to-talk key" hint="Record the mic only while this key is held: your voice chat's push-to-talk key, like V or Mouse4. Empty = always on.">
+        <input type="text" bind:value={draft.audio.push_to_talk} placeholder="V, Mouse4, Mouse5…" aria-label="Push-to-talk key" />
+      </Field>
+      {#if draft.audio.push_to_talk.trim()}
+        <Field title="Push-to-talk release (ms)" hint="Keep the mic open this long after you let go, so the end of a word isn't cut off."><input type="number" min="0" max="5000" step="10" bind:value={draft.audio.ptt_release_ms} /></Field>
+      {/if}
+      <Field title="Filters" hint="Like OBS: none by default. A good start for a mic: noise suppression, noise gate, compressor, limiter." stacked><AudioFilters audio={draft.audio} source="mic" label="Microphone" /></Field>
+    {/if}
+
+    <h3 class="sub">App tracks</h3>
+    <Field title="Apps on their own track" hint="Record programs separately (up to 4), like discord.exe, so you can mute voice chat later in an editor. Needs Windows 10 2004 or newer." stacked><ListEditor bind:items={draft.audio.apps} placeholder="discord.exe" /></Field>
+    {#each appList as app (app.key)}
+      <Field title="{app.label} filters" stacked><AudioFilters audio={draft.audio} source={app.key} label={app.label} /></Field>
+    {/each}
+
+    <details class="sync" bind:open={syncOpen}>
+      <summary>Audio out of sync with the video?</summary>
+      <p class="muted small">Only needed if a source plays early or late in your clips. Positive = later.</p>
+      <Field title="Microphone offset (ms)"><input type="number" min="-5000" max="5000" step="5" bind:value={draft.audio.mic_offset_ms} /></Field>
+      <Field title="System audio offset (ms)"><input type="number" min="-5000" max="5000" step="5" bind:value={draft.audio.system_offset_ms} /></Field>
+    </details>
+
     <h3 class="sub">Quality</h3>
     <Field title="Audio quality (AAC)" hint="AAC bitrate in kbit/s per track. 160 is plenty for game audio.">
       <select bind:value={draft.audio.bitrate_kbps}>{#each [96, 128, 160, 192] as b (b)}<option value={b}>{b} kbps</option>{/each}</select>
@@ -248,10 +296,10 @@
     <Field title="Start / stop recording" hint="Starts or stops a full recording." error={bad.has('toggle_recording')}><HotkeyInput bind:value={draft.hotkeys.toggle_recording} conflict={bad.has('toggle_recording')} /></Field>
     <Field title="Mark moment" hint="Marks this moment; markers show on the clip's timeline." error={bad.has('mark')}><HotkeyInput bind:value={draft.hotkeys.mark} conflict={bad.has('mark')} /></Field>
   {:else if tab === 'Games'}
-    <Field title="Mode" hint="Auto buffers only while a known game runs and idles otherwise. Always buffers the monitor, game or not.">
+    <Field title="Mode" hint="Game only buffers while a known game runs and does nothing otherwise. Desktop buffers your monitor all the time, game or not.">
       <div class="row">
-        <button class="chip" class:on={draft.games.mode === 'auto'} onclick={() => (draft.games.mode = 'auto')}>Auto</button>
-        <button class="chip" class:on={draft.games.mode === 'always'} onclick={() => (draft.games.mode = 'always')}>Always</button>
+        <button class="chip" class:on={draft.games.mode === 'auto'} onclick={() => (draft.games.mode = 'auto')}>Game only</button>
+        <button class="chip" class:on={draft.games.mode === 'always'} onclick={() => (draft.games.mode = 'always')}>Desktop</button>
       </div>
     </Field>
     <p class="muted small note">{sys?.known_games != null ? `clipr knows ${sys.known_games.toLocaleString()} games.` : 'Loading the known games list…'}</p>
@@ -289,7 +337,7 @@
       <p class="muted small note">Save to generate the PIN.</p>
     {/if}
     <Field title="First port" hint="First port to try for the web UI. If it is taken, clipr uses the next free one. Applies after a restart."><input type="number" min="1024" max="65535" bind:value={draft.web.port} /></Field>
-  {:else if tab === 'Look'}
+  {:else if tab === 'Appearance'}
     <Field title="Accent colour" hint="The one colour used for buttons, highlights and the timeline.">
       <input type="color" value={draft.ui.accent} oninput={(e) => { draft.ui.accent = e.currentTarget.value; applyAccent(draft.ui.accent); }} aria-label="Accent colour" />
       <code class="muted">{draft.ui.accent}</code>
@@ -302,6 +350,7 @@
     </Field>
   {/if}
 </section>
+</div>
 
 <div class="savebar" class:dirty>
   <span class="msg">
@@ -315,11 +364,20 @@
 </div>
 
 <style>
-  .tabs { display: flex; gap: 0.3rem; overflow-x: auto; margin-bottom: 1rem; padding-bottom: 0.2rem; scrollbar-width: thin; }
-  .tab { background: transparent; border-color: transparent; color: var(--text-muted); white-space: nowrap; }
+  .layout { display: grid; grid-template-columns: 10.5rem 1fr; gap: 1rem; align-items: start; }
+  .layout > .card { min-width: 0; }
+  .tabs { display: flex; flex-direction: column; gap: 0.2rem; position: sticky; top: 4.2rem; }
+  .tab { background: transparent; border-color: transparent; color: var(--text-muted); white-space: nowrap; text-align: left; }
+  .tracks { list-style: none; margin: 0.4rem 0 0.6rem; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+  .tracks li { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; padding: 0.35rem 0.6rem; border: 1px solid var(--border); border-radius: 0.5rem; background: var(--surface-2); }
+  .tn { font-size: 0.75rem; color: var(--text-muted); font-variant-numeric: tabular-nums; min-width: 3.6rem; }
+  .sync { margin-top: 1.4rem; border: 1px solid var(--border); border-radius: 0.6rem; padding: 0.5rem 0.8rem; }
+  .sync summary { cursor: pointer; color: var(--text-muted); }
+  .sub.first { margin-top: 0; }
   .tab.active { color: var(--text); background: var(--accent-soft); border-color: var(--accent-border); }
   .tabsel { display: none; width: 100%; margin-bottom: 1rem; }
   @media (max-width: 640px) {
+    .layout { display: block; }
     .tabs { display: none; }
     .tabsel { display: block; }
   }

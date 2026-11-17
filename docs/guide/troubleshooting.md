@@ -38,7 +38,7 @@ Your user name, PC name and profile folder are removed from the report, but read
 **Nothing happens when I press the clip hotkey.**
 clipr only buffers while it sees a game. Check the status at the top of the page or in the tray. If it says
 idle while you play, add the game's exe under Settings → Games → **Extra games**, or switch **Mode** to
-**Always**. Also check that no other program uses the same hotkey (NVIDIA, AMD and Xbox overlays often do).
+**Desktop**. Also check that no other program uses the same hotkey (NVIDIA, AMD and Xbox overlays often do).
 
 **clipr starts buffering for a program that isn't a game.**
 Add its exe under Settings → Games → **Blocked programs**.

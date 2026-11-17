@@ -148,7 +148,8 @@ setting, changing or renaming its way to a URL is `403`.
 
 When `web.lan` is on, the server also listens on the LAN (`0.0.0.0`, same port). Saving the setting opens or
 closes that listener at once, without a restart; turning it off also ends LAN event streams. If the port can't
-be opened, `GET /api/system` has `"lan_error"` (a message; `null` otherwise). Requests from any address other than loopback must
+be opened, `GET /api/system` has `"lan_error"` (a message; `null` otherwise), and `"lan_ip"` is the PC's
+local network address to open (`null` when unknown). Requests from any address other than loopback must
 carry the PIN: `POST /api/login {"pin"}` sets an HttpOnly cookie `clipr_session` (random token, valid 30 days);
 without it every LAN request gets `401` and the UI shows a PIN screen. The PIN is `web.lan_pin` (6 digits,
 generated when LAN access is first turned on, shown in Settings). Loopback requests never need it. A session ends when `web.lan_pin` changes or `web.lan` is turned off. After

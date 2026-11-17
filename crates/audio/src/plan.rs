@@ -28,11 +28,13 @@ impl SourceKind {
         match self {
             Self::System => "System".into(),
             Self::Mic => "Mic".into(),
-            Self::App(exe) => exe
-                .strip_suffix(".exe")
-                .or_else(|| exe.strip_suffix(".EXE"))
-                .unwrap_or(exe)
-                .to_owned(),
+            // `.exe` in any case, like the UI's label.
+            Self::App(exe) => match exe.len().checked_sub(4) {
+                Some(i) if exe.is_char_boundary(i) && exe[i..].eq_ignore_ascii_case(".exe") => {
+                    exe[..i].to_owned()
+                }
+                _ => exe.clone(),
+            },
         }
     }
 }
@@ -59,8 +61,8 @@ pub const MAX_TRACKS: usize = 6;
 /// Builds the plan. Sources are system, mic, then each distinct app.
 ///
 /// The mix holds system and mic, plus the apps only when system audio is off: with system audio on, an
-/// app's sound is already in it, and adding the app again would double it. Apps always get their own
-/// track when `separate` is on. Returns no sources when nothing is enabled.
+/// app's sound is already in it, and adding the app again would double it. Every app always gets its own
+/// track; `separate` also gives system audio and the mic one. Returns no sources when nothing is enabled.
 pub fn plan(system: bool, mic: bool, apps: &[String], separate: bool) -> Plan {
     let mut sources = Vec::new();
     if system {
@@ -69,9 +71,7 @@ pub fn plan(system: bool, mic: bool, apps: &[String], separate: bool) -> Plan {
     if mic {
         sources.push(SourceKind::Mic);
     }
-    // With system audio on and no separate tracks an app's sound has nowhere to go: don't capture it.
-    let want_apps = !system || separate;
-    for app in apps.iter().filter(|_| want_apps) {
+    for app in apps {
         let app = app.trim();
         let known = |s: &SourceKind| matches!(s, SourceKind::App(a) if a.eq_ignore_ascii_case(app));
         if !app.is_empty() && !sources.iter().any(known) {
@@ -94,8 +94,8 @@ pub fn plan(system: bool, mic: bool, apps: &[String], separate: bool) -> Plan {
         name: "Mix".into(),
         sources: mix,
     }];
-    if separate {
-        for (i, source) in sources.iter().enumerate() {
+    for (i, source) in sources.iter().enumerate() {
+        if separate || matches!(source, SourceKind::App(_)) {
             if tracks.len() == MAX_TRACKS {
                 warnings.push(format!(
                     "only {MAX_TRACKS} audio tracks fit: {} is in the mix but has no track of its own",
@@ -150,16 +150,34 @@ mod tests {
     }
 
     #[test]
-    fn apps_are_skipped_when_they_would_go_nowhere() {
+    fn apps_get_their_own_track_without_separate_tracks() {
         let p = plan(true, false, &apps(&["discord.exe"]), false);
-        assert_eq!(p.sources, [SourceKind::System]);
+        assert_eq!(
+            p.sources,
+            [SourceKind::System, SourceKind::App("discord.exe".into())]
+        );
+        let names: Vec<_> = p.tracks.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["Mix", "discord"]);
+        // Not in the mix: system audio already has it.
+        assert_eq!(p.tracks[0].sources, [0]);
     }
 
     #[test]
     fn without_system_audio_the_mix_is_mic_plus_apps() {
         let p = plan(false, true, &apps(&["game.exe", "discord.exe"]), false);
-        assert_eq!(p.tracks.len(), 1);
         assert_eq!(p.tracks[0].sources, [0, 1, 2]);
+        // Each app still gets its own track; the mic doesn't without separate tracks.
+        let names: Vec<_> = p.tracks.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["Mix", "game", "discord"]);
+    }
+
+    #[test]
+    fn app_labels_drop_exe_in_any_case() {
+        for exe in ["Discord.exe", "Discord.EXE", "Discord.Exe", "Discord"] {
+            assert_eq!(SourceKind::App(exe.into()).label(), "Discord");
+        }
+        assert_eq!(SourceKind::App("é.exe".into()).label(), "é");
+        assert_eq!(SourceKind::App("exe".into()).label(), "exe");
     }
 
     #[test]

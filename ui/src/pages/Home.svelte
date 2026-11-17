@@ -2,13 +2,15 @@
   import { onMount } from 'svelte';
   import * as api from '../lib/api';
   import { app, onServerEvent, toastError } from '../lib/store.svelte';
-  import { fmtBytes, fmtTime } from '../lib/format';
-  import ClipCard from '../lib/ClipCard.svelte';
+  import { fmtBytes, fmtDateTime, fmtTime } from '../lib/format';
   import Wizard from '../lib/Wizard.svelte';
   import DiscordPosts from '../lib/DiscordPosts.svelte';
   import CrashNotice from '../lib/CrashNotice.svelte';
+  import { clipHref } from '../lib/router.svelte';
 
-  let clips = $state<api.Clip[]>([]);
+  // Home is quick info: the newest clip and the library size. The Gallery has the clips.
+  let latest = $state<api.Clip | null>(null);
+  let count = $state<number | null>(null);
   let disk = $state<api.Disk | null>(null);
   let fresh = $state('');
   let now = $state(Date.now());
@@ -18,11 +20,17 @@
   const paused = $derived(st?.paused ?? false);
   const elapsed = $derived(st?.state === 'recording' && st.recording_since ? now / 1000 - st.recording_since : 0);
 
+  // Only the newest request's answer counts, so an older list can't undo a clip that was just saved.
+  let seq = 0;
   async function refetch() {
+    const mine = ++seq;
     try {
-      clips = (await api.listClips()).slice(0, 6);
+      const all = await api.listClips();
+      if (mine !== seq) return;
+      latest = all[0] ?? null;
+      count = all.length;
     } catch (e) {
-      if (!clips.length) toastError(e);
+      if (mine === seq && count === null) toastError(e);
     }
   }
   const loadDisk = () => api.getDisk().then((d) => (disk = d)).catch(() => {});
@@ -33,7 +41,9 @@
     const tick = setInterval(() => (now = Date.now()), 500);
     const off = onServerEvent((e) => {
       if (e.type === 'clip_saved') {
-        clips = [e.clip, ...clips.filter((c) => c.id !== e.clip.id)].slice(0, 6);
+        seq++; // drops a list request still on its way
+        if (latest?.id !== e.clip.id) count = (count ?? 0) + 1;
+        latest = e.clip;
         fresh = e.clip.id;
         setTimeout(() => (fresh = ''), 3000);
         void loadDisk();
@@ -104,26 +114,21 @@
 <CrashNotice />
 <DiscordPosts />
 
-<div class="row head">
-  <h2>Newest clips</h2>
-  <span class="spacer"></span>
-  <a href="#/gallery" class="muted">All clips →</a>
-</div>
-{#if clips.length}
-  <div class="grid">
-    {#each clips as c (c.id)}
-      <ClipCard clip={c} highlight={fresh === c.id} onupdate={(u) => (clips = clips.map((x) => (x.id === u.id ? u : x)))} />
-    {/each}
+<section class="card info">
+  {#if latest}
+    <a class="latest" class:fresh={fresh === latest.id} href={clipHref(latest.id)}>
+      <span class="muted small">{fresh === latest.id ? 'Just saved' : 'Last clip'}</span>
+      <b>{latest.title}</b>
+      <span class="muted small">{latest.game} · {fmtDateTime(latest.created)}{latest.duration_secs ? ` · ${fmtTime(latest.duration_secs)}` : ''}</span>
+    </a>
+  {:else if count === 0}
+    <p class="muted">No clips yet. Press {label(hk?.save_clip) || 'the save-clip button'} while a game runs.</p>
+  {/if}
+  <div class="row facts">
+    {#if count}<a href="#/gallery">{count.toLocaleString()} {count === 1 ? 'clip' : 'clips'} →</a>{/if}
+    {#if disk}<span class="muted small">{fmtBytes(disk.free_bytes)} free of {fmtBytes(disk.total_bytes)} · clips use {fmtBytes(disk.clips_bytes)}</span>{/if}
   </div>
-{:else}
-  <p class="muted">No clips yet. Press {label(hk?.save_clip) || 'the save-clip button'} while a game runs.</p>
-{/if}
-
-{#if disk}
-  <p class="muted small disk">
-    {fmtBytes(disk.free_bytes)} free of {fmtBytes(disk.total_bytes)} · clips use {fmtBytes(disk.clips_bytes)}
-  </p>
-{/if}
+</section>
 
 {#if app.config && !app.config.ui.setup_done}<Wizard />{/if}
 
@@ -141,9 +146,12 @@
   .sep { margin: 0 .4rem; }
   .actions { display: flex; flex-wrap: wrap; gap: 1rem 1.4rem; margin-top: .6rem; }
   .act { display: flex; align-items: center; gap: .5rem; }
-  .head { margin-bottom: .8rem; }
-  .head h2 { margin: 0; font-size: 1.2rem; }
-  .head a { text-decoration: none; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
-  .disk { margin-top: 1.5rem; }
+  .info { display: flex; flex-direction: column; gap: .8rem; padding: 1.2rem 1.6rem; }
+  .info p { margin: 0; }
+  .latest { display: flex; flex-direction: column; gap: .15rem; text-decoration: none; color: inherit; border-radius: .5rem; padding: .4rem .6rem; margin: -.4rem -.6rem; transition: background .2s; }
+  .latest:hover { background: var(--surface-2); }
+  .latest.fresh { background: var(--accent-soft, var(--surface-2)); }
+  .latest b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .facts { gap: .4rem 1.2rem; flex-wrap: wrap; align-items: baseline; }
+  .facts a { text-decoration: none; }
 </style>

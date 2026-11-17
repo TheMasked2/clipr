@@ -2,7 +2,7 @@
   import { app } from './store.svelte';
   import { FLOOR, fmtDb, pct } from './meter';
 
-  /** The meters show the raw input, so a peak this close to 0 dB means it clipped before clipr got it. */
+  /** CLIP looks at the raw input: a peak this close to 0 dB means it clipped before clipr got it. */
   const CLIP_DB = -0.5;
   /** How long CLIP stays lit after the last clipped peak, so a short one is still seen. */
   const CLIP_HOLD_MS = 2000;
@@ -27,13 +27,14 @@
   {#each app.levels as l (l.name)}
     <div class="m">
       <span class="name">{l.name}</span>
-      <div class="bar" role="meter" aria-label={l.name} aria-valuemin={FLOOR} aria-valuemax={0} aria-valuenow={Math.round(l.db)}>
-        <div class="fill" class:hot={l.db > -12} class:clip={l.db > -3} style="width: {pct(l.db)}%"></div>
+      <!-- The bar is what gets recorded: after the filters, push-to-talk and volume. -->
+      <div class="bar" role="meter" aria-label={l.name} aria-valuemin={FLOOR} aria-valuemax={0} aria-valuenow={Math.round(l.after)}>
+        <div class="fill" class:hot={l.after > -12} class:clip={l.after > -3} style="width: {pct(l.after)}%"></div>
       </div>
       {#if clipping.has(l.name)}
         <span class="badge" title="This source reached full scale: its sound is distorting before clipr records it. Lower its level (for a mic: Windows Sound settings → input volume or boost).">CLIP</span>
       {:else}
-        <span class="db">{fmtDb(l.db)}</span>
+        <span class="db" title="Before filters: {fmtDb(l.db)}">{fmtDb(l.after)}</span>
       {/if}
     </div>
   {:else}

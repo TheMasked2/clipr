@@ -114,8 +114,8 @@ pub struct AudioConfig {
     pub mic_volume: u32,
     /// Apps recorded on their own tracks (exe names, e.g. `discord.exe`). Needs Windows 10 2004 or newer.
     pub apps: Vec<String>,
-    /// Also write every source on its own track (track 1 is always the full mix; up to 6 tracks), so you
-    /// can turn voice chat down later in an editor.
+    /// Also give system audio and the mic a track of their own (apps always have one; track 1 is always the
+    /// full mix; up to 6 tracks), so you can turn them down later in an editor.
     pub separate_tracks: bool,
     /// Filters per source, applied in order, like OBS: the key is `system`, `mic`, or an app's exe name
     /// (`discord.exe`). Every source starts with none. An entry clipr can't read (an unknown kind from a newer
