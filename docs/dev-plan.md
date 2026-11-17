@@ -27,7 +27,7 @@ phases, milestones and the risks to settle early.
 | Rich Presence | Discord IPC (`discord-rich-presence`) | |
 | Cloud | `rusty-s3` (SigV4 presign) + `reqwest` | Works with R2, S3, B2. Avoids the heavy AWS SDK |
 | Voice (v1.x) | `ort` (ONNX Runtime) for openWakeWord, `whisper-rs` (whisper.cpp) | Local, multilingual-capable |
-| Logging / crash | `tracing`, opt-in crash reports (minidump + backtrace upload) | |
+| Logging / crash | `tracing`, opt-in crash reports (minidump + `module+offset` stack, reported as a GitHub issue by the user) | |
 | Packaging | Inno Setup installer + portable zip, GitHub Actions release | Same as Ultron |
 
 ### Crate layout
@@ -189,7 +189,9 @@ A capture restart (new monitor or video settings) finishes the file and continue
 - [x] Opt-in updater (GitHub releases, only applies when no game runs and nothing is recording): checks every
       6 h when on, "Check now" / "Update now" in Settings → General, beta channel toggle, sha256-verified
       installer, portable copies get a Download link
-- [ ] Opt-in crash reports
+- [x] Opt-in crash reports, no server: panics and native exceptions leave a record + minidump; Home shows a
+      scrubbed report (no user/PC name, profile paths, LAN IPs) with "Report on GitHub" (pre-filled issue the
+      user reviews and sends), Copy, Show dump file, Dismiss. Nothing is sent by itself
 - [ ] User docs: setup, Discord bot tutorial, every setting explained
 - [ ] Test matrix: NVIDIA / AMD / Intel, HDR on/off, multi-monitor, borderless + fullscreen, laptop iGPU
 - [ ] Release v1.0 on GitHub

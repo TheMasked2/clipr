@@ -237,7 +237,8 @@ impl Worker {
                 current_version()
             );
         }
-        self.clean_downloads();
+        // The installer that just updated this copy may still be finishing: retry until it's gone.
+        let mut cleaned = self.clean_downloads();
         let mut next_check = Instant::now() + FIRST_CHECK;
         loop {
             let auto = (self.settings)().auto_update;
@@ -265,6 +266,15 @@ impl Worker {
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
             }
+            if !cleaned {
+                let holding = {
+                    let s = self.updater.shared.lock().unwrap();
+                    s.setup.is_some() || s.want_apply
+                };
+                if !holding {
+                    cleaned = self.clean_downloads();
+                }
+            }
             let auto_now = (self.settings)().auto_update;
             let apply = {
                 let mut s = self.updater.shared.lock().unwrap();
@@ -283,15 +293,16 @@ impl Worker {
         }
     }
 
-    /// Removes installers left from earlier updates (the one that installed this copy may still be
-    /// finishing, so failures are fine).
-    fn clean_downloads(&self) {
+    /// Removes installers left from earlier updates. True when nothing is left.
+    fn clean_downloads(&self) -> bool {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
-            return;
+            return true; // no folder, nothing to clean
         };
+        let mut all = true;
         for entry in entries.flatten() {
-            let _ = std::fs::remove_file(entry.path());
+            all &= std::fs::remove_file(entry.path()).is_ok();
         }
+        all
     }
 
     /// Asks GitHub. With `auto` on, a found update installs by itself when nothing runs.

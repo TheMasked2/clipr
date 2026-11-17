@@ -6,6 +6,7 @@
   import ClipCard from '../lib/ClipCard.svelte';
   import Wizard from '../lib/Wizard.svelte';
   import DiscordPosts from '../lib/DiscordPosts.svelte';
+  import CrashNotice from '../lib/CrashNotice.svelte';
 
   let clips = $state<api.Clip[]>([]);
   let disk = $state<api.Disk | null>(null);
@@ -100,6 +101,7 @@
   </div>
 </section>
 
+<CrashNotice />
 <DiscordPosts />
 
 <div class="row head">

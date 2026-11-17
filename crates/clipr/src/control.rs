@@ -22,6 +22,8 @@ pub struct AppControl {
     pub hotkeys: mpsc::Sender<HotkeyConfig>,
     pub main_thread: u32,
     pub updater: crate::updater::Updater,
+    pub crash_dir: PathBuf,
+    pub log_dir: PathBuf,
     pub known_games: Arc<dyn Fn() -> usize + Send + Sync>,
 }
 
@@ -82,6 +84,7 @@ impl Control for AppControl {
             let _ = self.hotkeys.send(config.hotkeys.clone());
             win::wake(self.main_thread);
         }
+        crate::crash::set_enabled(config.privacy.crash_reports);
         if old.clips.dir() != config.clips.dir() {
             self.library.set_clips_dir(config.clips.dir());
         }
@@ -99,6 +102,37 @@ impl Control for AppControl {
 
     fn levels(&self) -> Vec<(String, f32)> {
         self.engine.levels()
+    }
+
+    fn crashes(&self) -> serde_json::Value {
+        if !self.config().privacy.crash_reports {
+            return json!([]);
+        }
+        let records = crate::crash::list(&self.crash_dir);
+        if records.is_empty() {
+            return json!([]);
+        }
+        static MACHINE: OnceLock<crate::crash::Machine> = OnceLock::new();
+        let machine = MACHINE.get_or_init(crate::crash::Machine::detect);
+        let scrub = crate::crash::Scrub::from_env();
+        records
+            .iter()
+            .map(|(id, r)| {
+                let has_dump = crate::crash::dump_path(&self.crash_dir, id).is_some();
+                crate::crash::to_json(id, r, machine, &self.log_dir, &scrub, has_dump)
+            })
+            .collect()
+    }
+
+    fn dismiss_crash(&self, id: &str) -> std::result::Result<(), String> {
+        crate::crash::dismiss(&self.crash_dir, id)
+    }
+
+    fn reveal_crash(&self, id: &str) -> std::result::Result<(), String> {
+        let path = crate::crash::dump_path(&self.crash_dir, id)
+            .ok_or_else(|| "This crash has no dump file.".to_string())?;
+        win::reveal(&path);
+        Ok(())
     }
 
     fn update_status(&self) -> serde_json::Value {

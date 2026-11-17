@@ -11,6 +11,7 @@
 
 mod autostart;
 mod control;
+mod crash;
 mod engine;
 mod icon;
 mod overlay;
@@ -61,6 +62,8 @@ fn run() -> Result<()> {
     }));
 
     let config = Config::load_or_recover(&paths.config_file());
+    crash::install(paths.crash_dir(), config.privacy.crash_reports);
+    crash::crash_test_from_env();
     if !paths.config_file().exists()
         && let Err(e) = config.save(&paths.config_file())
     {
@@ -120,6 +123,8 @@ fn run() -> Result<()> {
         hotkeys: hotkeys_tx,
         main_thread: win::current_thread_id(),
         updater,
+        crash_dir: paths.crash_dir(),
+        log_dir: paths.log_dir(),
         known_games: Arc::new(move || watcher.list_len()),
     });
     let server = runtime.spawn(clipr_web::serve_many(
