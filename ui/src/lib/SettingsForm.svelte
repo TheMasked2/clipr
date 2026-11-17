@@ -87,11 +87,13 @@
   // The recorded apps (their filter keys match the server's: the exe name in lower case), and the tracks a
   // clip gets, worked out like the server's plan (crates/audio/src/plan.rs): track 1 is the mix; every app
   // has its own track; Separate tracks also gives system audio and the mic one. Six tracks at most.
+  // ASCII-only lower case, like the server's key (to_ascii_lowercase).
+  const asciiLower = (s: string) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
   const appList = $derived(
     draft.audio.apps
       .map((a) => a.trim())
-      .filter((a, i, all) => a && all.findIndex((b) => b.toLowerCase() === a.toLowerCase()) === i)
-      .map((a) => ({ key: a.toLowerCase(), label: a.replace(/\.exe$/i, '') })),
+      .filter((a, i, all) => a && all.findIndex((b) => asciiLower(b) === asciiLower(a)) === i)
+      .map((a) => ({ key: asciiLower(a), label: a.replace(/\.exe$/i, '') })),
   );
   const tracks = $derived.by(() => {
     const a = draft.audio;
@@ -102,8 +104,9 @@
     ];
     if (!mix.length && !appList.length) return [];
     const own = [
-      ...(a.separate_tracks && a.system ? ['System audio'] : []),
-      ...(a.separate_tracks && a.mic ? ['Microphone'] : []),
+      // The names the clip page and video editors show.
+      ...(a.separate_tracks && a.system ? ['System'] : []),
+      ...(a.separate_tracks && a.mic ? ['Mic'] : []),
       ...appList.map((x) => x.label),
     ];
     return [{ name: 'Mix', has: mix.join(' + ') || 'nothing' }, ...own.map((o) => ({ name: o, has: o }))].slice(0, 6);

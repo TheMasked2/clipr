@@ -28,11 +28,13 @@ impl SourceKind {
         match self {
             Self::System => "System".into(),
             Self::Mic => "Mic".into(),
-            Self::App(exe) => exe
-                .strip_suffix(".exe")
-                .or_else(|| exe.strip_suffix(".EXE"))
-                .unwrap_or(exe)
-                .to_owned(),
+            // `.exe` in any case, like the UI's label.
+            Self::App(exe) => match exe.len().checked_sub(4) {
+                Some(i) if exe.is_char_boundary(i) && exe[i..].eq_ignore_ascii_case(".exe") => {
+                    exe[..i].to_owned()
+                }
+                _ => exe.clone(),
+            },
         }
     }
 }
@@ -167,6 +169,15 @@ mod tests {
         // Each app still gets its own track; the mic doesn't without separate tracks.
         let names: Vec<_> = p.tracks.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, ["Mix", "game", "discord"]);
+    }
+
+    #[test]
+    fn app_labels_drop_exe_in_any_case() {
+        for exe in ["Discord.exe", "Discord.EXE", "Discord.Exe", "Discord"] {
+            assert_eq!(SourceKind::App(exe.into()).label(), "Discord");
+        }
+        assert_eq!(SourceKind::App("é.exe".into()).label(), "é");
+        assert_eq!(SourceKind::App("exe".into()).label(), "exe");
     }
 
     #[test]

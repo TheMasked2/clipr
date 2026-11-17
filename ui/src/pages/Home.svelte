@@ -20,13 +20,17 @@
   const paused = $derived(st?.paused ?? false);
   const elapsed = $derived(st?.state === 'recording' && st.recording_since ? now / 1000 - st.recording_since : 0);
 
+  // Only the newest request's answer counts, so an older list can't undo a clip that was just saved.
+  let seq = 0;
   async function refetch() {
+    const mine = ++seq;
     try {
       const all = await api.listClips();
+      if (mine !== seq) return;
       latest = all[0] ?? null;
       count = all.length;
     } catch (e) {
-      if (count === null) toastError(e);
+      if (mine === seq && count === null) toastError(e);
     }
   }
   const loadDisk = () => api.getDisk().then((d) => (disk = d)).catch(() => {});
@@ -37,6 +41,7 @@
     const tick = setInterval(() => (now = Date.now()), 500);
     const off = onServerEvent((e) => {
       if (e.type === 'clip_saved') {
+        seq++; // drops a list request still on its way
         if (latest?.id !== e.clip.id) count = (count ?? 0) + 1;
         latest = e.clip;
         fresh = e.clip.id;
