@@ -54,6 +54,8 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 clipr checks GitHub releases by itself only when `general.auto_update` is on (2 min after start, then every
 6 h); `general.update_beta` adds prereleases. Only an installed copy (Inno Setup's `unins000.exe` next to the
 exe) can install; a portable copy links the release page instead.
+For testing, `CLIPR_UPDATE_PRETEND_VERSION=0.0.1` makes the updater compare as that version, so an installed
+copy can "update" to the current release (still sha256-verified).
 
 - `GET /api/update` → `{"current":"0.1.0-beta.1","installed":true,"state","release","checked_at","error",
   "progress","busy","will_install"}`. `state`: `idle checking up_to_date available downloading ready waiting
