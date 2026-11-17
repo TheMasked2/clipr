@@ -19,7 +19,7 @@ pub mod mix;
 pub mod plan;
 mod wasapi;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -38,6 +38,32 @@ use crate::levels::Levels;
 use crate::mix::{HNS_PER_SEC, RATE, Timeline, time_at};
 use crate::plan::{Plan, SourceKind};
 use crate::wasapi::{Processing, PttKey, Source};
+
+/// The microphone is muted in clips (the mute hotkey). Read on every poll, so it applies within ~10 ms and
+/// across capture restarts.
+static MIC_MUTED: AtomicBool = AtomicBool::new(false);
+
+/// The detected game's process id (0 = none), for the game source.
+static GAME_PID: AtomicU32 = AtomicU32::new(0);
+
+/// Mutes (`true`) or unmutes the microphone in clips. It fades like push-to-talk.
+pub fn set_mic_muted(muted: bool) {
+    MIC_MUTED.store(muted, Ordering::Relaxed);
+}
+
+pub fn mic_muted() -> bool {
+    MIC_MUTED.load(Ordering::Relaxed)
+}
+
+/// Which process the game source records (`None`: no game, so it records silence). The capture thread picks
+/// a change up within a few seconds.
+pub fn set_game_pid(pid: Option<u32>) {
+    GAME_PID.store(pid.unwrap_or(0), Ordering::Relaxed);
+}
+
+pub(crate) fn game_pid() -> Option<u32> {
+    Some(GAME_PID.load(Ordering::Relaxed)).filter(|&p| p != 0)
+}
 
 /// How far behind "now" mixed audio is cut, so slow sources have time to deliver.
 const LATENCY_100NS: i64 = 30 * HNS_PER_SEC / 1000;
@@ -71,7 +97,13 @@ impl AudioCapture {
     /// Starts capture and encoding on its own thread. Errors if no source is enabled or the encoder
     /// can't start. `on_packet` is called on the capture thread.
     pub fn start(config: &AudioConfig, on_packet: impl FnMut(AudioPacket) + Send + 'static) -> Result<Self> {
-        let plan = plan::plan(config.system, config.mic, &config.apps, config.separate_tracks);
+        let plan = plan::plan(
+            config.system,
+            config.mic,
+            config.game,
+            &config.apps,
+            config.separate_tracks,
+        );
         if plan.sources.is_empty() {
             bail!("no audio source is enabled");
         }
@@ -205,7 +237,7 @@ fn build_sources(config: &AudioConfig, plan: &Plan, levels: &Arc<Levels>) -> (Ve
         let (offset_ms, volume) = match kind {
             SourceKind::System => (config.system_offset_ms, config.system_volume),
             SourceKind::Mic => (config.mic_offset_ms, config.mic_volume),
-            SourceKind::App(_) => (0, 100),
+            SourceKind::Game | SourceKind::App(_) => (0, 100),
         };
         let filters = config
             .filters

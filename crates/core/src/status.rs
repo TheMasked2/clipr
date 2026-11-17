@@ -34,6 +34,8 @@ pub struct Activity {
     pub recording_since: Option<u64>,
     /// The user paused the buffer (tray, hotkey or web UI).
     pub paused: bool,
+    /// The user muted the microphone in clips (hotkey, tray or web UI).
+    pub mic_muted: bool,
 }
 
 /// What `/api/status` returns and the WebSocket pushes.
@@ -47,6 +49,8 @@ pub struct StatusSnapshot {
     pub recording_since: Option<u64>,
     #[serde(default)]
     pub paused: bool,
+    #[serde(default)]
+    pub mic_muted: bool,
     pub uptime_secs: u64,
 }
 
@@ -98,6 +102,7 @@ impl Status {
             error: activity.error,
             recording_since: activity.recording_since,
             paused: activity.paused,
+            mic_muted: activity.mic_muted,
             uptime_secs: self.started.elapsed().as_secs(),
         }
     }

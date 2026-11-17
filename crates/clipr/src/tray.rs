@@ -31,15 +31,17 @@ enum Action {
     ToggleBuffer = 3,
     ToggleRecording = 4,
     Mark = 5,
+    ToggleMic = 6,
 }
 
 impl Action {
-    const ALL: [Action; 5] = [
+    const ALL: [Action; 6] = [
         Action::SaveClip,
         Action::SaveLongClip,
         Action::ToggleBuffer,
         Action::ToggleRecording,
         Action::Mark,
+        Action::ToggleMic,
     ];
 
     fn from_id(id: i32) -> Option<Self> {
@@ -53,6 +55,7 @@ impl Action {
             Action::ToggleBuffer => &keys.toggle_buffer,
             Action::ToggleRecording => &keys.toggle_recording,
             Action::Mark => &keys.mark,
+            Action::ToggleMic => &keys.toggle_mic,
         }
     }
 }
@@ -241,6 +244,7 @@ pub fn run(
             Some(Action::ToggleBuffer) => engine.send(Command::ToggleBuffering),
             Some(Action::Mark) => engine.send(Command::Mark),
             Some(Action::ToggleRecording) => engine.send(Command::ToggleRecording),
+            Some(Action::ToggleMic) => engine.send(Command::ToggleMic),
             None => {}
         },
     );

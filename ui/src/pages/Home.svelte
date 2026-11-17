@@ -108,6 +108,12 @@
       <button onclick={() => run(api.markMoment())}>Mark moment</button>
       {#if hk?.mark}<kbd>{hk.mark}</kbd>{/if}
     </div>
+    {#if app.config?.audio.mic}
+      <div class="act">
+        <button class:warn={st?.mic_muted} onclick={() => run(api.setMicMuted(!st?.mic_muted))}>{st?.mic_muted ? 'Unmute mic' : 'Mute mic'}</button>
+        {#if hk?.toggle_mic}<kbd>{hk.toggle_mic}</kbd>{/if}
+      </div>
+    {/if}
   </div>
 </section>
 
@@ -146,6 +152,7 @@
   .sep { margin: 0 .4rem; }
   .actions { display: flex; flex-wrap: wrap; gap: 1rem 1.4rem; margin-top: .6rem; }
   .act { display: flex; align-items: center; gap: .5rem; }
+  .act button.warn { color: #f5b942; border-color: #f5b94266; }
   .info { display: flex; flex-direction: column; gap: .8rem; padding: 1.2rem 1.6rem; }
   .info p { margin: 0; }
   .latest { display: flex; flex-direction: column; gap: .15rem; text-decoration: none; color: inherit; border-radius: .5rem; padding: .4rem .6rem; margin: -.4rem -.6rem; transition: background .2s; }

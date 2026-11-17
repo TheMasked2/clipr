@@ -15,6 +15,7 @@
 </script>
 
 <span class="pill {view.cls}" role="status">{view.text}</span>
+{#if app.status?.mic_muted}<span class="pill muted" role="status" title="Your microphone is muted in clips (not in your voice chat).">Mic muted</span>{/if}
 
 <style>
   .pill {
@@ -33,4 +34,5 @@
   .buf { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-border); }
   .rec { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-border); }
   .down { border-style: dashed; }
+  .muted { color: #f5b942; border-color: #f5b94266; margin-left: 0.4rem; }
 </style>

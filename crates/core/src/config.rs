@@ -42,6 +42,8 @@ pub struct ReplayConfig {
     pub buffer_secs: u32,
     /// Play a short sound when a clip is saved.
     pub sound_on_save: bool,
+    /// How loud that sound (and the mic mute/unmute blip) plays, 0–100 %.
+    pub sound_volume: u32,
     /// Show a small "Clip saved" note in the corner of the screen. It never shows up in clips, and games in
     /// exclusive fullscreen hide it.
     pub toast_on_save: bool,
@@ -54,6 +56,7 @@ impl Default for ReplayConfig {
             clip_secs: 30,
             buffer_secs: 120,
             sound_on_save: true,
+            sound_volume: 60,
             toast_on_save: true,
         }
     }
@@ -112,6 +115,9 @@ pub struct AudioConfig {
     pub mic: bool,
     /// Microphone volume, 0–200 %.
     pub mic_volume: u32,
+    /// Record the detected game's own sound on a track of its own (only the game, no voice chat or music).
+    /// Follows whichever game clipr detects. Needs Windows 10 2004 or newer.
+    pub game: bool,
     /// Apps recorded on their own tracks (exe names, e.g. `discord.exe`). Needs Windows 10 2004 or newer.
     pub apps: Vec<String>,
     /// Also give system audio and the mic a track of their own (apps always have one; track 1 is always the
@@ -149,6 +155,8 @@ pub struct AudioConfig {
 pub const SYSTEM_SOURCE: &str = "system";
 /// The [`AudioConfig::filters`] key for the microphone.
 pub const MIC_SOURCE: &str = "mic";
+/// The [`AudioConfig::filters`] key for the game's own sound ([`AudioConfig::game`]).
+pub const GAME_SOURCE: &str = "game";
 
 /// One audio filter. Levels are in dBFS, times in ms.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -286,6 +294,7 @@ impl Default for AudioConfig {
             system_volume: 100,
             mic: false,
             mic_volume: 100,
+            game: false,
             apps: Vec::new(),
             separate_tracks: false,
             filters: BTreeMap::new(),
@@ -315,6 +324,8 @@ pub struct HotkeyConfig {
     pub toggle_recording: String,
     /// Marks this moment; markers show on the clip's timeline in the gallery.
     pub mark: String,
+    /// Mutes or unmutes the microphone in clips (not in your voice chat). Empty (the default) turns it off.
+    pub toggle_mic: String,
 }
 
 impl Default for HotkeyConfig {
@@ -325,6 +336,7 @@ impl Default for HotkeyConfig {
             toggle_buffer: String::new(),
             toggle_recording: "Alt+F9".into(),
             mark: String::new(),
+            toggle_mic: String::new(),
         }
     }
 }

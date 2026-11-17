@@ -57,8 +57,10 @@ the normal value. Capture restarts when the game changes.
 - **Clip length (seconds)** (30): how far back a saved clip goes.
 - **Buffer length (seconds)** (120): how much the buffer keeps. **Save long clip** saves all of it. The buffer
   lives in RAM: the page shows an estimate for your bitrate (two minutes at 15 Mbit/s is about 225 MB).
-- **Sound on save** (on): play a short sound when a clip is saved. It plays through your speakers, so with
-  system audio on it can be heard in a clip saved right after.
+- **Sound on save** (on): play a short chime when a clip is saved, or a low tone when saving fails. It plays
+  through your speakers, so with system audio on it can be heard in a clip saved right after.
+- **Sound volume** (60 %): how loud the save sound and the mic mute blip play. **Test** plays it at the
+  volume on the slider, before you save. 0 % is silent.
 - **Note on save** (on): show a small "Clip saved" note in the top-right corner. It never shows up in your
   clips. Games in exclusive fullscreen hide it, but the sound still plays.
 
@@ -71,9 +73,10 @@ in one place.
 
 The top of the page lists the tracks your clips get and what each one holds:
 
-- **Track 1, Mix**: system audio and the microphone together, plus your app tracks when system audio is off
-  (with it on, the apps are already in there). Players and Discord play this track, so clips sound right
+- **Track 1, Mix**: system audio and the microphone together, plus the game and your app tracks when system
+  audio is off (with it on, they are already in there). Players and Discord play this track, so clips sound right
   everywhere.
+- **Game**, when **Game audio** is on.
 - **One track per app** in **App tracks**, always.
 - **Separate tracks** (off): also give system audio and the microphone a track of their own.
 
@@ -99,7 +102,16 @@ The meters show while the buffer runs and follow the saved settings.
   your voice chat, like `V` or `Mouse4`. Empty means the mic is always recorded.
 - **Push-to-talk release (ms)** (200): keep the mic open this long after you let go, so the end of a word isn't
   cut off. Shows once a push-to-talk key is set.
+- **Mute in clips:** **Mute now** silences your mic in clips (not in your voice chat) until you unmute it.
+  The **Mute / unmute microphone** hotkey does the same, with a short blip, and the top bar shows **Mic
+  muted** while it is. clipr always starts unmuted.
 - **Filters**: see [Filters](#filters).
+
+### Game audio
+
+- **Game on its own track** (off): also record only the game's sound (no voice chat, no music) on a track of
+  its own, so you can turn it up or down later in an editor. It follows whichever game clipr detects. Needs
+  Windows 10 version 2004 or newer. The game has its own filter list.
 
 ### App tracks
 
@@ -153,6 +165,8 @@ it off. A hotkey turns red when two actions share the same combination.
 - **Pause / resume buffer** (off): pauses or resumes the replay buffer.
 - **Start / stop recording** (`Alt+F9`): starts or stops a full recording.
 - **Mark moment** (off): marks this moment. Markers show on the clip's timeline.
+- **Mute / unmute microphone** (off): mutes your mic in clips (not in your voice chat), with a short blip.
+  Press it again to unmute.
 
 ## Games
 

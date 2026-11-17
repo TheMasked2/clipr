@@ -22,6 +22,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clipr_audio::AudioCapture;
+
+use crate::sound::{self, Cue};
 use clipr_buffer::{Packet, ReplayBuffer, SECOND};
 use clipr_core::config::{AudioConfig, Config, GameMode, VideoCodec};
 use clipr_core::events::{Bus, Event};
@@ -54,6 +56,9 @@ pub enum Command {
     /// Start or stop a full recording.
     SetRecording(bool),
     ToggleRecording,
+    /// Mute (`true`) or unmute the microphone in clips.
+    SetMicMuted(bool),
+    ToggleMic,
     Stop,
 }
 
@@ -300,6 +305,8 @@ impl Supervisor {
             Command::SetRecording(false) => self.stop_recording(true),
             Command::ToggleRecording if self.recording.is_some() => self.stop_recording(true),
             Command::ToggleRecording => self.start_recording(None),
+            Command::SetMicMuted(muted) => self.set_mic_muted(muted),
+            Command::ToggleMic => self.set_mic_muted(!clipr_audio::mic_muted()),
             Command::Stop => {}
         }
     }
@@ -309,6 +316,8 @@ impl Supervisor {
         if now >= self.next_poll {
             self.next_poll = now + GAME_POLL;
             self.game = self.watcher.poll();
+            // The game audio source records whatever game runs now.
+            clipr_audio::set_game_pid(self.game.as_ref().map(|g| g.pid));
             if self.pipeline.is_some() {
                 // What's on screen now is what the buffer's newest footage shows.
                 self.buffer_game = self.game.as_ref().map(|g| g.name.clone());
@@ -464,7 +473,7 @@ impl Supervisor {
 
     /// Starts audio capture into the buffer. A failure only costs the sound: video keeps going.
     fn start_audio(&mut self, config: &AudioConfig) -> Option<AudioCapture> {
-        if !config.system && !config.mic && config.apps.is_empty() {
+        if !config.system && !config.mic && !config.game && config.apps.is_empty() {
             return None;
         }
         let shared = self.shared.clone();
@@ -546,7 +555,31 @@ impl Supervisor {
             error: self.error.clone(),
             recording_since,
             paused: !self.buffering,
+            mic_muted: clipr_audio::mic_muted(),
         });
+    }
+
+    /// The mute hotkey (or the tray, or the web UI): mutes or unmutes the microphone in clips, with a blip and
+    /// a note so the user knows which way it went. It isn't saved: clipr starts unmuted.
+    fn set_mic_muted(&mut self, muted: bool) {
+        if muted == clipr_audio::mic_muted() {
+            return;
+        }
+        clipr_audio::set_mic_muted(muted);
+        tracing::info!("microphone {}", if muted { "muted" } else { "on" });
+        let cue = if muted { Cue::MicMuted } else { Cue::MicOn };
+        sound::play(cue, self.config.replay.sound_volume);
+        if self.config.replay.toast_on_save {
+            self.toast
+                .show(if muted { "Mic muted in clips" } else { "Mic on" }, !muted);
+        }
+        self.publish();
+    }
+
+    /// The save sound's volume, or `None` with it switched off.
+    fn sound(&self) -> Option<u32> {
+        let r = &self.config.replay;
+        r.sound_on_save.then_some(r.sound_volume)
     }
 
     /// Logs frame statistics and warns when the game starves the capture.
@@ -602,7 +635,7 @@ impl Supervisor {
         let game = self.buffer_game.clone().unwrap_or_else(|| "Desktop".into());
         let reserved = save::clip_path(&self.config.clips.dir(), &game, "");
         let bus = self.bus.clone();
-        let sound = self.config.replay.sound_on_save;
+        let sound = self.sound();
         let toast = self.config.replay.toast_on_save.then(|| self.toast.clone());
         let length = cut.duration_secs();
         let worker = std::thread::Builder::new()
@@ -770,7 +803,7 @@ impl Supervisor {
             Ok(None) => tracing::info!("the recording stopped before its first frame; no file"),
             Ok(Some(path)) => {
                 tracing::info!("recording saved: {} ({secs} s)", path.display());
-                cue(self.config.replay.sound_on_save, true);
+                cue(self.sound(), true);
                 if self.config.replay.toast_on_save {
                     self.toast
                         .show(&format!("Recording saved · {}:{:02}", secs / 60, secs % 60), true);
@@ -805,7 +838,7 @@ impl Supervisor {
 
     fn fail(&self, message: &str, toast: &str) {
         tracing::warn!("{message}");
-        cue(self.config.replay.sound_on_save, false);
+        cue(self.sound(), false);
         if self.config.replay.toast_on_save {
             self.toast.show(toast, false);
         }
@@ -815,13 +848,9 @@ impl Supervisor {
     }
 }
 
-/// The save sound: Windows' "asterisk" sound for a saved clip, its error sound for a failure.
-fn cue(enabled: bool, ok: bool) {
-    if !enabled {
-        return;
+/// The save sound (`None`: switched off): clipr's chime for a saved clip, a low tone for a failure.
+fn cue(volume: Option<u32>, ok: bool) {
+    if let Some(volume) = volume {
+        sound::play(if ok { Cue::Saved } else { Cue::Failed }, volume);
     }
-    use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONASTERISK, MB_ICONHAND};
-    // SAFETY: plain call; plays asynchronously.
-    unsafe { MessageBeep(if ok { MB_ICONASTERISK } else { MB_ICONHAND }) };
 }

@@ -58,6 +58,14 @@ impl Control for AppControl {
         self.engine.send(Command::SetRecording(on));
     }
 
+    fn set_mic_muted(&self, muted: bool) {
+        self.engine.send(Command::SetMicMuted(muted));
+    }
+
+    fn test_sound(&self, volume: u32) {
+        crate::sound::play(crate::sound::Cue::Saved, volume);
+    }
+
     fn mark(&self) {
         self.engine.send(Command::Mark);
     }

@@ -61,6 +61,7 @@ fn label(kind: &SourceKind) -> String {
     match kind {
         SourceKind::System => "system audio".into(),
         SourceKind::Mic => "microphone".into(),
+        SourceKind::Game => "game audio".into(),
         SourceKind::App(exe) => format!("app {exe}"),
     }
 }
@@ -213,6 +214,8 @@ impl Source {
                 }
                 None => true,
             };
+            // The mute hotkey closes the mic the same way push-to-talk does.
+            let open_ptt = open_ptt && !(self.kind == SourceKind::Mic && crate::mic_muted());
             let result = read_all(
                 open,
                 self.lane,
@@ -252,9 +255,12 @@ impl Source {
             return;
         }
         match &self.kind {
-            SourceKind::App(exe) => {
+            kind @ (SourceKind::App(_) | SourceKind::Game) => {
                 self.next_check = now + APP_CHECK;
-                let pid = find_process(exe);
+                let pid = match kind {
+                    SourceKind::App(exe) => find_process(exe),
+                    _ => crate::game_pid(),
+                };
                 if pid != self.pid {
                     if let Some(pid) = pid {
                         tracing::info!("{}: found it (process {pid})", label(&self.kind));
@@ -294,7 +300,7 @@ impl Source {
             SourceKind::System => open_endpoint(devices, eRender, true),
             SourceKind::Mic => open_endpoint(devices, eCapture, false),
             // Not running: silence, no error.
-            SourceKind::App(_) => match self.pid {
+            SourceKind::Game | SourceKind::App(_) => match self.pid {
                 Some(pid) => open_process(pid),
                 None => return,
             },
@@ -317,11 +323,7 @@ impl Source {
                 }
                 self.failing = true;
                 // Activating an app's loopback can block this thread for a while: try it less often.
-                let wait = if matches!(self.kind, SourceKind::App(_)) {
-                    APP_RETRY
-                } else {
-                    RETRY
-                };
+                let wait = if self.kind.is_process() { APP_RETRY } else { RETRY };
                 self.retry_at = now + wait;
             }
         }
