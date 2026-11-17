@@ -96,12 +96,11 @@ impl Lan {
         }
     }
 
+    /// Saving with access on while it couldn't open tries again (after the user freed the port, say).
     pub fn set(&self, on: bool) {
-        self.want.send_if_modified(|v| std::mem::replace(v, on) != on);
-    }
-
-    pub fn is_on(&self) -> bool {
-        *self.want.borrow()
+        let retry = on && self.error.lock().unwrap().is_some();
+        self.want
+            .send_if_modified(|v| std::mem::replace(v, on) != on || retry);
     }
 
     /// Why access from the local network is on but not working, if it isn't.
@@ -326,23 +325,30 @@ async fn serve_lan(app: IntoMakeServiceWithConnectInfo<Router, SocketAddr>, stat
     let mut shutdown = state.shutdown.clone();
     loop {
         if *want.borrow_and_update() {
-            match bind_lan(lan.port).await {
+            match bind_lan_retrying(lan.port).await {
                 Ok(listener) => {
                     *lan.error.lock().unwrap() = None;
                     tracing::info!(
                         "web UI open to the local network on port {} (PIN required)",
                         lan.port
                     );
+                    // Graceful shutdown drops the listener at once but waits for requests in flight (a long
+                    // video stream) to finish; let that drain on its own so switching back on isn't held up.
                     let (mut off, mut stop) = (want.clone(), shutdown.clone());
-                    axum::serve(listener, app.clone())
-                        .with_graceful_shutdown(async move {
-                            tokio::select! {
-                                _ = off.wait_for(|on| !*on) => {}
-                                () = stopped(&mut stop) => {}
-                            }
-                        })
-                        .await
-                        .context("local network server stopped")?;
+                    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel::<()>();
+                    let server = axum::serve(listener, app.clone()).with_graceful_shutdown(async move {
+                        tokio::select! {
+                            _ = off.wait_for(|on| !*on) => {}
+                            () = stopped(&mut stop) => {}
+                        }
+                        let _ = closed_tx.send(());
+                    });
+                    tokio::spawn(async move {
+                        if let Err(e) = server.await {
+                            tracing::warn!("the local network server stopped: {e}");
+                        }
+                    });
+                    let _ = closed_rx.await;
                     if *shutdown.borrow() {
                         return Ok(());
                     }
@@ -364,6 +370,22 @@ async fn serve_lan(app: IntoMakeServiceWithConnectInfo<Router, SocketAddr>, stat
                 }
             }
             () = stopped(&mut shutdown) => return Ok(()),
+        }
+    }
+}
+
+/// [`bind_lan`], retried for up to a second: right after access went off and on again, the old listener may
+/// not be dropped yet.
+async fn bind_lan_retrying(port: u16) -> Result<TcpListener> {
+    let mut tries = 0;
+    loop {
+        match bind_lan(port).await {
+            Ok(listener) => return Ok(listener),
+            Err(e) if tries >= 10 => return Err(e),
+            Err(_) => {
+                tries += 1;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
         }
     }
 }

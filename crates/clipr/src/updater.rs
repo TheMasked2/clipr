@@ -1,7 +1,7 @@
 //! The updater thread. It checks GitHub releases (by itself only when `general.auto_update` is on, and then
 //! once per start, like Steam: shortly after clipr starts, never again until the next start; "Check now" in
-//! the UI works either way), downloads the
-//! installer with a verified checksum, and applies it only when no game runs and nothing is recording. To
+//! the UI works either way), downloads the installer with a verified checksum, and applies it only when no
+//! game runs and nothing is recording. To
 //! apply, it stores the installer in [`take_pending`] and quits the main loop; `main` shuts everything down
 //! as usual and then starts the installer, which waits for clipr to exit, installs and starts it again.
 //!
@@ -325,15 +325,16 @@ impl Worker {
         all
     }
 
-    /// Asks GitHub. With `auto` on, a found update installs by itself when nothing runs. False when GitHub
-    /// couldn't be reached (true when the check was skipped because one just ran or a download is going).
+    /// Asks GitHub. With `auto` on, a found update installs by itself when nothing runs. True when there is an
+    /// answer: this check's, or, when it's skipped (one just ran, or a download is going), the last one's. So a
+    /// failed "Check now" right before a startup check doesn't count as answered.
     fn check(&self, auto: bool) -> bool {
         {
             let mut s = self.updater.shared.lock().unwrap();
             if s.last_check.is_some_and(|t| t.elapsed() < MIN_CHECK_GAP)
                 || matches!(s.phase, Phase::Downloading | Phase::Installing)
             {
-                return true;
+                return s.phase != Phase::Error;
             }
             s.phase = Phase::Checking;
             s.error = None;
