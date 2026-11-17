@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use windows::Win32::Foundation::{GENERIC_WRITE, RPC_E_CHANGED_MODE};
+use windows::Win32::Foundation::{GENERIC_WRITE, HGLOBAL, RPC_E_CHANGED_MODE};
 use windows::Win32::Graphics::Imaging::{
     CLSID_WICImagingFactory, GUID_ContainerFormatJpeg, GUID_WICPixelFormat24bppBGR, IWICBitmapFrameEncode,
     IWICImagingFactory, WICBitmapEncoderNoCache,
@@ -17,9 +17,12 @@ use windows::Win32::Media::MediaFoundation::{
     MF_VERSION, MFCreateAttributes, MFCreateMediaType, MFCreateSourceReaderFromURL, MFMediaType_Video,
     MFSTARTUP_FULL, MFShutdown, MFStartup, MFVideoFormat_RGB32,
 };
-use windows::Win32::System::Com::StructuredStorage::{IPropertyBag2, PROPVARIANT, PropVariantToUInt64};
+use windows::Win32::System::Com::StructuredStorage::{
+    CreateStreamOnHGlobal, IPropertyBag2, PROPVARIANT, PropVariantToUInt64,
+};
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+    CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize, IStream,
+    STREAM_SEEK_CUR, STREAM_SEEK_SET,
 };
 use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};
 
@@ -319,20 +322,7 @@ fn write_jpeg(out: &Path, w: u32, h: u32, bgr: &[u8]) -> Result<()> {
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
             let stream = factory.CreateStream()?;
             stream.InitializeFromFilename(&HSTRING::from(tmp.to_string_lossy().as_ref()), GENERIC_WRITE.0)?;
-            let encoder = factory.CreateEncoder(&GUID_ContainerFormatJpeg, std::ptr::null())?;
-            encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
-            let mut frame: Option<IWICBitmapFrameEncode> = None;
-            let mut bag: Option<IPropertyBag2> = None;
-            encoder.CreateNewFrame(&mut frame, &mut bag)?;
-            let frame = frame.context("no JPEG frame")?;
-            frame.Initialize(bag.as_ref())?;
-            frame.SetSize(w, h)?;
-            let mut format = GUID_WICPixelFormat24bppBGR;
-            frame.SetPixelFormat(&mut format)?;
-            frame.WritePixels(h, w * 3, bgr)?;
-            frame.Commit()?;
-            encoder.Commit()?;
-            Ok(())
+            encode_jpeg(&factory, &stream, w, h, bgr)
         })()
     };
     if let Err(e) = written {
@@ -342,9 +332,90 @@ fn write_jpeg(out: &Path, w: u32, h: u32, bgr: &[u8]) -> Result<()> {
     std::fs::rename(&tmp, out).with_context(|| format!("can't write {}", out.display()))
 }
 
+/// Encodes `bgr` (24-bit, `w`×`h`) as a JPEG into `stream`.
+///
+/// # Safety
+/// COM must be running on this thread.
+unsafe fn encode_jpeg(
+    factory: &IWICImagingFactory,
+    stream: &IStream,
+    w: u32,
+    h: u32,
+    bgr: &[u8],
+) -> Result<()> {
+    // SAFETY: COM calls on interfaces created here; `bgr` outlives the `WritePixels` call.
+    unsafe {
+        let encoder = factory.CreateEncoder(&GUID_ContainerFormatJpeg, std::ptr::null())?;
+        encoder.Initialize(stream, WICBitmapEncoderNoCache)?;
+        let mut frame: Option<IWICBitmapFrameEncode> = None;
+        let mut bag: Option<IPropertyBag2> = None;
+        encoder.CreateNewFrame(&mut frame, &mut bag)?;
+        let frame = frame.context("no JPEG frame")?;
+        frame.Initialize(bag.as_ref())?;
+        frame.SetSize(w, h)?;
+        let mut format = GUID_WICPixelFormat24bppBGR;
+        frame.SetPixelFormat(&mut format)?;
+        frame.WritePixels(h, w * 3, bgr)?;
+        frame.Commit()?;
+        encoder.Commit()?;
+    }
+    Ok(())
+}
+
+/// `bgra` (`w`×`h`, 4 bytes a pixel, rows packed) as a JPEG file in memory. Starts COM on this thread when
+/// it isn't running yet, so any thread can call it.
+pub fn jpeg(w: u32, h: u32, bgra: &[u8]) -> Result<Vec<u8>> {
+    anyhow::ensure!(
+        w > 0 && h > 0 && bgra.len() == w as usize * h as usize * 4,
+        "a {w}x{h} image needs {} bytes, got {}",
+        w as usize * h as usize * 4,
+        bgra.len()
+    );
+    let bgr = to_bgr(bgra);
+    // SAFETY: plain initialisation, undone below on the same thread when it started COM.
+    let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    if hr.is_err() && hr != RPC_E_CHANGED_MODE {
+        bail!("can't start COM: {hr:?}");
+    }
+    // SAFETY: COM runs on this thread; the stream grows its own memory, and `out` has room for each read.
+    let written = unsafe {
+        (|| -> Result<Vec<u8>> {
+            let factory: IWICImagingFactory =
+                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
+            let stream = CreateStreamOnHGlobal(HGLOBAL::default(), true)?;
+            encode_jpeg(&factory, &stream, w, h, &bgr)?;
+            let mut len = 0u64;
+            stream.Seek(0, STREAM_SEEK_CUR, Some(&mut len))?;
+            stream.Seek(0, STREAM_SEEK_SET, None)?;
+            let mut out = vec![0u8; usize::try_from(len)?];
+            let mut read = 0u32;
+            stream
+                .Read(out.as_mut_ptr().cast(), u32::try_from(len)?, Some(&mut read))
+                .ok()?;
+            out.truncate(read as usize);
+            Ok(out)
+        })()
+    };
+    if hr.is_ok() {
+        // SAFETY: balances the successful CoInitializeEx above.
+        unsafe { CoUninitialize() };
+    }
+    written.context("can't make the JPEG")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jpeg_in_memory() {
+        let (w, h) = (64, 36);
+        let bgra: Vec<u8> = (0..w * h).flat_map(|i| [(i % 256) as u8, 80, 200, 255]).collect();
+        let j = jpeg(w, h, &bgra).unwrap();
+        assert_eq!(&j[..2], [0xFF, 0xD8]);
+        assert_eq!(&j[j.len() - 2..], [0xFF, 0xD9]);
+        assert!(jpeg(w, h, &bgra[4..]).is_err());
+    }
 
     #[test]
     fn names_are_stable_and_distinct() {

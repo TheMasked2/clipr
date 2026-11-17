@@ -9,19 +9,20 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clipr_capture::{CaptureOptions, CaptureSession, CapturedFrame, Target};
 use clipr_core::clock::now_100ns;
 use clipr_encode::EncodeSettings;
 use clipr_encode::mf::HwEncoder;
-use clipr_gpu::{Gpu, Nv12Converter, ScaleMode};
+use clipr_gpu::{Gpu, Nv12Converter, ScaleMode, Snapshotter};
 use clipr_mux::MediaFormat;
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 use windows::Win32::Graphics::Gdi::HMONITOR;
 
 use super::Shared;
+use crate::preview;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoSettings {
@@ -41,7 +42,11 @@ pub fn spawn(
 ) -> JoinHandle<Result<()>> {
     std::thread::Builder::new()
         .name("clipr-video".into())
-        .spawn(move || run(settings, &shared, &stop))
+        .spawn(move || {
+            let result = run(settings, &shared, &stop);
+            preview::clear();
+            result
+        })
         .expect("can't start a thread")
 }
 
@@ -116,6 +121,7 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
     let period = 10_000_000 / fps;
     let mut converter: Option<Nv12Converter> = None;
     let mut last: Option<ID3D11Texture2D> = None;
+    let mut live = Preview::default();
     let mut tick: i64 = 0;
     let t0 = now_100ns();
     let mut on_packet = |encoder: &HwEncoder, sample: clipr_encode::mf::Packet| -> Result<()> {
@@ -144,6 +150,7 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
         }
 
         let frame = latest.lock().unwrap().take();
+        live.tick(&gpu, frame.as_ref());
         if let Some(frame) = frame {
             let input = (frame.width, frame.height);
             // A new size (resolution change, window resize) needs a new converter; the output size stays.
@@ -173,6 +180,56 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
     session.stop();
     encoder.drain(&mut on_packet)?;
     Ok(())
+}
+
+/// The live preview's snapshots (see [`crate::preview`]): one every [`preview::INTERVAL`] while a page
+/// watches, read back a tick later. If the GPU can't make them, the preview stops and capture goes on.
+#[derive(Default)]
+struct Preview {
+    snapshotter: Option<Snapshotter>,
+    next: Option<Instant>,
+    broken: bool,
+}
+
+impl Preview {
+    fn tick(&mut self, gpu: &Gpu, frame: Option<&CapturedFrame>) {
+        if self.broken {
+            return;
+        }
+        if let Err(e) = self.try_tick(gpu, frame) {
+            tracing::warn!("the live preview stopped: {e:#}");
+            self.broken = true;
+            self.snapshotter = None;
+        }
+    }
+
+    fn try_tick(&mut self, gpu: &Gpu, frame: Option<&CapturedFrame>) -> Result<()> {
+        if let Some(s) = self.snapshotter.as_mut()
+            && let Some(snapshot) = s.take()?
+        {
+            preview::publish(snapshot);
+        }
+        let Some(frame) = frame else {
+            return Ok(());
+        };
+        let now = Instant::now();
+        if self.next.is_some_and(|t| now < t)
+            || self.snapshotter.as_ref().is_some_and(Snapshotter::pending)
+            || !preview::wanted()
+        {
+            return Ok(());
+        }
+        let input = (frame.width, frame.height);
+        if self.snapshotter.as_ref().map(Snapshotter::input_size) != Some(input) {
+            self.snapshotter = Some(Snapshotter::new(gpu, input, preview::MAX_SIZE)?);
+        }
+        self.snapshotter
+            .as_mut()
+            .expect("just set")
+            .start(&frame.texture)?;
+        self.next = Some(now + preview::INTERVAL);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

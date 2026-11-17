@@ -160,6 +160,26 @@ pub async fn test_sound(State(s): State<AppState>, body: Bytes) -> ApiResult<Sta
     Ok(no_content())
 }
 
+/// The live preview of what is captured: a small JPEG, or 204 while nothing is captured yet. The page asks
+/// a few times a second while it shows the preview; asking is what keeps snapshots coming.
+pub async fn preview(State(s): State<AppState>) -> ApiResult<Response> {
+    let control = s.control.clone();
+    let jpeg = tokio::task::spawn_blocking(move || control.preview())
+        .await
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the preview failed"))?;
+    Ok(match jpeg {
+        Some(jpeg) => (
+            [
+                (axum::http::header::CONTENT_TYPE, "image/jpeg"),
+                (axum::http::header::CACHE_CONTROL, "no-store"),
+            ],
+            Body::from(jpeg.as_ref().clone()),
+        )
+            .into_response(),
+        None => no_content().into_response(),
+    })
+}
+
 // ---- settings -----------------------------------------------------------------------------------------
 
 pub async fn get_config(State(s): State<AppState>, ext: Extensions) -> Json<Config> {

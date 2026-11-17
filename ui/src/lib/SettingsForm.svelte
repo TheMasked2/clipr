@@ -12,6 +12,7 @@
   import ListEditor from './ListEditor.svelte';
   import HotkeyInput from './HotkeyInput.svelte';
   import VideoSimple from './VideoSimple.svelte';
+  import CapturePreview from './CapturePreview.svelte';
   import LevelMeters from './LevelMeters.svelte';
   import AudioFilters from './AudioFilters.svelte';
   import DiscordSettings from './DiscordSettings.svelte';
@@ -176,6 +177,7 @@
     <UpdatePanel remote={sys?.remote ?? false} />
     <Field title="Crash reports" hint="If clipr crashes, keep a report (and a minidump) on this PC and show it on Home next time, so you can send it as a GitHub issue. Your user name, PC name and profile folder are taken out, and nothing is ever sent by itself. Opt-in, off by default."><Toggle bind:checked={draft.privacy.crash_reports} label="Crash reports" /></Field>
   {:else if tab === 'Video'}
+    <Field title="Preview" hint="What clipr captures right now, a few frames a second. Changes here show once you save them." stacked><CapturePreview /></Field>
     <div class="seg">
       <button class="chip" class:on={!advanced} onclick={() => (advanced = false)}>Simple</button>
       <button class="chip" class:on={advanced} onclick={() => (advanced = true)}>Advanced</button>

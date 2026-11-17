@@ -27,7 +27,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 
 pub use mp4::{Mp4Info, probe_file};
-pub use thumbs::thumb_file_name;
+pub use thumbs::{jpeg, thumb_file_name};
 
 /// Frames in a hover-scrub sprite.
 pub const SPRITE_FRAMES: u32 = 10;

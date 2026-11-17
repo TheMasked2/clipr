@@ -17,8 +17,8 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11VideoProcessorOutputView,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709, DXGI_FORMAT_NV12,
-    DXGI_RATIONAL, DXGI_SAMPLE_DESC,
+    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, DXGI_COLOR_SPACE_TYPE,
+    DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709, DXGI_FORMAT_NV12, DXGI_RATIONAL, DXGI_SAMPLE_DESC,
 };
 use windows_core::Interface;
 
@@ -40,10 +40,7 @@ pub enum ScaleMode {
 /// `pool` further conversions. Recreate the converter when the input size changes.
 pub struct Nv12Converter {
     context: ID3D11DeviceContext,
-    video_device: ID3D11VideoDevice,
-    video_context: ID3D11VideoContext1,
-    enumerator: ID3D11VideoProcessorEnumerator,
-    processor: ID3D11VideoProcessor,
+    processor: Processor,
     input_size: (u32, u32),
     output_size: (u32, u32),
     outputs: Vec<(ID3D11Texture2D, ID3D11VideoProcessorOutputView)>,
@@ -54,6 +51,8 @@ pub struct Nv12Converter {
 
 // SAFETY: all members are D3D11 video interfaces on a multithread-protected device.
 unsafe impl Send for Nv12Converter {}
+// SAFETY: as above.
+unsafe impl Send for Processor {}
 
 impl Nv12Converter {
     pub fn new(
@@ -72,6 +71,84 @@ impl Nv12Converter {
             output_size.0 % 2 == 0 && output_size.1 % 2 == 0,
             "NV12 needs an even output size, got {output_size:?}"
         );
+        let target = match mode {
+            ScaleMode::Stretch => RECT {
+                left: 0,
+                top: 0,
+                right: output_size.0 as i32,
+                bottom: output_size.1 as i32,
+            },
+            ScaleMode::Fit => fit_rect(input_size, output_size),
+        };
+        // Desktop/game frames are full-range sRGB-ish BT.709; encoders want limited-range BT.709 YUV.
+        let processor = Processor::new(
+            gpu,
+            input_size,
+            output_size,
+            fps,
+            target,
+            DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
+        )?;
+
+        let mut outputs = Vec::with_capacity(pool.max(2));
+        for _ in 0..pool.max(2) {
+            let texture = nv12_texture(gpu, output_size)?;
+            let view = processor.output_view(&texture)?;
+            outputs.push((texture, view));
+        }
+
+        Ok(Self {
+            context: gpu.context.clone(),
+            processor,
+            input_size,
+            output_size,
+            outputs,
+            next: 0,
+            input_views: Vec::new(),
+        })
+    }
+
+    pub fn input_size(&self) -> (u32, u32) {
+        self.input_size
+    }
+
+    pub fn output_size(&self) -> (u32, u32) {
+        self.output_size
+    }
+
+    /// Converts one BGRA texture of [`input_size`](Self::input_size). Returns the NV12 texture holding the
+    /// result; it stays valid until the ring wraps around.
+    pub fn convert(&mut self, source: &ID3D11Texture2D) -> Result<ID3D11Texture2D> {
+        let input = self.processor.input_view(&mut self.input_views, source)?;
+        let (texture, output) = &self.outputs[self.next];
+        self.next = (self.next + 1) % self.outputs.len();
+        self.processor.blt(input, output)?;
+        // The encoder reads the texture on its own GPU engine. Without a flush the conversion can sit in
+        // the immediate context's queue indefinitely, and a hardware encoder then waits on it forever.
+        // SAFETY: valid context.
+        unsafe { self.context.Flush() };
+        Ok(texture.clone())
+    }
+}
+
+/// A D3D11 video processor set up to scale one input size into `target` of an output of `output_size`, from
+/// full-range RGB into `output_space`.
+pub(crate) struct Processor {
+    pub(crate) video_device: ID3D11VideoDevice,
+    pub(crate) video_context: ID3D11VideoContext1,
+    pub(crate) enumerator: ID3D11VideoProcessorEnumerator,
+    pub(crate) processor: ID3D11VideoProcessor,
+}
+
+impl Processor {
+    pub(crate) fn new(
+        gpu: &Gpu,
+        input_size: (u32, u32),
+        output_size: (u32, u32),
+        fps: u32,
+        target: RECT,
+        output_space: DXGI_COLOR_SPACE_TYPE,
+    ) -> Result<Self> {
         let video_device: ID3D11VideoDevice = gpu.device.cast().context("GPU has no video device")?;
         let video_context: ID3D11VideoContext1 = gpu
             .context
@@ -106,15 +183,6 @@ impl Nv12Converter {
             right: iw,
             bottom: ih,
         };
-        let target = match mode {
-            ScaleMode::Stretch => RECT {
-                left: 0,
-                top: 0,
-                right: output_size.0 as i32,
-                bottom: output_size.1 as i32,
-            },
-            ScaleMode::Fit => fit_rect(input_size, output_size),
-        };
         let black = D3D11_VIDEO_COLOR {
             Anonymous: D3D11_VIDEO_COLOR_0 {
                 RGBA: D3D11_VIDEO_COLOR_RGBA {
@@ -137,68 +205,50 @@ impl Nv12Converter {
             video_context.VideoProcessorSetStreamDestRect(&processor, 0, true, Some(&target));
             video_context.VideoProcessorSetOutputTargetRect(&processor, false, None);
             video_context.VideoProcessorSetOutputBackgroundColor(&processor, false, &black);
-            // Desktop/game frames are full-range sRGB-ish BT.709; encoders want limited-range BT.709 YUV.
             video_context.VideoProcessorSetStreamColorSpace1(
                 &processor,
                 0,
                 DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
             );
-            video_context
-                .VideoProcessorSetOutputColorSpace1(&processor, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
-        }
-
-        let mut outputs = Vec::with_capacity(pool.max(2));
-        for _ in 0..pool.max(2) {
-            let texture = nv12_texture(gpu, output_size)?;
-            let view_desc = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
-                ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
-                Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0 {
-                    Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 },
-                },
-            };
-            let mut view = None;
-            // SAFETY: valid texture/enumerator/descriptor and out-pointer.
-            unsafe {
-                video_device.CreateVideoProcessorOutputView(
-                    &texture,
-                    &enumerator,
-                    &view_desc,
-                    Some(&mut view),
-                )
-            }
-            .context("can't create the NV12 output view")?;
-            outputs.push((texture, view.context("no output view")?));
+            video_context.VideoProcessorSetOutputColorSpace1(&processor, output_space);
         }
 
         Ok(Self {
-            context: gpu.context.clone(),
             video_device,
             video_context,
             enumerator,
             processor,
-            input_size,
-            output_size,
-            outputs,
-            next: 0,
-            input_views: Vec::new(),
         })
     }
 
-    pub fn input_size(&self) -> (u32, u32) {
-        self.input_size
+    /// An output view on `texture` (a render target of the output size).
+    pub(crate) fn output_view(&self, texture: &ID3D11Texture2D) -> Result<ID3D11VideoProcessorOutputView> {
+        let view_desc = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
+            ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
+            Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0 {
+                Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 },
+            },
+        };
+        let mut view = None;
+        // SAFETY: valid texture/enumerator/descriptor and out-pointer.
+        unsafe {
+            self.video_device.CreateVideoProcessorOutputView(
+                texture,
+                &self.enumerator,
+                &view_desc,
+                Some(&mut view),
+            )
+        }
+        .context("can't create the video processor's output view")?;
+        view.context("no output view")
     }
 
-    pub fn output_size(&self) -> (u32, u32) {
-        self.output_size
-    }
-
-    /// Converts one BGRA texture of [`input_size`](Self::input_size). Returns the NV12 texture holding the
-    /// result; it stays valid until the ring wraps around.
-    pub fn convert(&mut self, source: &ID3D11Texture2D) -> Result<ID3D11Texture2D> {
-        let input = self.input_view(source)?;
-        let (texture, output) = &self.outputs[self.next];
-        self.next = (self.next + 1) % self.outputs.len();
-
+    /// Scales and converts `input` into `output`.
+    pub(crate) fn blt(
+        &self,
+        input: ID3D11VideoProcessorInputView,
+        output: &ID3D11VideoProcessorOutputView,
+    ) -> Result<()> {
         let mut stream = D3D11_VIDEO_PROCESSOR_STREAM {
             Enable: true.into(),
             pInputSurface: ManuallyDrop::new(Some(input)),
@@ -211,17 +261,18 @@ impl Nv12Converter {
         };
         // SAFETY: we put an owned reference in the ManuallyDrop above and release it exactly once.
         unsafe { ManuallyDrop::drop(&mut stream.pInputSurface) };
-        result.context("GPU colour conversion failed")?;
-        // The encoder reads the texture on its own GPU engine. Without a flush the conversion can sit in
-        // the immediate context's queue indefinitely, and a hardware encoder then waits on it forever.
-        // SAFETY: valid context.
-        unsafe { self.context.Flush() };
-        Ok(texture.clone())
+        result.context("GPU colour conversion failed")
     }
 
-    fn input_view(&mut self, source: &ID3D11Texture2D) -> Result<ID3D11VideoProcessorInputView> {
+    /// An input view for `source`, cached in `views`: a capture pool has a handful of textures that come
+    /// back frame after frame.
+    pub(crate) fn input_view(
+        &self,
+        views: &mut Vec<(usize, ID3D11VideoProcessorInputView)>,
+        source: &ID3D11Texture2D,
+    ) -> Result<ID3D11VideoProcessorInputView> {
         let key = source.as_raw() as usize;
-        if let Some((_, view)) = self.input_views.iter().find(|(k, _)| *k == key) {
+        if let Some((_, view)) = views.iter().find(|(k, _)| *k == key) {
             return Ok(view.clone());
         }
         let desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
@@ -242,11 +293,11 @@ impl Nv12Converter {
         }
         .context("can't read the captured frame on the GPU")?;
         let view = view.context("no input view")?;
-        // A capture pool has a handful of textures; if we somehow see many, start over.
-        if self.input_views.len() >= 16 {
-            self.input_views.clear();
+        // If we somehow see many textures, start over.
+        if views.len() >= 16 {
+            views.clear();
         }
-        self.input_views.push((key, view.clone()));
+        views.push((key, view.clone()));
         Ok(view)
     }
 }
@@ -278,7 +329,7 @@ pub fn nv12_texture(gpu: &Gpu, (width, height): (u32, u32)) -> Result<ID3D11Text
 }
 
 /// The largest even-sized rect with the input's aspect ratio, centred in the output.
-fn fit_rect((iw, ih): (u32, u32), (ow, oh): (u32, u32)) -> RECT {
+pub(crate) fn fit_rect((iw, ih): (u32, u32), (ow, oh): (u32, u32)) -> RECT {
     let scale = (ow as f64 / iw as f64).min(oh as f64 / ih as f64);
     let w = ((iw as f64 * scale).round() as u32).min(ow) & !1;
     let h = ((ih as f64 * scale).round() as u32).min(oh) & !1;

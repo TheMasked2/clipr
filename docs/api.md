@@ -41,6 +41,10 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `POST /api/mark` → `204`
 - `POST /api/mic` body `{"muted": true}` → `204`: mutes or unmutes the microphone in clips (with a blip)
 - `POST /api/sound/test` body `{"volume": 60}` (0–100) → `204`: plays the save sound once at that volume
+- `GET /api/preview` → `200` `image/jpeg` (at most 640×360, `Cache-Control: no-store`), or `204` while nothing is
+  captured (or before the first snapshot). The live preview: asking keeps clipr taking a snapshot every 200 ms for
+  the next 3 seconds, so a page polls it a few times a second while it shows the preview, and clipr stops when it
+  stops asking.
 
 ## Settings
 
