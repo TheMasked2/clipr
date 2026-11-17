@@ -22,8 +22,8 @@
     {#if router.route === 'gallery'}
       <Gallery />
     {:else if router.route === 'clip'}
-      <!-- Keyed, so going from one clip to another loads it fresh. -->
-      {#key router.id}<Player />{/key}
+      <!-- Not keyed: Player reloads by itself when the clip id changes, and a rename keeps the page. -->
+      <Player />
     {:else if router.route === 'settings'}
       <Settings />
     {:else}
