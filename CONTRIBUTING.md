@@ -16,6 +16,15 @@ cd ui && npm ci && npm run build && cd ..
 cargo run -p clipr
 ```
 
+To make the downloads (portable zip and installer) in `dist\`:
+
+```sh
+powershell -ExecutionPolicy Bypass -File scripts\package.ps1
+```
+
+The installer needs [Inno Setup 6.3 or newer](https://jrsoftware.org/isdl.php); without it you only get the zip. CI builds
+both on every push (the `clipr-windows` artifact).
+
 ## Checks
 
 CI runs these on every push and pull request, on `windows-latest`. Run them locally before opening a PR:

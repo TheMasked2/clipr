@@ -5,8 +5,10 @@ press a hotkey, like ShadowPlay or Medal, but open source, with no account and n
 
 ## Start
 
-1. Unzip anywhere and run `clipr.exe`. Windows SmartScreen may warn because the beta isn't signed:
-   click **More info → Run anyway**.
+1. Run `clipr-<version>-setup.exe` (it installs for you only, no admin needed, and adds clipr to the Start
+   menu), or unzip the portable zip anywhere and run `clipr.exe`. Windows SmartScreen may warn because the
+   beta isn't signed: click **More info → Run anyway**. Uninstalling (Settings → Apps) keeps your clips; it
+   asks whether to remove clipr's settings too.
 2. Your browser opens the clipr page (`http://127.0.0.1:7845`). A short setup guides you through the look,
    quality, hotkeys and audio. Every step can be skipped.
 3. clipr lives in the tray (the icon near the clock). Closing the browser tab doesn't stop it; use
