@@ -56,7 +56,8 @@ the normal value. Capture restarts when the game changes.
 - **Clip length (seconds)** (30): how far back a saved clip goes.
 - **Buffer length (seconds)** (120): how much the buffer keeps. **Save long clip** saves all of it. The buffer
   lives in RAM: the page shows an estimate for your bitrate (two minutes at 15 Mbit/s is about 225 MB).
-- **Sound on save** (on): play a short sound when a clip is saved. Only you hear it; it isn't recorded.
+- **Sound on save** (on): play a short sound when a clip is saved. It plays through your speakers, so with
+  system audio on it can be heard in a clip saved right after.
 - **Note on save** (on): show a small "Clip saved" note in the top-right corner. It never shows up in your
   clips. Games in exclusive fullscreen hide it, but the sound still plays.
 
@@ -126,6 +127,9 @@ it off. A hotkey turns red when two actions share the same combination.
 
 ## Games
 
+Games and programs are named by their **exe name**, like `cs2.exe`. To find one, open Task Manager while the game
+runs, right-click it and choose **Go to details**: the highlighted name is the exe.
+
 - **Mode** (Auto): **Auto** buffers only while a known game runs and idles otherwise. **Always** buffers the
   monitor all the time, game or not.
 - **Extra games** (none): games to detect by exe name (`mygame.exe`), on top of the known list.
@@ -158,7 +162,7 @@ setup and what each option does.
 - **Allow access from my local network** (off): open the clipr page to other devices at home, like your phone.
   They have to enter a PIN, which is shown here after you save, together with the address to open. Anyone on
   your network with the PIN can see and delete your clips, and the connection isn't encrypted, so only turn
-  this on at home.
+  this on at home. Turning it on or off applies after a restart of clipr.
 - **First port** (7845): the first port to try for the page. If it's taken, clipr uses the next free one.
   Applies after a restart.
 

@@ -16,14 +16,14 @@ You need the **Manage Webhooks** permission on the server (you have it on your o
 3. Click **Copy Webhook URL**.
 4. On the PC that runs clipr, open **Settings → Discord** and click **Add a channel**.
 5. Give it a name (for example `#clips`) and paste the webhook URL.
-6. Click **Save**, then **Test**. A message "clipr is connected" should appear in the channel.
+6. Click **Test**: a message "clipr is connected" should appear in the channel. Then click **Save**.
 
 Keep the webhook URL to yourself: anyone who has it can post to that channel. clipr never writes it to its logs,
 and for that reason a webhook URL can only be pasted or changed on the PC itself, not from your phone.
 
 ## When clipr posts
 
-Each channel has its own choice for new clips:
+You can add up to 10 channels. Each channel has its own choice for new clips:
 
 - **Ask** (default): new clips wait on the **Home** page. Click **Post** or **Skip** for each.
 - **Auto:** new clips are posted by themselves.
@@ -43,8 +43,8 @@ Full recordings are never posted by themselves. To share one, use **Share to Dis
 
 ## Share a clip by hand
 
-Open the clip in the Gallery and use **Share to Discord**: pick a channel and it's posted right away, game or
-not. This works with any channel mode, Off included.
+Open the clip in the Gallery. Under **Share to Discord**, pick a channel and click **Post**: it's posted right
+away, game or not. This works with any channel mode, Off included.
 
 The Home page lists recent posts with their state: waiting for you, waiting for the game to close, posting,
 posted, skipped or failed. A failed post has a **Retry** button.

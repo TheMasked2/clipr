@@ -11,7 +11,8 @@ The beta isn't code-signed yet, so Windows SmartScreen may warn you. Click **Mor
 
 You need Windows 10 (version 1903 or newer) or Windows 11, and a GPU with a hardware video encoder: NVIDIA,
 AMD or Intel, which almost every GPU from the last ten years has. Recording single apps on their own audio
-track needs Windows 10 version 2004 or newer.
+track needs Windows 10 version 2004 or newer. To see your version, press `Win+R`, type `winver` and press
+Enter.
 
 ## First run
 
@@ -50,8 +51,10 @@ part of it:
 Set or change them under [Settings → Hotkeys](settings.md#hotkeys). The **Home** page has the same actions as
 buttons, plus a status card that shows whether clipr is buffering or recording.
 
-When a clip is saved you hear a short sound and see a small "Clip saved" note in the top-right corner. Neither
-ends up in your clips, and both can be turned off under [Settings → Replay](settings.md#replay).
+When a clip is saved you hear a short sound and see a small "Clip saved" note in the top-right corner. The note
+never shows up in your clips. The sound plays through your speakers like any other sound, so with system audio
+on it can be heard in a clip you save right after. Both can be turned off under
+[Settings → Replay](settings.md#replay).
 
 Clips go to `Videos\clipr\<Game>\` unless you pick another folder.
 
@@ -87,20 +90,21 @@ next time clipr starts, up to about the last second.
 
 clipr's page can be opened from other devices at home, protected by a PIN:
 
-1. On the PC, open **Settings → Network** and turn on **Allow access from my local network**. Save.
-2. The Network tab now shows the PIN and the address to open (something like `http://192.168.1.20:7845`).
+1. On the PC, open **Settings → Network**, turn on **Allow access from my local network** and click **Save**.
+   The Network tab now shows the PIN and the address to open (something like `http://192.168.1.20:7845`).
+2. Restart clipr (tray → **Quit clipr**, then start it again): the network access opens when clipr starts.
 3. Open that address on your phone and enter the PIN.
 
 Anyone on your network with the PIN can see and delete your clips, and the connection isn't encrypted, so only
-do this on a network you trust. A few things only work on the PC itself, like pasting a Discord webhook URL,
-installing an update or opening Explorer.
+do this on a network you trust. A few things only work on the PC itself: pasting a Discord webhook URL,
+changing the clips folder or the Network settings, installing an update, and opening Explorer.
 
 ## Updates
 
 **Settings → General** shows your version and can check for a new one. Updates are opt-in: with **Update
 automatically** on, clipr checks GitHub every few hours and installs a new version by itself, but only when no
-game runs and nothing records. Otherwise click **Update now** when you like. Installing takes a few seconds,
-and clipr starts again by itself.
+game runs and nothing records. Otherwise click **Update now** when you like; it waits while a game runs or a
+recording is on. Installing takes a few seconds, and clipr starts again by itself.
 
 ## Uninstall
 
