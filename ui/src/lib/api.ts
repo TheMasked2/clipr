@@ -202,10 +202,15 @@ export interface Disk {
   clips_bytes: number;
 }
 
-/** One audio source's current level in dBFS (-60 and below = silence). */
+/** One audio source's current peak level in dBFS (-60 and below = silence). */
 export interface Level {
+  /** The source's key in `audio.filters`: 'system', 'mic', or an app's exe name in lower case. */
+  source: string;
   name: string;
+  /** As the device delivered it, before any filters. */
   db: number;
+  /** As it goes into the recording: after the filters, push-to-talk and volume. */
+  after: number;
 }
 
 export type ServerEvent =

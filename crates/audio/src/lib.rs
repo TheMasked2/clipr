@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clipr_core::clock::now_100ns;
-use clipr_core::config::{AudioConfig, MIC_SOURCE, SYSTEM_SOURCE};
+use clipr_core::config::AudioConfig;
 use windows::Win32::Media::MediaFoundation::{
     IMFMediaType, MF_VERSION, MFSTARTUP_FULL, MFShutdown, MFStartup,
 };
@@ -79,7 +79,9 @@ impl AudioCapture {
             tracing::warn!("{warning}");
         }
         let tracks: Vec<String> = plan.tracks.iter().map(|t| t.name.clone()).collect();
-        let levels = Arc::new(Levels::new(plan.sources.iter().map(SourceKind::label).collect()));
+        let levels = Arc::new(Levels::new(
+            plan.sources.iter().map(|s| (s.key(), s.label())).collect(),
+        ));
 
         let config = config.clone();
         let stop = Arc::new(AtomicBool::new(false));
@@ -126,9 +128,10 @@ impl AudioCapture {
         aac::type_from_blob(blob)
     }
 
-    /// Each source's peak level over the last ~100 ms in dBFS (-100 = silence), measured on the device's
-    /// own signal before any filters. Cheap enough to call ten times a second.
-    pub fn levels(&self) -> Vec<(String, f32)> {
+    /// Each source's peak level over the last ~100 ms in dBFS (-100 = silence): `db` on the device's own
+    /// signal before any filters, `after` as it goes into the recording (after the filters, push-to-talk
+    /// and the source's volume). Cheap enough to call ten times a second.
+    pub fn levels(&self) -> Vec<clipr_core::status::Level> {
         self.levels.snapshot()
     }
 
@@ -198,14 +201,11 @@ fn build_sources(config: &AudioConfig, plan: &Plan, levels: &Arc<Levels>) -> (Ve
     let mut gains = Vec::new();
     let mut earliest_shift = 0i64;
     for (lane, kind) in plan.sources.iter().enumerate() {
-        let (key, offset_ms, volume) = match kind {
-            SourceKind::System => (
-                SYSTEM_SOURCE.to_string(),
-                config.system_offset_ms,
-                config.system_volume,
-            ),
-            SourceKind::Mic => (MIC_SOURCE.to_string(), config.mic_offset_ms, config.mic_volume),
-            SourceKind::App(exe) => (exe.to_ascii_lowercase(), 0, 100),
+        let key = kind.key();
+        let (offset_ms, volume) = match kind {
+            SourceKind::System => (config.system_offset_ms, config.system_volume),
+            SourceKind::Mic => (config.mic_offset_ms, config.mic_volume),
+            SourceKind::App(_) => (0, 100),
         };
         let filters = config
             .filters
@@ -240,6 +240,7 @@ fn build_sources(config: &AudioConfig, plan: &Plan, levels: &Arc<Levels>) -> (Ve
         let lane_gain = gain(volume);
         earliest_shift = earliest_shift.min(processing.shift_100ns);
         gains.push(lane_gain);
+        levels.set_gain(lane, lane_gain);
         sources.push(Source::new(kind.clone(), lane, processing, levels.clone(), lane));
     }
     (sources, gains, -earliest_shift)

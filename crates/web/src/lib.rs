@@ -303,11 +303,8 @@ async fn push_events(mut socket: WebSocket, state: AppState) {
             }
             _ = meter.tick() => {
                 let levels = state.control.levels();
-                if !levels.is_empty() {
-                    let list: Vec<Value> = levels.iter().map(|(name, db)| json!({ "name": name, "db": db })).collect();
-                    if !send_json(&mut socket, &json!({ "type": "levels", "levels": list })).await {
-                        return;
-                    }
+                if !levels.is_empty() && !send_json(&mut socket, &json!({ "type": "levels", "levels": levels })).await {
+                    return;
                 }
             }
             event = bus.recv() => match event {
