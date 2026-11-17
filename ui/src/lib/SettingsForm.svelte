@@ -141,7 +141,7 @@
     <Field title="Update automatically" hint="Check GitHub releases every few hours and install a new version by itself, only when no game runs and nothing records. Opt-in, off by default."><Toggle bind:checked={draft.general.auto_update} label="Auto update" /></Field>
     <Field title="Beta versions" hint="Offer beta versions too, not only full releases."><Toggle bind:checked={draft.general.update_beta} label="Beta versions" /></Field>
     <UpdatePanel remote={sys?.remote ?? false} />
-    <Field title="Send crash reports" hint="Send anonymous crash reports. Opt-in, off by default."><Toggle bind:checked={draft.privacy.crash_reports} label="Crash reports" /></Field>
+    <Field title="Crash reports" hint="If clipr crashes, keep a report (and a minidump) on this PC and show it on Home next time, so you can send it as a GitHub issue. Your user name, PC name and profile folder are taken out, and nothing is ever sent by itself. Opt-in, off by default."><Toggle bind:checked={draft.privacy.crash_reports} label="Crash reports" /></Field>
   {:else if tab === 'Video'}
     <div class="seg">
       <button class="chip" class:on={!advanced} onclick={() => (advanced = false)}>Simple</button>

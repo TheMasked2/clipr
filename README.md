@@ -114,8 +114,9 @@ and fetched from your phone with bot commands.
 - ✅ Choose your look at setup: **Dark sleek** (default), **Minimal / terminal**, **Playful** or **System
   theme**, with your own accent colour. v1 ships Dark sleek with an accent picker. The other themes come
   in v1.x.
-- ✅ Installer and portable zip. Auto-update from GitHub releases and anonymous crash reports are both
-  **opt-in**.
+- ✅ Installer and portable zip. Auto-update from GitHub releases and crash reports are both **opt-in**.
+  A crash report never leaves the PC by itself: clipr shows it, with names and paths taken out, and you
+  choose to file it as a GitHub issue.
 - ⏭ Linux (PipeWire capture and audio). The capture and audio layers are written behind traits from the
   start so this can be added later.
 

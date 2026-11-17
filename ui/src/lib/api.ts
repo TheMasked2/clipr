@@ -143,6 +143,19 @@ export interface SystemInfo {
   remote?: boolean;
 }
 
+export interface CrashReport {
+  id: string;
+  /** Unix seconds. */
+  time: number;
+  version: string;
+  summary: string;
+  /** Markdown, scrubbed of user name, PC name, profile paths and LAN addresses. */
+  report: string;
+  /** A pre-filled new GitHub issue (shortened to fit a URL). */
+  issue_url: string;
+  has_dump: boolean;
+}
+
 export type UpdateState =
   | 'idle'
   | 'checking'
@@ -260,6 +273,9 @@ export const getConfig = () => request<Config>('GET', '/api/config');
 export const putConfig = (c: Config) => request<Config>('PUT', '/api/config', c);
 export const getSystem = () => request<SystemInfo>('GET', '/api/system');
 export const getDisk = () => request<Disk>('GET', '/api/disk');
+export const getCrashes = () => request<CrashReport[]>('GET', '/api/crashes');
+export const dismissCrash = (id: string) => request<void>('POST', '/api/crashes/dismiss', { id });
+export const revealCrash = (id: string) => request<void>('POST', '/api/crashes/reveal', { id });
 export const getUpdate = () => request<UpdateInfo>('GET', '/api/update');
 export const checkUpdate = () => request<void>('POST', '/api/update/check');
 export const applyUpdate = () => request<void>('POST', '/api/update/apply');

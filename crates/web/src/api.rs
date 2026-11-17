@@ -151,6 +151,41 @@ pub async fn system(State(s): State<AppState>, ext: Extensions) -> Json<Value> {
     Json(info)
 }
 
+// ---- crash reports ------------------------------------------------------------------------------------
+
+pub async fn crashes(State(s): State<AppState>) -> ApiResult<Json<Value>> {
+    let control = s.control.clone();
+    Ok(Json(blocking(move || Ok(control.crashes())).await?))
+}
+
+#[derive(Deserialize)]
+struct CrashReq {
+    id: String,
+}
+
+pub async fn dismiss_crash(State(s): State<AppState>, body: Bytes) -> ApiResult<StatusCode> {
+    let req: CrashReq = parse_json(&body)?;
+    s.control
+        .dismiss_crash(&req.id)
+        .map_err(|m| ApiError::new(StatusCode::NOT_FOUND, m))?;
+    Ok(no_content())
+}
+
+/// Opens Explorer at the dump file: only on the PC itself.
+pub async fn reveal_crash(State(s): State<AppState>, ext: Extensions, body: Bytes) -> ApiResult<StatusCode> {
+    if auth::is_remote(&ext) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "The dump file can only be opened on the PC clipr runs on.",
+        ));
+    }
+    let req: CrashReq = parse_json(&body)?;
+    s.control
+        .reveal_crash(&req.id)
+        .map_err(|m| ApiError::new(StatusCode::NOT_FOUND, m))?;
+    Ok(no_content())
+}
+
 // ---- updates ------------------------------------------------------------------------------------------
 
 pub async fn update_status(State(s): State<AppState>) -> Json<Value> {

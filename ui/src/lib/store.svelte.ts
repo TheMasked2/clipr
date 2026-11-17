@@ -127,16 +127,28 @@ export function confirmDialog(text: string, ok = 'OK', danger = false): Promise<
 }
 
 let started = false;
+/** The clipr version this page was loaded from. */
+let pageVersion: string | null = null;
+
 export function startConnection(): void {
   if (started) return;
   started = true;
   onUnauthorized(() => (app.locked = true));
   connect({
-    onStatus: (s) => (app.status = s),
+    onStatus: (s) => {
+      // clipr was updated while this page stayed open: load the new UI rather than run the old one.
+      if (pageVersion && s.version && s.version !== pageVersion) {
+        location.reload();
+        return;
+      }
+      pageVersion ??= s.version;
+      app.status = s;
+    },
     onConnected: (up) => {
       app.connected = up;
       if (!up) setLevels([]);
-      if (up && !app.config) void loadConfig();
+      // Always re-read: clipr may have restarted with other settings, and saving a stale copy would undo them.
+      if (up) void loadConfig();
       if (up) void loadPosts();
     },
     onEvent: (e) => {

@@ -49,6 +49,11 @@ impl Paths {
         self.data_dir.join("logs")
     }
 
+    /// Crash records and minidumps (only with `privacy.crash_reports` on).
+    pub fn crash_dir(&self) -> PathBuf {
+        self.data_dir.join("crashes")
+    }
+
     /// The port the running instance's web UI listens on, so a second launch (desktop shortcut, Start
     /// menu) can open the right address even after a port fallback.
     pub fn port_file(&self) -> PathBuf {

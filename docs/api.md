@@ -49,6 +49,19 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `GET /api/system` → `{ "gpus": [{"name","vendor","encoders":["H.264","HEVC","AV1"]}], "monitors":
   [{"index":1,"name","width","height","primary"}], "known_games": 2600 }` (free-form; show what's there)
 
+## Crash reports
+
+Only with `privacy.crash_reports` on: a crash leaves `crashes/<id>.json` (+ `<id>.dmp`, a minidump) in the data
+folder, and nothing is ever sent by itself. `CLIPR_CRASH_TEST=panic|access` crashes clipr on purpose 5 s after
+start, for testing.
+
+- `GET /api/crashes` → newest first, `[{"id","time","version","summary","report","issue_url","has_dump"}]`.
+  `report` is Markdown with the user name, PC name, profile folder and LAN addresses taken out; `issue_url` is
+  a pre-filled new GitHub issue (shortened to fit a URL). `[]` when the setting is off
+- `POST /api/crashes/dismiss` body `{"id"}` → `204` (deletes the record and its dump) or `404`
+- `POST /api/crashes/reveal` body `{"id"}` → `204` (Explorer at the dump file), `404` without a dump, `403`
+  from another machine (LAN)
+
 ## Updates
 
 clipr checks GitHub releases by itself only when `general.auto_update` is on (2 min after start, then every

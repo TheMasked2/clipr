@@ -1102,3 +1102,43 @@ async fn updates_report_check_and_refuse_to_apply_here() {
         .await;
     assert_eq!(code, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn crash_reports_list_dismiss_and_reveal_rules() {
+    let env = env();
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
+    let app = router(env.state.clone());
+
+    let (code, body) = get_body(app.clone(), "/api/crashes").await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(json(&body), serde_json::json!([]));
+
+    let (code, _, body) = call("POST", "/api/crashes/dismiss")
+        .body(r#"{"id":"123"}"#)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    assert!(json(&body)["error"].is_string());
+    let (code, _, _) = call("POST", "/api/crashes/dismiss").body("{}").send(&app).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+
+    // Opening Explorer is for the PC itself, never a LAN device.
+    let (_, headers, _) = call("POST", "/api/login")
+        .peer("192.168.1.50")
+        .body(r#"{"pin":"123456"}"#)
+        .send(&app)
+        .await;
+    let set_cookie = headers[header::SET_COOKIE].to_str().unwrap().to_string();
+    let token = set_cookie.split(';').next().unwrap().to_string();
+    let (code, _, _) = call("POST", "/api/crashes/reveal")
+        .peer("192.168.1.50")
+        .header("cookie", &token)
+        .body(r#"{"id":"123"}"#)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+}

@@ -41,6 +41,22 @@ pub trait Control: Send + Sync + 'static {
     /// isn't running.
     fn levels(&self) -> Vec<(String, f32)>;
 
+    /// Crash reports from earlier runs, newest first, for `GET /api/crashes` (see `docs/api.md`). Empty
+    /// unless `privacy.crash_reports` is on.
+    fn crashes(&self) -> serde_json::Value {
+        serde_json::json!([])
+    }
+
+    /// Deletes a crash report and its dump.
+    fn dismiss_crash(&self, _id: &str) -> std::result::Result<(), String> {
+        Err("No such crash report.".into())
+    }
+
+    /// Shows a crash's dump file in Explorer.
+    fn reveal_crash(&self, _id: &str) -> std::result::Result<(), String> {
+        Err("No such crash report.".into())
+    }
+
     /// The updater's state for `GET /api/update`. Free-form JSON (see `docs/api.md`).
     fn update_status(&self) -> serde_json::Value {
         serde_json::json!({ "current": clipr_core::VERSION, "installed": false, "state": "idle" })
