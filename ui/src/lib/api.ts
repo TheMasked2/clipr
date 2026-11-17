@@ -12,6 +12,8 @@ export interface Status {
   uptime_secs: number;
   /** The user paused the replay buffer. */
   paused: boolean;
+  /** The microphone is muted in clips (the mute hotkey); clipr starts unmuted. */
+  mic_muted?: boolean;
 }
 
 export type ClipKind = 'clip' | 'recording';
@@ -71,13 +73,23 @@ export interface Config {
     update_beta: boolean;
   };
   privacy: { crash_reports: boolean };
-  replay: { enabled: boolean; clip_secs: number; buffer_secs: number; sound_on_save: boolean; toast_on_save: boolean };
+  replay: {
+    enabled: boolean;
+    clip_secs: number;
+    buffer_secs: number;
+    sound_on_save: boolean;
+    /** 0–100 %: the save sound and the mic mute blip. */
+    sound_volume: number;
+    toast_on_save: boolean;
+  };
   video: { codec: Codec; fps: number; height: number; bitrate_kbps: number; monitor: number; high_priority: boolean };
   audio: {
     system: boolean;
     system_volume: number;
     mic: boolean;
     mic_volume: number;
+    /** The detected game's own sound on a track of its own. */
+    game: boolean;
     apps: string[];
     separate_tracks: boolean;
     /** Filters per source: `system`, `mic`, or an app's exe name, in the order they run. */
@@ -94,6 +106,7 @@ export interface Config {
     toggle_buffer: string;
     toggle_recording: string;
     mark: string;
+    toggle_mic: string;
   };
   clips: { folder: string; max_age_days: number; max_total_gb: number; min_free_gb: number };
   games: {
@@ -324,6 +337,8 @@ export const saveClip = (seconds?: number) =>
 export const setBuffer = (on: boolean) => request<void>('POST', '/api/buffer', { on });
 export const setRecording = (on: boolean) => request<void>('POST', '/api/recording', { on });
 export const markMoment = () => request<void>('POST', '/api/mark');
+export const setMicMuted = (muted: boolean) => request<void>('POST', '/api/mic', { muted });
+export const testSound = (volume: number) => request<void>('POST', '/api/sound/test', { volume });
 export const getPosts = () => request<Job[]>('GET', '/api/discord/posts');
 export const shareClip = (id: string, webhook: string) =>
   request<{ job: number }>('POST', '/api/discord/share', { id, webhook });

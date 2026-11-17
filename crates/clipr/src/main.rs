@@ -15,6 +15,7 @@ mod crash;
 mod engine;
 mod icon;
 mod overlay;
+mod sound;
 mod tray;
 mod updater;
 mod win;

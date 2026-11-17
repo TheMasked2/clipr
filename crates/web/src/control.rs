@@ -20,6 +20,12 @@ pub trait Control: Send + Sync + 'static {
     /// Adds a marker at this moment (to the running recording and to the next clip saved).
     fn mark(&self);
 
+    /// Mutes (`true`) or unmutes the microphone in clips. The state shows in the status (`mic_muted`).
+    fn set_mic_muted(&self, _muted: bool) {}
+
+    /// Plays the save sound once at `volume` %, so the user can hear the setting before saving it.
+    fn test_sound(&self, _volume: u32) {}
+
     /// The current settings.
     fn config(&self) -> Config;
 

@@ -134,6 +134,32 @@ pub async fn mark(State(s): State<AppState>) -> StatusCode {
     no_content()
 }
 
+#[derive(Deserialize)]
+struct MutedReq {
+    muted: bool,
+}
+
+pub async fn set_mic(State(s): State<AppState>, body: Bytes) -> ApiResult<StatusCode> {
+    let req: MutedReq = parse_json(&body)?;
+    s.control.set_mic_muted(req.muted);
+    Ok(no_content())
+}
+
+#[derive(Deserialize)]
+struct VolumeReq {
+    volume: u32,
+}
+
+/// Plays the save sound at a volume that isn't saved yet (the settings page's Test button).
+pub async fn test_sound(State(s): State<AppState>, body: Bytes) -> ApiResult<StatusCode> {
+    let req: VolumeReq = parse_json(&body)?;
+    if req.volume > 100 {
+        return Err(ApiError::bad_request("The volume must be between 0 and 100"));
+    }
+    s.control.test_sound(req.volume);
+    Ok(no_content())
+}
+
 // ---- settings -----------------------------------------------------------------------------------------
 
 pub async fn get_config(State(s): State<AppState>, ext: Extensions) -> Json<Config> {
@@ -386,6 +412,7 @@ pub fn validate_config(c: &Config) -> Result<()> {
     };
     in_range("Frame rate", c.video.fps, 10, 240)?;
     in_range("Clip length", c.replay.clip_secs, 5, 600)?;
+    in_range("Save sound volume", c.replay.sound_volume, 0, 100)?;
     in_range("Buffer length", c.replay.buffer_secs, c.replay.clip_secs, 1800).map_err(|_| {
         anyhow::anyhow!(
             "Buffer length must be between the clip length ({} s) and 1800 s",
@@ -436,6 +463,7 @@ pub fn validate_config(c: &Config) -> Result<()> {
         ("Toggle buffer", &h.toggle_buffer),
         ("Toggle recording", &h.toggle_recording),
         ("Mark", &h.mark),
+        ("Mute microphone", &h.toggle_mic),
     ];
     let mut used: Vec<(u32, u32, &str)> = Vec::new();
     for (name, text) in keys {
@@ -901,5 +929,11 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("Save clip") && err.contains("Mark"), "{err}");
+        let err = cfg(|c| c.hotkeys.toggle_mic = "Alt+F9".into())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Mute microphone"), "{err}");
+        assert!(cfg(|c| c.replay.sound_volume = 101).is_err());
+        assert!(cfg(|c| c.replay.sound_volume = 0).is_ok());
     }
 }

@@ -17,9 +17,10 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
   { "version": "0.1.0", "state": "idle|buffering|recording", "game": "Valorant" | null,
     "encoder": "AMD HW H.264 Encoder MFT" | null, "error": "text" | null,
     "recording_since": 1763213000 | null, "uptime_secs": 42,
-    "paused": false }
+    "paused": false, "mic_muted": false }
   ```
-  `paused` is true while the user has paused the replay buffer (then `state` is `idle`).
+  `paused` is true while the user has paused the replay buffer (then `state` is `idle`). `mic_muted` is true
+  while the microphone is muted in clips (the mute hotkey or `POST /api/mic`; clipr starts unmuted).
 - `GET /api/events` (WebSocket). Server → client messages:
   - `{"type":"status", ...Status}` on connect and on every change
   - `{"type":"levels","levels":[{"source":"system","name":"System","db":-23.5,"after":-26.1}]}` about 10
@@ -38,6 +39,8 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `POST /api/buffer` body `{"on": true}` → `204`
 - `POST /api/recording` body `{"on": true}` → `204`
 - `POST /api/mark` → `204`
+- `POST /api/mic` body `{"muted": true}` → `204`: mutes or unmutes the microphone in clips (with a blip)
+- `POST /api/sound/test` body `{"volume": 60}` (0–100) → `204`: plays the save sound once at that volume
 
 ## Settings
 

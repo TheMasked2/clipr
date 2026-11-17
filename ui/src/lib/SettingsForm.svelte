@@ -81,6 +81,7 @@
       toggle_buffer: draft.hotkeys.toggle_buffer,
       toggle_recording: draft.hotkeys.toggle_recording,
       mark: draft.hotkeys.mark,
+      toggle_mic: draft.hotkeys.toggle_mic,
     }),
   );
   const addProfile = () => draft.games.profiles.push({ game: '', fps: null, height: null, bitrate_kbps: null });
@@ -100,21 +101,26 @@
     const mix = [
       ...(a.system ? ['System audio'] : []),
       ...(a.mic ? ['Microphone'] : []),
-      ...(a.system ? [] : appList.map((x) => x.label)),
+      ...(a.system ? [] : [...(a.game ? ['Game'] : []), ...appList.map((x) => x.label)]),
     ];
-    if (!mix.length && !appList.length) return [];
+    if (!mix.length && !appList.length && !a.game) return [];
     const own = [
       // The names the clip page and video editors show.
       ...(a.separate_tracks && a.system ? ['System'] : []),
       ...(a.separate_tracks && a.mic ? ['Mic'] : []),
+      ...(a.game ? ['Game'] : []),
       ...appList.map((x) => x.label),
     ];
     return [{ name: 'Mix', has: mix.join(' + ') || 'nothing' }, ...own.map((o) => ({ name: o, has: o }))].slice(0, 6);
   });
   const dropped = $derived(
-    Math.max(0, 1 + (draft.audio.separate_tracks ? +draft.audio.system + +draft.audio.mic : 0) + appList.length - 6),
+    Math.max(
+      0,
+      1 + (draft.audio.separate_tracks ? +draft.audio.system + +draft.audio.mic : 0) + +draft.audio.game + appList.length - 6,
+    ),
   );
   let syncOpen = $state(false);
+  const micMuted = $derived(app.status?.mic_muted ?? false);
   const ramMb = $derived(Math.round((draft.video.bitrate_kbps * draft.replay.buffer_secs) / 8 / 1000));
 
   const codecs: { v: Config['video']['codec']; name: string; text: string; enc: string }[] = [
@@ -222,7 +228,14 @@
     <Field title="Replay buffer" hint="Keep the replay buffer running, so the save-clip hotkey has something to save."><Toggle bind:checked={draft.replay.enabled} label="Replay buffer" /></Field>
     <Field title="Clip length (seconds)" hint="How many seconds a saved clip goes back."><input type="number" min="1" max="3600" bind:value={draft.replay.clip_secs} /></Field>
     <Field title="Buffer length (seconds)" hint={`How much the buffer keeps in memory; "save long clip" saves all of it. Estimated RAM use at your bitrate: about ${ramMb} MB.`}><input type="number" min="1" max="3600" bind:value={draft.replay.buffer_secs} /></Field>
-    <Field title="Sound on save" hint="Play a short sound when a clip is saved."><Toggle bind:checked={draft.replay.sound_on_save} label="Sound on save" /></Field>
+    <Field title="Sound on save" hint="Play a short chime when a clip is saved (a low tone if saving fails). It plays through your speakers, so with system audio on it can be heard in a clip saved right after."><Toggle bind:checked={draft.replay.sound_on_save} label="Sound on save" /></Field>
+    <Field title="Sound volume" hint="How loud the save sound and the mic mute blip play (the blip plays even with Sound on save off). 0 % = silent.">
+      <div class="vol">
+        <input type="range" min="0" max="100" step="5" bind:value={draft.replay.sound_volume} aria-label="Sound volume" />
+        <span class="pctv">{draft.replay.sound_volume}%</span>
+        <button onclick={() => api.testSound(draft.replay.sound_volume).catch(() => {})} disabled={!draft.replay.sound_volume}>Test</button>
+      </div>
+    </Field>
     <Field title="Note on save" hint="Show a small &quot;Clip saved&quot; note in the top-right corner. It never shows up in your clips. Games in exclusive fullscreen hide it (the sound still plays)."><Toggle bind:checked={draft.replay.toast_on_save} label="Note on save" /></Field>
   {:else if tab === 'Audio'}
     <h3 class="sub first">Tracks</h3>
@@ -267,7 +280,19 @@
       {#if draft.audio.push_to_talk.trim()}
         <Field title="Push-to-talk release (ms)" hint="Keep the mic open this long after you let go, so the end of a word isn't cut off."><input type="number" min="0" max="5000" step="10" bind:value={draft.audio.ptt_release_ms} /></Field>
       {/if}
+      <Field title="Mute in clips" hint={`Silences your mic in clips (not in your voice chat) until you unmute it. Set a hotkey for it under Hotkeys${draft.hotkeys.toggle_mic ? ` (now ${draft.hotkeys.toggle_mic})` : ''}. clipr always starts unmuted.`}>
+        <div class="row">
+          {#if micMuted}<span class="warnt small">Muted</span>{/if}
+          <button onclick={() => api.setMicMuted(!micMuted).catch(() => {})}>{micMuted ? 'Unmute' : 'Mute now'}</button>
+        </div>
+      </Field>
       <Field title="Filters" hint="Like OBS: none by default. A good start for a mic: noise suppression, noise gate, compressor, limiter." stacked><AudioFilters audio={draft.audio} source="mic" label="Microphone" /></Field>
+    {/if}
+
+    <h3 class="sub">Game audio</h3>
+    <Field title="Game on its own track" hint="Also record only the game's sound (no voice chat, no music) on a track of its own, so you can turn it up or down later in an editor. Follows whichever game clipr detects (if the game is also under App tracks, that track has it instead). Needs Windows 10 2004 or newer."><Toggle bind:checked={draft.audio.game} label="Game audio" /></Field>
+    {#if draft.audio.game}
+      <Field title="Filters" stacked><AudioFilters audio={draft.audio} source="game" label="Game" /></Field>
     {/if}
 
     <h3 class="sub">App tracks</h3>
@@ -295,6 +320,7 @@
     <Field title="Pause / resume buffer" hint="Pauses or resumes the replay buffer. Empty (the default) turns it off." error={bad.has('toggle_buffer')}><HotkeyInput bind:value={draft.hotkeys.toggle_buffer} conflict={bad.has('toggle_buffer')} /></Field>
     <Field title="Start / stop recording" hint="Starts or stops a full recording." error={bad.has('toggle_recording')}><HotkeyInput bind:value={draft.hotkeys.toggle_recording} conflict={bad.has('toggle_recording')} /></Field>
     <Field title="Mark moment" hint="Marks this moment; markers show on the clip's timeline." error={bad.has('mark')}><HotkeyInput bind:value={draft.hotkeys.mark} conflict={bad.has('mark')} /></Field>
+    <Field title="Mute / unmute microphone" hint="Mutes your mic in clips (not in your voice chat), with a short blip. Press again to unmute. Empty (the default) turns it off." error={bad.has('toggle_mic')}><HotkeyInput bind:value={draft.hotkeys.toggle_mic} conflict={bad.has('toggle_mic')} /></Field>
   {:else if tab === 'Games'}
     <Field title="Mode" hint="Game only buffers while a known game runs and does nothing otherwise. Desktop buffers your monitor all the time, game or not.">
       <div class="row">
