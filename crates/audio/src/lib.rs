@@ -19,8 +19,8 @@ pub mod mix;
 pub mod plan;
 mod wasapi;
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -39,20 +39,57 @@ use crate::mix::{HNS_PER_SEC, RATE, Timeline, time_at};
 use crate::plan::{Plan, SourceKind};
 use crate::wasapi::{Processing, PttKey, Source};
 
-/// The microphone is muted in clips (the mute hotkey). Read on every poll, so it applies within ~10 ms and
-/// across capture restarts.
-static MIC_MUTED: AtomicBool = AtomicBool::new(false);
+/// Sources muted in clips, by key (`mic`, `system`, `game`, an app's exe name in lower case). It isn't saved:
+/// clipr starts with nothing muted. It applies within ~10 ms and across capture restarts: each source checks
+/// [`MUTED_GEN`] on every poll and reads the list only after a change.
+static MUTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Bumped on every change to [`MUTED`].
+static MUTED_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// The detected game's process id (0 = none), for the game source.
 static GAME_PID: AtomicU32 = AtomicU32::new(0);
 
-/// Mutes (`true`) or unmutes the microphone in clips. It fades like push-to-talk.
+/// Mutes (`true`) or unmutes a source in clips, by its key (any case). It fades like push-to-talk.
+pub fn set_muted(key: &str, muted: bool) {
+    let key = key.to_ascii_lowercase();
+    let mut list = MUTED.lock().unwrap_or_else(|e| e.into_inner());
+    let had = list.contains(&key);
+    if muted && !had {
+        list.push(key);
+        list.sort();
+    } else if !muted && had {
+        list.retain(|k| *k != key);
+    } else {
+        return;
+    }
+    MUTED_GEN.fetch_add(1, Ordering::Release);
+}
+
+/// Whether a source (by key, any case) is muted in clips.
+pub fn is_muted(key: &str) -> bool {
+    MUTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|k| k.eq_ignore_ascii_case(key))
+}
+
+/// Every muted source's key, sorted.
+pub fn muted() -> Vec<String> {
+    MUTED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+pub(crate) fn muted_gen() -> u64 {
+    MUTED_GEN.load(Ordering::Acquire)
+}
+
+/// Mutes (`true`) or unmutes the microphone in clips.
 pub fn set_mic_muted(muted: bool) {
-    MIC_MUTED.store(muted, Ordering::Relaxed);
+    set_muted(clipr_core::config::MIC_SOURCE, muted);
 }
 
 pub fn mic_muted() -> bool {
-    MIC_MUTED.load(Ordering::Relaxed)
+    is_muted(clipr_core::config::MIC_SOURCE)
 }
 
 /// Which process the game source records (`None`: no game, so it records silence). The capture thread picks
@@ -310,9 +347,8 @@ fn build_sources(config: &AudioConfig, plan: &Plan, levels: &Arc<Levels>) -> (Ve
                 }
             };
         }
-        if !chain.is_empty() || processing.ptt.is_some() {
-            processing.chain = Some(chain);
-        }
+        // Every source gets a chain, even an empty one: it is also what fades a muted source out and in.
+        processing.chain = Some(chain);
         let lane_gain = gain(volume);
         earliest_shift = earliest_shift.min(processing.shift_100ns);
         gains.push(lane_gain);
@@ -431,3 +467,24 @@ const _: fn() = || {
     fn send<T: Send>() {}
     send::<AudioCapture>();
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn muting_is_per_source_in_any_case_and_bumps_the_generation() {
+        let before = muted_gen();
+        set_muted("Test-Discord.EXE", true);
+        assert!(is_muted("test-discord.exe"));
+        assert!(!is_muted("test-spotify.exe"));
+        assert!(muted().contains(&"test-discord.exe".to_string()));
+        assert!(muted_gen() > before);
+        // Muting again changes nothing.
+        let now = muted_gen();
+        set_muted("test-discord.exe", true);
+        assert_eq!(muted_gen(), now);
+        set_muted("TEST-DISCORD.exe", false);
+        assert!(!is_muted("test-discord.exe"));
+    }
+}

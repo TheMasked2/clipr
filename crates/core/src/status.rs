@@ -36,6 +36,8 @@ pub struct Activity {
     pub paused: bool,
     /// The user muted the microphone in clips (the hotkey or the web UI).
     pub mic_muted: bool,
+    /// Every source muted in clips, by its `audio.filters` key (`mic` too, when it is).
+    pub muted: Vec<String>,
 }
 
 /// What `/api/status` returns and the WebSocket pushes.
@@ -51,6 +53,9 @@ pub struct StatusSnapshot {
     pub paused: bool,
     #[serde(default)]
     pub mic_muted: bool,
+    /// Every source muted in clips, by key (`system`, `mic`, `game`, an app's exe name in lower case).
+    #[serde(default)]
+    pub muted: Vec<String>,
     pub uptime_secs: u64,
 }
 
@@ -103,6 +108,7 @@ impl Status {
             recording_since: activity.recording_since,
             paused: activity.paused,
             mic_muted: activity.mic_muted,
+            muted: activity.muted,
             uptime_secs: self.started.elapsed().as_secs(),
         }
     }
@@ -132,8 +138,12 @@ pub struct Level {
     pub name: String,
     /// What the device delivered, before clipr touches it.
     pub db: f32,
-    /// What goes into the recording: after the source's filters, push-to-talk and volume.
+    /// What goes into the recording: after the source's filters, push-to-talk, mute and volume.
     pub after: f32,
+    /// `db` per channel (left, right); `db` is the louder of the two.
+    pub db_lr: [f32; 2],
+    /// `after` per channel (left, right).
+    pub after_lr: [f32; 2],
 }
 
 #[cfg(test)]

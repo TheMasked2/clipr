@@ -14,6 +14,8 @@ export interface Status {
   paused: boolean;
   /** The microphone is muted in clips (the mute hotkey); clipr starts unmuted. */
   mic_muted?: boolean;
+  /** Every source muted in clips, by key ('mic' too when it is). Not saved: clipr starts with none. */
+  muted?: string[];
 }
 
 export type ClipKind = 'clip' | 'recording';
@@ -290,8 +292,19 @@ export interface Level {
   name: string;
   /** As the device delivered it, before any filters. */
   db: number;
-  /** As it goes into the recording: after the filters, push-to-talk and volume. */
+  /** As it goes into the recording: after the filters, push-to-talk, mute and volume. */
   after: number;
+  /** `db` per channel: left, right. */
+  db_lr?: [number, number];
+  /** `after` per channel: left, right. */
+  after_lr?: [number, number];
+}
+
+/** Whether a source (by key) is muted in clips right now. */
+export function isMuted(status: Status | null | undefined, source: string): boolean {
+  if (!status) return false;
+  if (source === 'mic' && status.mic_muted) return true;
+  return (status.muted ?? []).includes(source);
 }
 
 export type ServerEvent =
@@ -417,6 +430,8 @@ export const setBuffer = (on: boolean) => request<void>('POST', '/api/buffer', {
 export const setRecording = (on: boolean) => request<void>('POST', '/api/recording', { on });
 export const markMoment = () => request<void>('POST', '/api/mark');
 export const setMicMuted = (muted: boolean) => request<void>('POST', '/api/mic', { muted });
+/** Mutes or unmutes any source in clips, by key; it applies at once and isn't saved. */
+export const setMuted = (source: string, muted: boolean) => request<void>('POST', '/api/mute', { source, muted });
 export const testSound = (volume: number) => request<void>('POST', '/api/sound/test', { volume });
 /** One second of capture, for Home's performance numbers (see `GET /api/perf`). */
 export interface PerfSample {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as api from './api';
   import Fader from './Fader.svelte';
-  import { FLOOR, fmtDb, pct } from './meter';
+  import { channels, FLOOR, fmtDb, pct, RED_AT, YELLOW_AT } from './meter';
   import { app, toastError, watchLevelsWhileShown } from './store.svelte';
 
   // The audio mixer as upright strips, like OBS's: per source its live level (what gets recorded: after its
@@ -27,7 +27,11 @@
 
   const audio = $derived(app.config?.audio);
   const anySource = $derived(!!audio && (audio.system || audio.mic || audio.game || audio.apps.length > 0));
-  const micMuted = $derived(app.status?.mic_muted ?? false);
+  const muted = (source: string) => api.isMuted(app.status, source);
+  function toggle(source: string) {
+    const m = muted(source);
+    (source === 'mic' ? api.setMicMuted(!m) : api.setMuted(source, !m)).catch(toastError);
+  }
 </script>
 
 <div class="strips" aria-label="Audio mixer">
@@ -40,16 +44,15 @@
         <span class="db">{fmtDb(l.after)}</span>
       {/if}
       <div class="ctl">
-        <div class="bar" role="meter" aria-label="{l.name} level" aria-valuemin={FLOOR} aria-valuemax={0} aria-valuenow={Math.round(l.after)} title="Before filters: {fmtDb(l.db)}, recorded: {fmtDb(l.after)}">
-          <div class="fill" class:hot={l.after > -12} class:clip={l.after > -3} class:muted={l.source === 'mic' && micMuted} style="height: {pct(l.after)}%"></div>
+        <!-- Left and right, like OBS. Muted, it greys out and shows what comes in, so you still see it's live. -->
+        <div class="meters" class:off={muted(l.source)} role="meter" aria-label="{l.name} level" aria-valuemin={FLOOR} aria-valuemax={0} aria-valuenow={Math.round(l.after)} title="{muted(l.source) ? 'Muted in clips. Coming in' : 'Before filters'}: {fmtDb(l.db)}, recorded: {fmtDb(l.after)}" style="--y: {YELLOW_AT}%; --r: {RED_AT}%">
+          {#each muted(l.source) ? channels(l.db_lr, l.db) : channels(l.after_lr, l.after) as v, i (i)}
+            <div class="bar"><div class="cover" style="height: {100 - pct(v)}%"></div></div>
+          {/each}
         </div>
         <Fader source={l.source} label={l.name} vertical />
       </div>
-      {#if l.source === 'mic'}
-        <button class="mute" class:on={micMuted} onclick={() => api.setMicMuted(!micMuted).catch(toastError)} title="Mute the microphone in clips (the mute hotkey does the same)">{micMuted ? 'Muted' : 'Mute'}</button>
-      {:else}
-        <span class="mute-gap"></span>
-      {/if}
+      <button class="mute" class:on={muted(l.source)} aria-pressed={muted(l.source)} onclick={() => toggle(l.source)} title={l.source === 'mic' ? 'Mute the microphone in clips, not in your voice chat (the mute hotkey does the same)' : `Mute ${l.name} in clips (you still hear it)`}>{muted(l.source) ? 'Muted' : 'Mute'}</button>
     </div>
   {:else}
     <p class="muted small empty">
@@ -69,13 +72,15 @@
   .db { font-size: .7rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .badge { padding: 0 .3rem; border-radius: .25rem; background: var(--danger); color: #fff; font-size: .66rem; font-weight: 700; letter-spacing: .04em; }
   .ctl { flex: 1; min-height: 0; display: flex; gap: .45rem; align-items: stretch; padding: .2rem 0; }
-  .bar { width: .45rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; display: flex; flex-direction: column-reverse; }
-  .fill { width: 100%; background: var(--accent); transition: height 90ms linear; }
-  .fill.hot { background: #f5b942; }
-  .fill.clip { background: var(--danger); }
-  .fill.muted { opacity: .35; }
+  .meters { display: flex; gap: 2px; }
+  /* The colours sit on the bar; a cover hides the part above the level. */
+  .bar {
+    width: .38rem; border-radius: 2px; overflow: hidden; position: relative; border: 1px solid var(--border);
+    background: linear-gradient(to top, #3fb950 0 var(--y), #d29922 var(--y) var(--r), #e5484d var(--r) 100%);
+  }
+  .cover { position: absolute; top: 0; left: 0; right: 0; background: var(--surface-2); transition: height 90ms linear; }
+  .meters.off .bar { filter: grayscale(1); opacity: .45; }
   .mute { padding: .05rem .45rem; font-size: .72rem; border-radius: 6px; }
   .mute.on { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
-  .mute-gap { height: 1.45rem; }
   .empty { margin: 0; padding: .7rem; }
 </style>

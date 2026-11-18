@@ -20,13 +20,15 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
     "paused": false, "mic_muted": false }
   ```
   `paused` is true while the user has paused the replay buffer (then `state` is `idle`). `mic_muted` is true
-  while the microphone is muted in clips (the mute hotkey or `POST /api/mic`; clipr starts unmuted).
+  while the microphone is muted in clips (the mute hotkey or `POST /api/mic`; clipr starts unmuted). `muted`
+  lists every source muted in clips by key (`POST /api/mute`; `mic` too while it is).
 - `GET /api/events` (WebSocket). Server → client messages:
   - `{"type":"status", ...Status}` on connect and on every change
   - `{"type":"levels","levels":[{"source":"system","name":"System","db":-23.5,"after":-26.1}]}` about 10
     times a second while audio is running (nothing is sent without audio; see `POST /api/levels/watch`). Per source, peak dBFS over the
     last ~100 ms (-60 and below is silence): `db` as the device delivered it, `after` as it goes into the
-    recording (after the source's filters, push-to-talk and volume). `source` is the source's key in
+    recording (after the source's filters, push-to-talk, mute and volume), each the louder channel;
+    `db_lr` and `after_lr` give them per channel (left, right). `source` is the source's key in
     `audio.filters` (`system`, `mic`, or an app's exe name in lower case)
   - `{"type":"clip_saved","clip": Clip}` when a clip or recording was written
   - `{"type":"clip_failed","message":"..."}`
@@ -41,6 +43,9 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `POST /api/buffer` body `{"on": true}` → `204`
 - `POST /api/recording` body `{"on": true}` → `204`
 - `POST /api/mark` → `204`
+- `POST /api/mute` body `{"source": "discord.exe", "muted": true}` → `204`: mutes or unmutes any source in
+  clips by key (`system`, `mic`, `game`, an app's exe name), with a short fade; not saved. `400` for an empty
+  key or one with `/`, `\` or `:`
 - `POST /api/mic` body `{"muted": true}` → `204`: mutes or unmutes the microphone in clips (with a blip)
 - `POST /api/sound/test` body `{"volume": 60}` (0–100) → `204`: plays the save sound once at that volume
 - `GET /api/perf` → `200` JSON array, one sample a second over the last two minutes, oldest first:

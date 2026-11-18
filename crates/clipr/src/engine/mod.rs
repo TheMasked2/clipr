@@ -60,6 +60,8 @@ pub enum Command {
     /// Mute (`true`) or unmute the microphone in clips.
     SetMicMuted(bool),
     ToggleMic,
+    /// Mutes or unmutes any source in clips, by key (the mixer's Mute buttons).
+    SetMuted(String, bool),
     Stop,
 }
 
@@ -415,6 +417,7 @@ impl Supervisor {
             Command::ToggleRecording => self.start_recording(None),
             Command::SetMicMuted(muted) => self.set_mic_muted(muted),
             Command::ToggleMic => self.set_mic_muted(!clipr_audio::mic_muted()),
+            Command::SetMuted(key, muted) => self.set_muted(&key, muted),
             Command::Stop => {}
         }
     }
@@ -698,6 +701,7 @@ impl Supervisor {
             recording_since,
             paused: !self.buffering,
             mic_muted: clipr_audio::mic_muted(),
+            muted: clipr_audio::muted(),
         });
         // Discord shows the game while clipr buffers or records it: only games, never the desktop, and nothing
         // while clipr is idle. A custom game's name is its window title (a document, a tab), so Discord gets
@@ -735,6 +739,20 @@ impl Supervisor {
             self.toast
                 .show(if muted { "Mic muted in clips" } else { "Mic on" }, !muted);
         }
+        self.publish();
+    }
+
+    /// Mutes or unmutes a source in clips from the mixer. The mic goes the mic's way (with its blip); the
+    /// others change quietly, since the mixer shows it. Not saved: clipr starts with nothing muted.
+    fn set_muted(&mut self, key: &str, muted: bool) {
+        if key.eq_ignore_ascii_case(clipr_core::config::MIC_SOURCE) {
+            return self.set_mic_muted(muted);
+        }
+        if muted == clipr_audio::is_muted(key) {
+            return;
+        }
+        clipr_audio::set_muted(key, muted);
+        tracing::info!("{key} {}", if muted { "muted" } else { "on" });
         self.publish();
     }
 

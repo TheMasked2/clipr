@@ -145,6 +145,23 @@ pub async fn set_mic(State(s): State<AppState>, body: Bytes) -> ApiResult<Status
     Ok(no_content())
 }
 
+#[derive(Deserialize)]
+struct MuteReq {
+    source: String,
+    muted: bool,
+}
+
+/// Mutes or unmutes one source in clips (the mixer's Mute buttons).
+pub async fn set_mute(State(s): State<AppState>, body: Bytes) -> ApiResult<StatusCode> {
+    let req: MuteReq = parse_json(&body)?;
+    let source = req.source.trim();
+    if source.is_empty() || source.len() > 260 || source.contains(['/', '\\', ':']) {
+        return Err(ApiError::bad_request("Not an audio source."));
+    }
+    s.control.set_muted(source, req.muted);
+    Ok(no_content())
+}
+
 /// Performance samples for Home's graphs.
 pub async fn perf(State(s): State<AppState>) -> Json<serde_json::Value> {
     Json(s.control.perf())
