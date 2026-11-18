@@ -86,23 +86,40 @@
 
   const last = $derived(samples[samples.length - 1]);
   /** How full the replay buffer is, in seconds, against its length. */
+  /** What clipr is doing, in a word or two (no timer), for screen readers. */
+  const doingLabel = $derived(
+    !app.connected && !st
+      ? 'Connecting'
+      : st?.state === 'recording'
+        ? `Recording${st.game ? ` ${st.game}` : ''}`
+        : st?.state === 'buffering'
+          ? `Clipping${st.game ? ` ${st.game}` : ''}`
+          : paused
+            ? 'Paused'
+            : app.config?.games.mode === 'auto'
+              ? 'Waiting for a game'
+              : 'Not clipping',
+  );
   const filled = $derived(Math.min(last?.buffer_secs ?? 0, app.config?.replay.buffer_secs ?? Infinity));
 </script>
 
-{#snippet badge()}
-  <span class="badge" class:rec={st?.state === 'recording'} class:buf={st?.state === 'buffering'} title={st?.encoder ? `Encoder: ${st.encoder}` : undefined} role="status">
+<!-- What clipr is doing, at the start of the status bar: "Recording (game) 0:12:07", "Clipping (game) · …". -->
+{#snippet doing()}
+  <!-- Screen readers hear the state when it changes, not the timer every second. -->
+  <span class="sr-only" role="status">{doingLabel}</span>
+  <span class="doing" class:rec={st?.state === 'recording'} class:buf={st?.state === 'buffering'} title={st?.encoder ? `Encoder: ${st.encoder}` : undefined}>
     {#if !app.connected && !st}
       <span class="dot"></span>Connecting…
     {:else if st?.state === 'recording'}
-      <span class="dot"></span><b>REC</b><span class="mono">{fmtTime(elapsed)}</span>{#if st.game}<span class="dim">· {st.game}</span>{/if}
+      <span class="dot"></span><b>Recording</b>{#if st.game}<span class="dim">({st.game})</span>{/if}<span class="mono">{fmtTime(elapsed)}</span>
     {:else if st?.state === 'buffering'}
-      <span class="dot"></span><b>Replay buffer</b><span class="mono">{fmtTime(filled)} of {fmtTime(app.config?.replay.buffer_secs ?? 0)}</span>{#if st.game}<span class="dim">· {st.game}</span>{/if}
+      <span class="dot"></span><b>Clipping</b>{#if st.game}<span class="dim">({st.game})</span>{/if}<span class="dim mono" title="How much of the replay buffer is filled: the most a clip can hold right now">· {fmtTime(filled)} of {fmtTime(app.config?.replay.buffer_secs ?? 0)} ready</span>
     {:else if paused}
-      <span class="dot"></span><b>Buffer paused</b><span class="dim">· resume it to save clips</span>
+      <span class="dot"></span><b>Paused</b><span class="dim">· resume to save clips</span>
     {:else if app.config?.games.mode === 'auto'}
       <span class="dot"></span><b>Waiting for a game</b>
     {:else}
-      <span class="dot"></span><b>Not buffering</b>
+      <span class="dot"></span><b>Not clipping</b>
     {/if}
   </span>
 {/snippet}
@@ -118,7 +135,7 @@
   <DiscordPosts />
   <CloudUploads />
 
-  <CapturePreview hideable stage {badge} />
+  <CapturePreview hideable stage />
 
   <div class="docks">
     <div class="cell sources"><Dock title="Sources" flush><SourcesDock /></Dock></div>
@@ -126,7 +143,7 @@
     <div class="cell controls"><Dock title="Controls" menus><ControlsDock /></Dock></div>
   </div>
 
-  <div class="bar"><StatusBar {samples} {disk} {latest} fresh={!!latest && fresh === latest.id} /></div>
+  <div class="bar"><StatusBar {samples} {disk} {latest} fresh={!!latest && fresh === latest.id} {doing} /></div>
 </div>
 
 {#if app.config && !app.config.ui.setup_done}<Wizard />{/if}
@@ -150,14 +167,11 @@
     /* On a phone the bar wraps to a few lines: it stays at the end instead of covering the docks. */
     .bar { position: static; }
   }
-  .badge {
-    display: inline-flex; align-items: center; gap: .45rem; padding: .25rem .65rem; border-radius: 7px;
-    background: #000b; color: #eee; font-size: .82rem; white-space: nowrap; max-width: 100%; overflow: hidden;
-  }
-  .badge .dot { width: .55rem; height: .55rem; border-radius: 50%; background: #888; flex: none; }
-  .badge.buf .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-  .badge.rec { background: color-mix(in srgb, var(--danger) 85%, black); color: #fff; }
-  .badge.rec .dot { background: #fff; animation: pulse 1.2s infinite; }
+  .doing { display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap; min-width: 0; overflow: hidden; }
+  .doing .dot { width: .55rem; height: .55rem; border-radius: 50%; background: #888; flex: none; }
+  .doing.buf .dot { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+  .doing.rec b { color: var(--danger); }
+  .doing.rec .dot { background: var(--danger); animation: pulse 1.2s infinite; }
   @keyframes pulse { 50% { opacity: .35; } }
   .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .dim { opacity: .75; overflow: hidden; text-overflow: ellipsis; }

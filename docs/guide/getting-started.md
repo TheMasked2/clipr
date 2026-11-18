@@ -54,15 +54,15 @@ Set or change them under [Settings → Hotkeys](settings.md#hotkeys).
 
 Home works like OBS's main window, with everything in a fixed place:
 
-- **Preview** across the top: what clipr captures right now. The badge in its corner says what clipr is doing:
-  **Replay buffer** with how much of it is filled (like 1:42 of 2:00), **REC** with the recording's time, **Buffer
-  paused**, or **Waiting for a game**. **Hide** turns the preview off; the badge stays.
+- **Preview** across the top: the whole picture clipr captures right now, as sharp as the space it has.
+  **Hide** turns it off.
 - **Sources**: what clipr records. The first row is the picture (a game's window or monitor, or the desktop
   too); then system audio, the microphone, the game's own sound and each app on its own track. The switch turns a
   sound on or off; ⚙ opens everything about that source: its volume, filters, push-to-talk for the mic, which
   monitor the desktop is, and so on. **+ App** records another program (like `discord.exe`) on a track of its
   own; open its ⚙ to remove it again. Turning sources on or off and saving their settings restarts capture, so
-  the replay buffer starts over (volume faders don't).
+  the replay buffer starts over (volume faders don't). **Save** keeps the window open, so you can try one filter
+  after another; close it when you're done.
 - **Mixer**: an upright strip per sound, with its live level (what gets recorded, after its filters) and a
   volume fader that applies while you drag. The level shows left and right side by side, green up to -20 dB,
   yellow to -9 dB, red above. **Mute** on any strip silences that source in clips right away, while
@@ -73,7 +73,8 @@ Home works like OBS's main window, with everything in a fixed place:
 - **Controls**: **Save clip**, **Save long clip** and **Start recording**, with their hotkeys. **More** has
   Pause buffer, Mark moment and Mute mic. **Output** at the bottom shows the quality, resolution and frame rate;
   click it to change them in one click each.
-- **The status bar** along the bottom: the frame rate against your target, late and skipped frames in the last
+- **The status bar** along the bottom: first what clipr is doing, like **Clipping (game) · 1:42 of 2:00 ready**
+  (how much a clip can hold right now), **Recording (game) 0:12:07**, **Paused** or **Waiting for a game**; then the frame rate against your target, late and skipped frames in the last
   minute, clipr's CPU, free disk space and your newest clip. **Graphs** opens the performance graphs: the last two
   minutes of each number, plus how many frames had a new picture, the time clipr spends per frame, the bitrate
   and memory (**Show numbers** shows them as a table).

@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as api from './api';
   import type { Config } from './api';
-  import { app, confirmDialog, quickEdit, saveDraft, toastError } from './store.svelte';
+  import { app, confirmDialog, quickEdit, saveDraft, toast, toastError } from './store.svelte';
   import Field from './Field.svelte';
   import Fader from './Fader.svelte';
   import AudioFilters from './AudioFilters.svelte';
@@ -62,8 +62,11 @@
     if (!draft) return;
     saving = true;
     try {
-      await saveDraft(clone(draft));
-      onclose();
+      // Stays open, so you can keep tuning (a filter, then another); close it yourself.
+      const saved = await saveDraft(clone(draft));
+      draft = clone(saved);
+      base = JSON.stringify(draft);
+      toast('ok', 'Saved.');
     } catch (e) {
       toastError(e);
     } finally {
@@ -104,7 +107,8 @@
       <h2>{title}</h2>
       <button class="x" onclick={onclose} aria-label="Close">×</button>
     </header>
-    <div class="content">
+    <!-- Locked while saving, so nothing typed meanwhile is lost when the saved settings come back. -->
+    <div class="content" inert={saving}>
       {#if source === 'video'}
         <Field title="Record" hint="Games buffers only while a known game runs. Always buffers the desktop too when no game runs.">
           <div class="row">
