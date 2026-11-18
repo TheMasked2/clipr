@@ -205,6 +205,11 @@ clips use.
 
 ## Discord
 
+**Show in my Discord status** (on): while clipr clips or records, your Discord profile shows the game and its
+icon, like *Playing clipr · VALORANT · Clipping with clipr*, with the time since the game started (or the
+recording, while one runs). It talks to the Discord app on this PC, so nothing goes online and there's nothing to
+sign in to; with Discord closed it does nothing.
+
 Post clips to Discord channels through webhooks. See the [Discord guide](discord.md) for the step-by-step
 setup and what each option does.
 

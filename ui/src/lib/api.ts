@@ -135,6 +135,8 @@ export interface DiscordConfig {
   webhooks: Webhook[];
   post_during_game: boolean;
   upload_limit_mb: number;
+  /** Rich Presence: the game clipr clips, in your Discord profile. */
+  presence: boolean;
 }
 
 export type JobState = 'ask' | 'queued' | 'posting' | 'posted' | 'skipped' | 'failed';

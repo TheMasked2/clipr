@@ -5,8 +5,8 @@ use stay as easy as Medal.
 
 clipr sits in the system tray and stays idle until a game starts. Then it keeps the last few minutes in a
 replay buffer, so you can clip a moment with a hotkey (or, later, with your voice). Clips land in a local
-gallery where you can trim, sort and share them. They can also go to Discord: posted to a channel or your DMs,
-and fetched from your phone with bot commands.
+gallery where you can trim, sort and share them. They can also go to Discord, posted to a channel through a
+webhook, and your Discord status shows the game you're clipping.
 
 > **Status:** public beta. Replay buffer, full recordings, the gallery, OBS-style audio and Discord webhooks
 > work; download the newest build from [releases](https://github.com/TheMasked2/clipr/releases). The
@@ -16,8 +16,8 @@ and fetched from your phone with bot commands.
 
 ## Principles
 
-- **Standalone.** One `clipr.exe`, with no OBS and no server of ours. Discord and cloud storage are optional,
-  and they run on the user's own bot token and bucket.
+- **Standalone.** One `clipr.exe`, with no OBS and no server of ours. Discord and cloud storage are optional:
+  Discord through webhooks and the Discord app on your PC (no bot), cloud storage on your own bucket.
 - **Lightweight.** Rust core, native Windows APIs, GPU encoding. It uses no CPU or GPU while no game runs.
   The UI is a small Svelte web app embedded in the exe, so no webview or Electron is needed.
 - **Never in the way of the game.** No uploads or posts during play unless the user configures them. Encoding
@@ -85,15 +85,13 @@ and fetched from your phone with bot commands.
 - ⏭ **Vertical export (9:16)** with an adjustable crop box for TikTok, Shorts and Reels.
 
 ### Discord
-- ✅ **Webhook posting:** paste a webhook URL and you're done.
-- ✅ **Bot inside clipr** on your own bot token (a guided setup in the wizard). No server is needed, and it's
-  online while your PC is on.
-  - Commands, each toggleable: `/last`, `/clips [game]`, `/clip [length]`, `/record start|stop`, `/status`.
-  - Posts to a chosen channel and/or your DMs, with **per-game channels** and a **rich embed** (game, title,
-    length, thumbnail).
-  - **Ask before posting** is the default. Nothing is posted unless you've configured a destination, and
-    posts wait until the game closes (no lag mid-game).
-- ✅ Rich Presence: "Recording with clipr".
+- ✅ **Webhook posting:** paste a webhook URL and you're done. **Per-game channels** and a **rich embed** (game,
+  title, length, thumbnail).
+- ✅ **Ask before posting** is the default: clipr itself asks (on Home), no bot needed. Nothing is posted unless
+  you've configured a destination, and posts wait until the game closes (no lag mid-game).
+- ✅ **Rich Presence** (on by default): your Discord status shows the game you're clipping, with its icon.
+- [ ] **Connect your Discord account** (sign in through Discord, no secret, no server): pick a channel in
+  Discord's own picker instead of pasting a webhook URL.
 - ✅ Without cloud storage, clipr makes a size-fitted copy for Discord's upload limit. With cloud storage,
   Discord gets a link with a playable embed.
 

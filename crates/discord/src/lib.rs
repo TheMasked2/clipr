@@ -1,7 +1,9 @@
-//! Discord integration. Webhooks and the post queue for now; the bot on the user's own token, slash commands
-//! and Rich Presence follow (see `docs/dev-plan.md`, Phase 6).
+//! Discord integration: webhooks, the post queue and Rich Presence. No bot: posts go through webhooks, and
+//! the "post this?" buttons live in clipr itself.
 
+pub mod presence;
 pub mod queue;
 pub mod webhook;
 
+pub use presence::{Presence, Status as PresenceStatus};
 pub use queue::{ClipInfo, Job, JobState, Poster};
