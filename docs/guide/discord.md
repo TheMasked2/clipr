@@ -52,7 +52,7 @@ posted, skipped or failed. A failed post has a **Retry** button.
 ## Your Discord status
 
 While clipr clips or records, your Discord profile shows the game with its icon: *Playing clipr · VALORANT ·
-Clipping with clipr*. It's on by default; turn it off with **Show in my Discord status** in Settings → Discord.
+Clipping with clipr*. Only games show, never the desktop. It's on by default; turn it off with **Show in my Discord status** in Settings → Discord.
 It talks to the Discord app on this PC, so there's nothing to sign in to.
 
 ## Coming later

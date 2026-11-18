@@ -53,7 +53,7 @@
   }
 </script>
 
-<Field title="Show in my Discord status" hint="While clipr clips or records, your Discord profile shows the game with its icon (&quot;Playing clipr · VALORANT · Clipping with clipr&quot;). Needs the Discord app on this PC; nothing goes online.">
+<Field title="Show in my Discord status" hint="While clipr clips or records, your Discord profile shows the game with its icon (&quot;Playing clipr · VALORANT · Clipping with clipr&quot;). Only games, never the desktop. Needs the Discord app on this PC; nothing goes online.">
   <Toggle bind:checked={discord.presence} label="Show in my Discord status" />
 </Field>
 

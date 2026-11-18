@@ -208,7 +208,7 @@ clips use.
 **Show in my Discord status** (on): while clipr clips or records, your Discord profile shows the game and its
 icon, like *Playing clipr · VALORANT · Clipping with clipr*, with the time since clipr started clipping the game
 (or since the recording started, while one runs). A custom game shows its program name (like `emulator`), never
-its window title. It talks to the Discord app on this PC, so nothing goes online and there's nothing to sign in
+its window title. Recording the desktop shows nothing. It talks to the Discord app on this PC, so nothing goes online and there's nothing to sign in
 to; with Discord closed it does nothing.
 
 Post clips to Discord channels through webhooks. See the [Discord guide](discord.md) for the step-by-step
