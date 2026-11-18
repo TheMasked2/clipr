@@ -229,6 +229,8 @@ pub async fn test_sound(State(s): State<AppState>, body: Bytes) -> ApiResult<Sta
 pub struct PreviewQuery {
     /// Pictures a second the page wants (1–30; default 5).
     fps: Option<u32>,
+    /// How wide the page shows the picture, in screen pixels (320–1920; default 640).
+    width: Option<u32>,
 }
 
 pub async fn preview(
@@ -245,7 +247,8 @@ pub async fn preview(
     }
     let control = s.control.clone();
     let fps = q.fps.unwrap_or(5).clamp(1, 30);
-    let jpeg = tokio::task::spawn_blocking(move || control.preview(fps))
+    let width = q.width.unwrap_or(640).clamp(320, 1920);
+    let jpeg = tokio::task::spawn_blocking(move || control.preview(fps, width))
         .await
         .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the preview failed"))?
         .map_err(|e| {

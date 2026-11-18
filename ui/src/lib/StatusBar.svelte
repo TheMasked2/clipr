@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, type Snippet } from 'svelte';
   import type * as api from './api';
   import { app } from './store.svelte';
   import { fmtBytes } from './format';
@@ -13,7 +13,8 @@
     disk,
     latest,
     fresh = false,
-  }: { samples: api.PerfSample[]; disk: api.Disk | null; latest: api.Clip | null; fresh?: boolean } = $props();
+    doing,
+  }: { samples: api.PerfSample[]; disk: api.Disk | null; latest: api.Clip | null; fresh?: boolean; doing?: Snippet } = $props();
 
   const last = $derived(samples[samples.length - 1]);
   const capturing = $derived(last?.capturing ?? false);
@@ -39,6 +40,7 @@
 </script>
 
 <footer class="status" aria-label="Status">
+  {#if doing}<span class="doing-cell">{@render doing()}</span>{/if}
   <span title="Frames encoded per second (average of the last 5 s), against the target">
     <span class="k">FPS</span>
     <span class:warnt={capturing && fps < target * 0.9}>{capturing ? `${Math.round(fps)} / ${target}` : '–'}</span>
@@ -82,6 +84,7 @@
     font-size: .8rem; font-variant-numeric: tabular-nums;
   }
   .k { color: var(--text-muted); margin-right: .2rem; }
+  .doing-cell { padding-right: 1.2rem; border-right: 1px solid var(--border); min-width: 0; }
   .warnt { color: #f5b942; }
   .grow { flex: 1; }
   .last { text-decoration: none; display: flex; min-width: 0; max-width: 22rem; gap: .2rem; }

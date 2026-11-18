@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { onMount, type Snippet } from 'svelte';
+  import { onMount } from 'svelte';
   import { app } from './store.svelte';
 
   // A small live picture of what clipr captures, a few frames a second, like OBS's preview. It only runs
   // while the page is visible and the preview isn't hidden: clipr takes snapshots only while someone asks.
-  // `stage` (Home): the preview fills its dock, with `badge` (the capture state) and the controls laid over it.
-  let { hideable = false, stage = false, badge }: { hideable?: boolean; stage?: boolean; badge?: Snippet } = $props();
+  // `stage` (Home): the whole picture, as big as fits, with its controls in the corner.
+  let { hideable = false, stage = false }: { hideable?: boolean; stage?: boolean } = $props();
+  let box: HTMLElement | undefined = $state();
 
   const KEY = 'clipr.preview.hidden';
   const FPS_KEY = 'clipr.preview.fps';
@@ -76,7 +77,10 @@
       const started = performance.now();
       let wait = 0;
       try {
-        const r = await fetch(`/api/preview?fps=${fps}`, { cache: 'no-store' });
+        // As sharp as it shows: its width in screen pixels, in steps of 320 so resizing doesn't keep changing it.
+        const px = (box?.clientWidth ?? 640) * (window.devicePixelRatio || 1);
+        const width = Math.min(1920, Math.max(320, Math.ceil(px / 320) * 320));
+        const r = await fetch(`/api/preview?fps=${fps}&width=${width}`, { cache: 'no-store' });
         if (r.status === 200) {
           const blob = await r.blob();
           if (!alive) return;
@@ -136,12 +140,13 @@
 
 {#if stage}
   {#if hideable && hidden}
-    <div class="hidden-bar">{@render badge?.()}<span class="ctl">{@render controls()}</span></div>
+    <div class="hidden-bar"><span class="muted small">Preview hidden</span><span class="ctl">{@render controls()}</span></div>
   {:else}
-    <div class="screen stage" class:live={!!src}>
-      {#if src}<img {src} alt="What clipr captures now" />{:else}{@render message()}{/if}
-      <div class="over left">{@render badge?.()}</div>
-      <div class="over right ctl">{@render controls()}</div>
+    <div class="stage-wrap">
+      <div class="screen stage" class:live={!!src} bind:this={box}>
+        {#if src}<img {src} alt="What clipr captures now" />{:else}{@render message()}{/if}
+        <div class="over right ctl">{@render controls()}</div>
+      </div>
     </div>
   {/if}
 {:else}
@@ -158,7 +163,7 @@
     </span>
   </div>
   {#if !(hideable && hidden)}
-    <div class="screen" class:live={!!src}>
+    <div class="screen" class:live={!!src} bind:this={box}>
       {#if src}
         <img {src} alt="What clipr captures now" />
       {:else}
@@ -190,12 +195,15 @@
   }
   .screen.live { padding: 0; }
   .screen img { width: 100%; height: 100%; object-fit: contain; display: block; }
-  .screen.stage { max-width: none; max-height: 52vh; height: 100%; border-radius: var(--radius); position: relative; }
+  /* The whole 16:9 picture, as big as fits: full width, or 52 % of the window's height, whichever is smaller. */
+  .stage-wrap { display: flex; justify-content: center; background: #000; border-radius: var(--radius); }
+  .screen.stage {
+    max-width: none; width: min(100%, calc(52vh * 16 / 9)); height: auto; aspect-ratio: 16 / 9;
+    border: none; border-radius: var(--radius); position: relative;
+  }
+  .screen.stage img { position: absolute; inset: 0; }
   .over { position: absolute; top: .55rem; display: flex; align-items: center; gap: .5rem; }
-  .over.left { left: .55rem; }
   .over.right { right: .55rem; padding: .15rem .45rem; border-radius: 7px; background: #000a; }
   .over.right select { background: transparent; color: #ddd; border-color: #fff3; }
-  /* Narrow: the badge keeps the top, the controls move to the bottom corner. */
-  @media (max-width: 600px) { .over.right { top: auto; bottom: .55rem; } }
   .hidden-bar { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .5rem .6rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 </style>
