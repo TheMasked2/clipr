@@ -422,13 +422,17 @@ pub enum GameCapture {
     Monitor,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GamesConfig {
     pub mode: GameMode,
     /// What is captured while a game runs.
     pub capture: GameCapture,
-    /// Extra games to detect, by exe name (`mygame.exe`).
+    /// Also treat a fullscreen program as a game when it runs from a game library folder (Steam, Epic, Xbox,
+    /// GOG, EA, Ubisoft, Riot, Amazon, itch), so brand-new games that aren't on the list yet are recorded too.
+    pub detect_unlisted: bool,
+    /// Extra games to detect: an exe name (`mygame.exe`), or a game's name as in its window title or folder
+    /// (`Trust Your Gut`).
     pub custom: Vec<String>,
     /// Exe names never treated as games, even if Discord lists them.
     pub blocked: Vec<String>,
@@ -436,6 +440,20 @@ pub struct GamesConfig {
     pub auto_record: Vec<String>,
     /// Video settings that replace `video.*` while a given game runs.
     pub profiles: Vec<GameProfile>,
+}
+
+impl Default for GamesConfig {
+    fn default() -> Self {
+        Self {
+            mode: GameMode::default(),
+            capture: GameCapture::default(),
+            detect_unlisted: true,
+            custom: Vec::new(),
+            blocked: Vec::new(),
+            auto_record: Vec::new(),
+            profiles: Vec::new(),
+        }
+    }
 }
 
 /// Video settings for one game. Empty fields keep the `video.*` value.

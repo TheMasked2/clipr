@@ -24,7 +24,7 @@ pub struct AppControl {
     pub updater: crate::updater::Updater,
     pub crash_dir: PathBuf,
     pub log_dir: PathBuf,
-    pub known_games: Arc<dyn Fn() -> usize + Send + Sync>,
+    pub games: Arc<clipr_games::GameWatcher>,
 }
 
 /// The auto preset, measured once in the background at startup.
@@ -181,6 +181,17 @@ impl Control for AppControl {
         self.updater.apply()
     }
 
+    fn unlisted_games(&self) -> Vec<clipr_web::UnlistedGame> {
+        self.games
+            .unlisted()
+            .into_iter()
+            .map(|u| clipr_web::UnlistedGame {
+                exe: u.exe,
+                title: u.title,
+            })
+            .collect()
+    }
+
     fn system_info(&self) -> serde_json::Value {
         let gpus: Vec<_> = clipr_encode::probe::list_adapters()
             .unwrap_or_default()
@@ -224,7 +235,7 @@ impl Control for AppControl {
         json!({
             "gpus": gpus,
             "monitors": monitors,
-            "known_games": (self.known_games)(),
+            "known_games": self.games.list_len(),
             "elevated": crate::win::is_elevated(),
             "preset": PRESET.get().cloned().flatten(),
         })

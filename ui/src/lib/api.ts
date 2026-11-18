@@ -118,6 +118,9 @@ export interface Config {
     mode: GameMode;
     /** What "Game only" captures: the game's window, or the whole monitor it's on. */
     capture: 'window' | 'monitor';
+    /** Fullscreen programs from game library folders (Steam, Epic, Xbox…) count as games too. */
+    detect_unlisted: boolean;
+    /** Exe names (`mygame.exe`) or game names as in the window title or folder (`Trust Your Gut`). */
     custom: string[];
     blocked: string[];
     auto_record: string[];
@@ -372,6 +375,9 @@ export const getStatus = () => request<Status>('GET', '/api/status');
 export const getConfig = () => request<Config>('GET', '/api/config');
 export const putConfig = (c: Config) => request<Config>('PUT', '/api/config', c);
 export const getSystem = () => request<SystemInfo>('GET', '/api/system');
+/** A program that ran fullscreen lately but isn't a game to clipr. */
+export type UnlistedGame = { exe: string; title: string };
+export const getUnlistedGames = () => request<UnlistedGame[]>('GET', '/api/games/unlisted');
 export const getDisk = () => request<Disk>('GET', '/api/disk');
 export const getCrashes = () => request<CrashReport[]>('GET', '/api/crashes');
 export const dismissCrash = (id: string) => request<void>('POST', '/api/crashes/dismiss', { id });

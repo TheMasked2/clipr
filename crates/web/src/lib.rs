@@ -34,7 +34,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinSet;
 
-pub use control::{Control, NoopControl};
+pub use control::{Control, NoopControl, UnlistedGame};
 
 /// How many ports after the preferred one to try before giving up.
 const PORT_ATTEMPTS: u16 = 20;
@@ -185,6 +185,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/clips/trim", post(api::trim_clip))
         .route("/api/clips/reveal", post(api::reveal))
         .route("/api/games", get(api::games))
+        .route("/api/games/unlisted", get(api::unlisted_games))
         .route("/api/shelves", get(api::shelves))
         .route("/api/cleanup", post(api::cleanup))
         .route("/api/cleanup/preview", post(api::cleanup_preview))

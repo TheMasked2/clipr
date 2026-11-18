@@ -19,6 +19,8 @@ pub struct Foreground {
     pub pid: u32,
     /// Lower-case file name of the process image, e.g. `valorant-win64-shipping.exe`.
     pub exe: String,
+    /// The full path of the process image, as Windows gives it (to recognise game library folders).
+    pub path: String,
     pub title: String,
     /// Covers its whole monitor, and is not the desktop or shell window.
     pub fullscreen: bool,
@@ -36,11 +38,12 @@ pub fn foreground() -> Option<Foreground> {
     if pid == 0 {
         return None;
     }
-    let exe = process_exe(pid)?;
+    let path = process_path(pid)?;
     Some(Foreground {
         hwnd: hwnd.0 as isize,
         pid,
-        exe,
+        exe: file_name(&path),
+        path,
         title: window_title(hwnd),
         fullscreen: is_fullscreen(hwnd),
     })
@@ -48,6 +51,18 @@ pub fn foreground() -> Option<Foreground> {
 
 /// The lower-case image file name of a running process, or `None` if it is gone or inaccessible.
 pub fn process_exe(pid: u32) -> Option<String> {
+    process_path(pid).map(|p| file_name(&p))
+}
+
+fn file_name(path: &str) -> String {
+    path.rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(path)
+        .to_ascii_lowercase()
+}
+
+/// The full image path of a running process, or `None` if it is gone or inaccessible.
+fn process_path(pid: u32) -> Option<String> {
     // SAFETY: OpenProcess has no memory preconditions; the handle is closed below.
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
     let mut buf = [0u16; 1024];
@@ -58,9 +73,7 @@ pub fn process_exe(pid: u32) -> Option<String> {
     // SAFETY: `handle` was opened above and is not used afterwards.
     let _ = unsafe { CloseHandle(handle) };
     res.ok()?;
-    let path = String::from_utf16_lossy(&buf[..len as usize]);
-    let name = path.rsplit(['\\', '/']).next().unwrap_or(&path);
-    Some(name.to_ascii_lowercase())
+    Some(String::from_utf16_lossy(&buf[..len as usize]))
 }
 
 fn window_title(hwnd: HWND) -> String {

@@ -10,7 +10,7 @@
 mod catalog;
 mod win;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -39,8 +39,12 @@ pub struct Game {
 #[derive(Default)]
 struct Lists {
     custom: HashSet<String>,
+    /// Custom entries that are a game's name, not an exe (`trust your gut`), lower case.
+    custom_names: Vec<String>,
     blocked: HashSet<String>,
     auto_record: HashSet<String>,
+    /// Fullscreen programs from game library folders count as games (`games.detect_unlisted`).
+    detect_unlisted: bool,
 }
 
 impl Lists {
@@ -48,10 +52,103 @@ impl Lists {
         let set = |v: &[String]| v.iter().map(|s| s.trim().to_ascii_lowercase()).collect();
         Self {
             custom: set(&config.custom),
+            // Three letters at least, so a stray "a" doesn't make every window a game.
+            custom_names: config
+                .custom
+                .iter()
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.ends_with(".exe") && s.chars().count() >= 3)
+                .collect(),
             blocked: set(&config.blocked),
             auto_record: set(&config.auto_record),
+            detect_unlisted: config.detect_unlisted,
         }
     }
+
+    /// Never a game: blocked by the user, or on the built-in list of programs that aren't games.
+    fn excluded(&self, exe: &str) -> bool {
+        self.blocked.contains(exe) || catalog::is_denied(exe)
+    }
+}
+
+/// A fullscreen program clipr saw but didn't record (not on the list), for "add it as a game".
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unlisted {
+    /// Lower-case exe file name.
+    pub exe: String,
+    pub title: String,
+}
+
+/// How many recently seen unlisted programs are kept.
+const UNLISTED_KEEP: usize = 8;
+
+/// Folders games are installed in by their stores, lower case with backslashes. The game's name is the folder
+/// right after one of these (`steamapps\common\Hades II\...` → `Hades II`).
+const LIBRARIES: [&str; 11] = [
+    "\\steamapps\\common\\",
+    "\\epic games\\",
+    "\\xboxgames\\",
+    "\\riot games\\",
+    "\\gog galaxy\\games\\",
+    "\\gog games\\",
+    "\\ea games\\",
+    "\\ubisoft game launcher\\games\\",
+    "\\amazon games\\library\\",
+    "\\itch\\apps\\",
+    "\\battle.net\\games\\",
+];
+
+/// Folders in game libraries that hold tools, not games.
+const NOT_GAMES: [&str; 5] = [
+    "riot client",
+    "steamworks shared",
+    "steam controller configs",
+    "directx",
+    "launcher",
+];
+
+/// Parts of exe names that are never the game itself (crash reporters, installers, anti-cheat).
+const NOT_GAME_EXES: [&str; 7] = [
+    "crash",
+    "unins",
+    "setup",
+    "redist",
+    "install",
+    "anticheat",
+    "bugreport",
+];
+
+/// The game's name from its install folder, when `path` is in a game library folder.
+fn library_game(path: &str) -> Option<String> {
+    let lower = path.replace('/', "\\").to_ascii_lowercase();
+    let exe = lower.rsplit('\\').next().unwrap_or("");
+    if NOT_GAME_EXES.iter().any(|n| exe.contains(n)) {
+        return None;
+    }
+    let start = LIBRARIES
+        .iter()
+        .find_map(|lib| lower.find(lib).map(|i| i + lib.len()))?;
+    let rest = &path[start..];
+    let folder = rest.split(['\\', '/']).next()?.trim();
+    // The exe has to be inside the game's folder, not the library folder itself.
+    if folder.is_empty()
+        || rest.len() <= folder.len()
+        || NOT_GAMES.contains(&folder.to_ascii_lowercase().as_str())
+    {
+        return None;
+    }
+    Some(folder.to_string())
+}
+
+/// The game's name when a custom entry names it: the window title or the install folder contains the entry.
+fn named_game(names: &[String], title: &str, path: &str) -> Option<String> {
+    let title_l = title.to_lowercase();
+    let folder = library_game(path);
+    let folder_l = folder.as_deref().map(str::to_lowercase).unwrap_or_default();
+    names
+        .iter()
+        .find(|n| title_l.contains(n.as_str()) || folder_l.contains(n.as_str()))?;
+    Some(folder.unwrap_or_else(|| title.trim().to_string()))
 }
 
 struct State {
@@ -61,6 +158,11 @@ struct State {
     current: Option<Game>,
     /// Fullscreen unknown exes already logged.
     logged: HashSet<String>,
+    /// Games found this run without being on a list (a library folder, a custom name): exe → name, so they
+    /// stay games while they run in the background. Cleared when the settings change.
+    found: HashMap<String, String>,
+    /// Fullscreen programs seen lately that aren't games to clipr, newest first.
+    unlisted: VecDeque<Unlisted>,
 }
 
 /// Watches the foreground window for known games. Cheap to share: all methods take `&self`.
@@ -115,6 +217,8 @@ impl GameWatcher {
             lists: Lists::default(),
             current: None,
             logged: HashSet::new(),
+            found: HashMap::new(),
+            unlisted: VecDeque::new(),
         }));
         let refresher = Arc::clone(&state);
         let spawned = std::thread::Builder::new()
@@ -127,7 +231,24 @@ impl GameWatcher {
     }
 
     pub fn set_config(&self, config: &GamesConfig) {
-        lock(&self.state).lists = Lists::from_config(config);
+        let mut st = lock(&self.state);
+        st.lists = Lists::from_config(config);
+        // Found again on the next poll under the new rules (a game the user just blocked isn't).
+        st.found.clear();
+        // An unlisted program that is a game now (added or found) leaves the list on its next poll.
+        let lists = &st.lists;
+        let keep: VecDeque<Unlisted> = st
+            .unlisted
+            .iter()
+            .filter(|u| !lists.custom.contains(&u.exe))
+            .cloned()
+            .collect();
+        st.unlisted = keep;
+    }
+
+    /// Fullscreen programs seen lately that clipr didn't record, newest first (to add one as a game).
+    pub fn unlisted(&self) -> Vec<Unlisted> {
+        lock(&self.state).unlisted.iter().cloned().collect()
     }
 
     /// The game to capture right now, if any. Call every ~2 s.
@@ -149,7 +270,7 @@ impl GameWatcher {
         let mut st = lock(&self.state);
         if let Some(fg) = foreground {
             let verdict = classify(&fg.exe, &st.known, &st.lists);
-            let custom = verdict == Verdict::Custom;
+            let mut custom = verdict == Verdict::Custom;
             let name = match verdict {
                 Verdict::Known(name) => Some(name),
                 Verdict::Custom => Some(if fg.title.trim().is_empty() {
@@ -157,7 +278,31 @@ impl GameWatcher {
                 } else {
                     fg.title.trim().to_string()
                 }),
-                Verdict::No => None,
+                Verdict::No if st.lists.excluded(&fg.exe) => None,
+                // Not on any list: a custom entry naming it, or a fullscreen program from a game library.
+                Verdict::No => {
+                    if let Some(name) = st.found.get(&fg.exe) {
+                        Some(name.clone())
+                    } else if let Some(name) = named_game(&st.lists.custom_names, &fg.title, &fg.path) {
+                        // Named after the window title (which can be private) unless the folder named it.
+                        custom = library_game(&fg.path).is_none();
+                        tracing::info!("{} is a game by its name in the custom games", fg.exe);
+                        st.found.insert(fg.exe.clone(), name.clone());
+                        Some(name)
+                    } else if st.lists.detect_unlisted
+                        && fg.fullscreen
+                        && let Some(name) = library_game(&fg.path)
+                    {
+                        tracing::info!(
+                            "{} isn't on the game list, but runs fullscreen from a game library",
+                            fg.exe
+                        );
+                        st.found.insert(fg.exe.clone(), name.clone());
+                        Some(name)
+                    } else {
+                        None
+                    }
+                }
             };
             if let Some(name) = name {
                 let game = Game {
@@ -176,11 +321,16 @@ impl GameWatcher {
                 st.current = Some(game.clone());
                 return Some(game);
             }
-            if fg.fullscreen
-                && !st.lists.blocked.contains(&fg.exe)
-                && !catalog::is_denied(&fg.exe)
-                && st.logged.insert(fg.exe.clone())
-            {
+            if fg.fullscreen && !st.lists.excluded(&fg.exe) {
+                // Remember it for Settings → Games ("seen lately"), newest first.
+                st.unlisted.retain(|u| u.exe != fg.exe);
+                st.unlisted.push_front(Unlisted {
+                    exe: fg.exe.clone(),
+                    title: fg.title.trim().to_string(),
+                });
+                st.unlisted.truncate(UNLISTED_KEEP);
+            }
+            if fg.fullscreen && !st.lists.excluded(&fg.exe) && st.logged.insert(fg.exe.clone()) {
                 tracing::debug!(
                     "fullscreen window of unknown program {} ({:?}); add it to the custom games to record it",
                     fg.exe,
@@ -191,7 +341,8 @@ impl GameWatcher {
         // Not in the foreground: keep the last game while its process lives.
         if let Some(prev) = st.current.take() {
             let still_game = process_exe(prev.pid).is_some_and(|exe| exe == prev.exe)
-                && classify(&prev.exe, &st.known, &st.lists) != Verdict::No;
+                && (classify(&prev.exe, &st.known, &st.lists) != Verdict::No
+                    || st.found.contains_key(&prev.exe));
             if still_game {
                 st.current = Some(prev.clone());
                 return Some(prev);
@@ -420,15 +571,23 @@ mod tests {
                 lists,
                 current: None,
                 logged: HashSet::new(),
+                found: HashMap::new(),
+                unlisted: VecDeque::new(),
             })),
         }
     }
 
     fn fg(exe: &str, pid: u32, title: &str, fullscreen: bool) -> Option<win::Foreground> {
+        fg_at(&format!("C:\\Program Files\\Some\\{exe}"), pid, title, fullscreen)
+    }
+
+    fn fg_at(path: &str, pid: u32, title: &str, fullscreen: bool) -> Option<win::Foreground> {
+        let exe = path.rsplit('\\').next().unwrap().to_ascii_lowercase();
         Some(win::Foreground {
             hwnd: 7,
             pid,
-            exe: exe.into(),
+            path: path.into(),
+            exe,
             title: title.into(),
             fullscreen,
         })
@@ -513,6 +672,95 @@ mod tests {
         assert!(
             b.keys()
                 .all(|k| k == &k.to_ascii_lowercase() && !catalog::is_denied(k))
+        );
+    }
+
+    #[test]
+    fn library_folders_name_the_game() {
+        let steam = "D:\\SteamLibrary\\steamapps\\common\\Hades II\\Ship\\Hades2.exe";
+        assert_eq!(library_game(steam).as_deref(), Some("Hades II"));
+        assert_eq!(
+            library_game("C:\\XboxGames\\Starfield\\Content\\Starfield.exe").as_deref(),
+            Some("Starfield")
+        );
+        assert_eq!(
+            library_game("C:\\Program Files\\Epic Games\\Fortnite\\FortniteClient.exe").as_deref(),
+            Some("Fortnite")
+        );
+        // Not games: other folders, tools in a library, crash reporters, an exe right in the library folder.
+        assert_eq!(
+            library_game("C:\\Program Files\\Mozilla Firefox\\firefox.exe"),
+            None
+        );
+        assert_eq!(
+            library_game("D:\\Steam\\steamapps\\common\\Steamworks Shared\\x.exe"),
+            None
+        );
+        assert_eq!(
+            library_game("D:\\Steam\\steamapps\\common\\Hades II\\CrashReporter.exe"),
+            None
+        );
+        assert_eq!(library_game("C:\\XboxGames\\gamingservices.exe"), None);
+    }
+
+    #[test]
+    fn an_unlisted_fullscreen_game_from_a_library_is_recorded() {
+        let w = watcher(lists(&[], &[], &[]));
+        let path = "D:\\SteamLibrary\\steamapps\\common\\Trust Your Gut\\TrustYourGut.exe";
+        // Windowed (a launcher, a menu in a window): not yet, but remembered as seen.
+        assert_eq!(
+            w.poll_with(fg_at(path, 5, "Trust Your Gut", false), |_| None, |_| 1),
+            None
+        );
+        let g = w
+            .poll_with(fg_at(path, 5, "Trust Your Gut", true), |_| None, |_| 1)
+            .unwrap();
+        assert_eq!(
+            (g.name.as_str(), g.exe.as_str(), g.custom),
+            ("Trust Your Gut", "trustyourgut.exe", false)
+        );
+        // Alt-tabbed away, it stays the game while it runs.
+        let g = w
+            .poll_with(
+                fg("explorer.exe", 1, "", false),
+                |_| Some("trustyourgut.exe".into()),
+                |_| 1,
+            )
+            .unwrap();
+        assert_eq!(g.name, "Trust Your Gut");
+        // The switch off: not a game.
+        let mut off = lists(&[], &[], &[]);
+        off.detect_unlisted = false;
+        let w = watcher(off);
+        assert_eq!(
+            w.poll_with(fg_at(path, 5, "Trust Your Gut", true), |_| None, |_| 1),
+            None
+        );
+        assert_eq!(w.unlisted()[0].exe, "trustyourgut.exe");
+        // Blocked wins.
+        let w = watcher(lists(&[], &["trustyourgut.exe"], &[]));
+        assert_eq!(
+            w.poll_with(fg_at(path, 5, "Trust Your Gut", true), |_| None, |_| 1),
+            None
+        );
+    }
+
+    #[test]
+    fn a_custom_entry_can_be_the_games_name() {
+        let w = watcher(lists(&["trust your gut", "a"], &[], &[]));
+        // Anywhere, windowed too: the user named it.
+        let g = w
+            .poll_with(
+                fg_at("C:\\Games\\TYG\\tyg.exe", 9, "Trust Your Gut v0.3", false),
+                |_| None,
+                |_| 1,
+            )
+            .unwrap();
+        assert_eq!((g.name.as_str(), g.custom), ("Trust Your Gut v0.3", true));
+        // A one-letter entry doesn't make everything a game.
+        assert_eq!(
+            w.poll_with(fg("notepad.exe", 3, "a file", false), |_| None, |_| 1),
+            None
         );
     }
 }

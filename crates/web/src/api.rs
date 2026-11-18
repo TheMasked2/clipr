@@ -708,6 +708,11 @@ pub async fn games(State(s): State<AppState>) -> ApiResult<Json<Vec<clipr_librar
     Ok(Json(blocking(move || lib.games()).await?))
 }
 
+/// Fullscreen programs seen lately that aren't games to clipr (Settings → Games → "add as a game").
+pub async fn unlisted_games(State(s): State<AppState>) -> Json<Vec<crate::control::UnlistedGame>> {
+    Json(s.control.unlisted_games())
+}
+
 pub async fn shelves(State(s): State<AppState>) -> ApiResult<Json<Vec<String>>> {
     let lib = s.library.clone();
     Ok(Json(blocking(move || lib.shelves()).await?))
