@@ -47,7 +47,9 @@
     meta();
     return onServerEvent((e) => {
       if (e.type === 'clip_saved') {
-        clips = [e.clip, ...clips.filter((c) => c.id !== e.clip.id)];
+        // With filters on, the new clip may not match them: ask the server.
+        if (filtered) void refetch();
+        else clips = [e.clip, ...clips.filter((c) => c.id !== e.clip.id)];
         fresh = e.clip.id;
         setTimeout(() => (fresh = ''), 3000);
         meta();
@@ -135,6 +137,7 @@
   {#each shelves as s (s)}
     <button class="chip" class:on={shelf === s} aria-pressed={shelf === s} onclick={() => (shelf = shelf === s ? '' : s)}>{s}</button>
   {/each}
+  {#if filtered}<button class="link small" onclick={clear}>Clear filters</button>{/if}
 </div>
 
 <div class="clips">
