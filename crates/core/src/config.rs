@@ -283,11 +283,12 @@ impl AudioConfig {
         match source.as_str() {
             SYSTEM_SOURCE => self.system_volume = percent,
             MIC_SOURCE => self.mic_volume = percent,
-            _ if percent == 100 => {
-                self.volumes.remove(&source);
-            }
             _ => {
-                self.volumes.insert(source, percent);
+                // A hand-edited file may spell the key in another case: replace every spelling.
+                self.volumes.retain(|k, _| !k.eq_ignore_ascii_case(&source));
+                if percent != 100 {
+                    self.volumes.insert(source, percent);
+                }
             }
         }
     }
@@ -851,6 +852,9 @@ mod tests {
         assert_eq!(a.without_volumes(), AudioConfig::default());
         a.set_volume("discord.exe", 100);
         assert!(a.volumes.is_empty());
+        a.volumes.insert("Game".into(), 50);
+        a.set_volume("game", 70);
+        assert_eq!((a.volumes.len(), a.volume("GAME")), (1, 70));
     }
 
     #[test]

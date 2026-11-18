@@ -27,7 +27,14 @@
       ),
     );
   }
+  /** Which drag is going on, so a finished one doesn't reset a newer one. */
+  let drag = 0;
+  let active = false;
   function input(v: number): void {
+    if (!active) {
+      active = true;
+      drag++;
+    }
     dragging = v;
     if (timer === undefined) {
       timer = setTimeout(() => {
@@ -39,8 +46,14 @@
   function change(v: number): void {
     clearTimeout(timer);
     timer = undefined;
+    if (!active) drag++;
+    active = false;
+    dragging = v;
+    const mine = drag;
     send(v);
-    void sending.then(() => (dragging = null));
+    void sending.then(() => {
+      if (mine === drag) dragging = null;
+    });
   }
 </script>
 

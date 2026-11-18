@@ -168,11 +168,14 @@ pub async fn set_volume(State(s): State<AppState>, body: Bytes) -> ApiResult<Jso
     if source.is_empty() || source.contains(['/', '\\', ':']) {
         return Err(ApiError::bad_request("Unknown audio source"));
     }
-    let mut config = s.control.config();
-    config.audio.set_volume(&source, req.volume);
-    validate_config(&config).map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    // Read, change and save under one lock, so two faders moved at once don't undo each other.
+    static VOLUMES: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let st = s.clone();
     let saved = blocking(move || {
+        let _one_at_a_time = VOLUMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut config = st.control.config();
+        config.audio.set_volume(&source, req.volume);
+        validate_config(&config).map_err(|e| LibraryError::Invalid(format!("{e:#}")))?;
         st.control
             .set_config(config)
             .map_err(|e| LibraryError::Invalid(format!("{e:#}")))?;

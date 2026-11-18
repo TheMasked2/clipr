@@ -222,7 +222,8 @@ impl Timeline {
                         *m += s * lane.gain;
                     }
                 } else {
-                    let step = (lane.next_gain - lane.gain) / frames as f32;
+                    // Ramp over the samples there are, so the lane ends this block at its new gain.
+                    let step = (lane.next_gain - lane.gain) / take.max(1) as f32;
                     for (i, (m, s)) in mix
                         .chunks_exact_mut(2)
                         .zip(lane.buf[..take * 2].chunks_exact(2))
