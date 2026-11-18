@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import type { Config } from './api';
+  import { isMuted, type Config } from './api';
   import { app, quickEdit, toastError } from './store.svelte';
   import SourcePanel from './SourcePanel.svelte';
 
@@ -45,7 +45,7 @@
     const n = (a.filters[key] ?? []).filter((f) => f.enabled).length;
     if (n) parts.push(`${n} ${n === 1 ? 'filter' : 'filters'}`);
     if (key === 'mic' && a.push_to_talk.trim()) parts.push(`push-to-talk ${a.push_to_talk.trim()}`);
-    if (key === 'mic' && st?.mic_muted) parts.push('muted');
+    if (isMuted(st, key)) parts.push('muted in clips');
     return parts.join(' · ');
   }
 

@@ -23,6 +23,10 @@ pub trait Control: Send + Sync + 'static {
     /// Mutes (`true`) or unmutes the microphone in clips. The state shows in the status (`mic_muted`).
     fn set_mic_muted(&self, _muted: bool) {}
 
+    /// Mutes (`true`) or unmutes any source in clips, by its key (`system`, `mic`, `game`, an app's exe name).
+    /// The state shows in the status (`muted`). It isn't saved.
+    fn set_muted(&self, _source: &str, _muted: bool) {}
+
     /// Plays the save sound once at `volume` %, so the user can hear the setting before saving it.
     fn test_sound(&self, _volume: u32) {}
 

@@ -64,7 +64,11 @@ Home works like OBS's main window, with everything in a fixed place:
   own; open its ⚙ to remove it again. Turning sources on or off and saving their settings restarts capture, so
   the replay buffer starts over (volume faders don't).
 - **Mixer**: an upright strip per sound, with its live level (what gets recorded, after its filters) and a
-  volume fader that applies while you drag. **Mute** on the mic strip mutes it in clips. See
+  volume fader that applies while you drag. The level shows left and right side by side, green up to -20 dB,
+  yellow to -9 dB, red above. **Mute** on any strip silences that source in clips right away, while
+  buffering or recording, without restarting anything (you still hear it yourself). A muted strip turns grey
+  and shows what comes in, so you can see it's still there. Mutes aren't saved: clipr starts with nothing
+  muted. See
   [Settings → Audio](settings.md#audio) for what the levels mean.
 - **Controls**: **Save clip**, **Save long clip** and **Start recording**, with their hotkeys. **More** has
   Pause buffer, Mark moment and Mute mic. **Output** at the bottom shows the quality, resolution and frame rate;

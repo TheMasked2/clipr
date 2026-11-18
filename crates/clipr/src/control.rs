@@ -62,6 +62,10 @@ impl Control for AppControl {
         self.engine.send(Command::SetMicMuted(muted));
     }
 
+    fn set_muted(&self, source: &str, muted: bool) {
+        self.engine.send(Command::SetMuted(source.to_string(), muted));
+    }
+
     fn test_sound(&self, volume: u32) {
         crate::sound::play(crate::sound::Cue::Saved, volume);
     }

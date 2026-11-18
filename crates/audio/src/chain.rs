@@ -349,6 +349,12 @@ impl SourceChain {
         }
     }
 
+    /// Starts the chain silent, for a source that is already muted, so a restart doesn't let its first
+    /// 10 ms through while the fade closes.
+    pub fn start_closed(&mut self) {
+        self.ptt_gain = 0.0;
+    }
+
     /// Whether the chain changes anything for a source without push-to-talk.
     pub fn is_empty(&self) -> bool {
         self.filters.is_empty() && !self.mono
@@ -614,6 +620,16 @@ mod tests {
         out.clear();
         chain.process(&input, true, &mut out);
         assert!((out[2 * 600] - 0.5).abs() < 1e-6, "back after the fade-in");
+    }
+
+    #[test]
+    fn a_chain_started_closed_lets_nothing_through() {
+        let mut chain = SourceChain::new(&[], false);
+        chain.start_closed();
+        let input = vec![0.5f32; 2 * 960];
+        let mut out = Vec::new();
+        chain.process(&input, false, &mut out);
+        assert!(out.iter().all(|&s| s == 0.0), "a muted source restarts silent");
     }
 
     #[test]

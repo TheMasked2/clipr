@@ -161,6 +161,11 @@ pub struct Source {
     meter: Meter,
     /// The same after the filter chain and push-to-talk.
     meter_after: Meter,
+    /// This source's key, for the mute list.
+    key: String,
+    /// Whether this source is muted in clips, as of mute list change `muted_gen`.
+    muted: bool,
+    muted_gen: u64,
     epoch: Instant,
     open: Option<Open>,
     /// The process an app source is (or should be) capturing.
@@ -175,11 +180,18 @@ impl Source {
     pub fn new(
         kind: SourceKind,
         lane: usize,
-        processing: Processing,
+        mut processing: Processing,
         levels: Arc<Levels>,
         level_index: usize,
     ) -> Self {
         let now = Instant::now();
+        let key = kind.key();
+        // The generation first, then the list: a change in between only means the first poll reads it again.
+        let muted_gen = crate::muted_gen();
+        let muted = crate::is_muted(&key);
+        if muted && let Some(chain) = &mut processing.chain {
+            chain.start_closed();
+        }
         Self {
             kind,
             lane,
@@ -188,6 +200,9 @@ impl Source {
             level_index,
             meter: Meter::new(),
             meter_after: Meter::new(),
+            key,
+            muted,
+            muted_gen,
             epoch: now,
             open: None,
             pid: None,
@@ -214,8 +229,13 @@ impl Source {
                 }
                 None => true,
             };
-            // The mute hotkey closes the mic the same way push-to-talk does.
-            let open_ptt = open_ptt && !(self.kind == SourceKind::Mic && crate::mic_muted());
+            // Muting (the mute hotkey, the mixer) closes a source the same way push-to-talk does.
+            let generation = crate::muted_gen();
+            if generation != self.muted_gen {
+                self.muted_gen = generation;
+                self.muted = crate::is_muted(&self.key);
+            }
+            let open_ptt = open_ptt && !self.muted;
             let result = read_all(
                 open,
                 self.lane,

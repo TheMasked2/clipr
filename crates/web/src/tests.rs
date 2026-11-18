@@ -410,6 +410,19 @@ async fn actions_reach_control() {
     }
     let (code, _, _) = call("POST", "/api/mark").send(&app).await;
     assert_eq!(code, StatusCode::NO_CONTENT);
+    let (code, _, _) = call("POST", "/api/mute")
+        .body(r#"{"source":"discord.exe","muted":true}"#)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+    for bad in [
+        r#"{"source":"  ","muted":true}"#,
+        r#"{"source":"C:\\x.exe","muted":true}"#,
+        r#"{"muted":true}"#,
+    ] {
+        let (code, _, _) = call("POST", "/api/mute").body(bad).send(&app).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{bad}");
+    }
     let (code, _, body) = call("POST", "/api/cleanup").send(&app).await;
     assert_eq!(code, StatusCode::OK);
     assert_eq!(json(&body)["removed"], 0);
