@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "clipr"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clipr-audio",
@@ -329,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "clipr-audio"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clipr-core",
@@ -342,11 +342,11 @@ dependencies = [
 
 [[package]]
 name = "clipr-buffer"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 
 [[package]]
 name = "clipr-capture"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clipr-gpu",
@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "clipr-cloud"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clipr-core",
@@ -372,7 +372,7 @@ dependencies = [
 
 [[package]]
 name = "clipr-core"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "dirs",
@@ -388,7 +388,7 @@ dependencies = [
 
 [[package]]
 name = "clipr-discord"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clipr-core",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "clipr-encode"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clipr-capture",
@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "clipr-games"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clipr-core",
@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "clipr-gpu"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "tracing",
@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "clipr-library"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clipr-core",
@@ -458,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "clipr-mux"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clipr-buffer",
@@ -470,7 +470,7 @@ dependencies = [
 
 [[package]]
 name = "clipr-update"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "clipr-core",
@@ -484,11 +484,11 @@ dependencies = [
 
 [[package]]
 name = "clipr-voice"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 
 [[package]]
 name = "clipr-web"
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 dependencies = [
  "anyhow",
  "axum",
