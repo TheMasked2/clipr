@@ -100,3 +100,70 @@ fn is_fullscreen(hwnd: HWND) -> bool {
     let m = info.rcMonitor;
     rect.left <= m.left && rect.top <= m.top && rect.right >= m.right && rect.bottom >= m.bottom
 }
+
+/// The game's main window: the largest visible, not minimised, unowned top-level window of `pid`. Dialogs,
+/// splash screens and launchers are smaller or owned, so window capture doesn't latch onto them.
+pub fn main_window(pid: u32) -> Option<(isize, i64)> {
+    use windows::Win32::Foundation::{LPARAM, TRUE};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GW_OWNER, GetWindow, IsIconic, IsWindowVisible,
+    };
+    use windows::core::BOOL;
+
+    struct Search {
+        pid: u32,
+        best: Option<(isize, i64)>,
+    }
+    unsafe extern "system" fn visit(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        // SAFETY: `lparam` is the `Search` passed below, alive for the whole EnumWindows call.
+        let search = unsafe { &mut *(lparam.0 as *mut Search) };
+        let mut pid = 0u32;
+        // SAFETY: plain queries on a window handle Windows gave us; a stale handle only makes them fail.
+        unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid != search.pid
+                || !IsWindowVisible(hwnd).as_bool()
+                || IsIconic(hwnd).as_bool()
+                || GetWindow(hwnd, GW_OWNER).is_ok_and(|o| !o.0.is_null())
+            {
+                return TRUE;
+            }
+            let mut r = RECT::default();
+            if GetWindowRect(hwnd, &mut r).is_ok() {
+                let area = i64::from(r.right - r.left) * i64::from(r.bottom - r.top);
+                if area > 0 && search.best.is_none_or(|(_, a)| area > a) {
+                    search.best = Some((hwnd.0 as isize, area));
+                }
+            }
+        }
+        TRUE
+    }
+    let mut search = Search { pid, best: None };
+    // SAFETY: the callback only touches `search` through the LPARAM, which outlives the call.
+    let _ = unsafe { EnumWindows(Some(visit), LPARAM(&raw mut search as isize)) };
+    search.best
+}
+
+/// Whether `hwnd` still is a visible window of `pid`, and its area.
+pub fn window_of(hwnd: isize, pid: u32) -> Option<i64> {
+    use windows::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindow, IsWindowVisible};
+    let h = HWND(hwnd as *mut _);
+    let mut owner = 0u32;
+    let mut r = RECT::default();
+    // SAFETY: plain queries; a stale handle only makes them fail.
+    unsafe {
+        if !IsWindow(Some(h)).as_bool() || !IsWindowVisible(h).as_bool() {
+            return None;
+        }
+        GetWindowThreadProcessId(h, Some(&mut owner));
+        if owner != pid {
+            return None;
+        }
+        if IsIconic(h).as_bool() {
+            // Minimised: still the game's window; keep it (capture repeats the last picture).
+            return Some(i64::MAX);
+        }
+        GetWindowRect(h, &mut r).ok()?;
+    }
+    Some(i64::from(r.right - r.left) * i64::from(r.bottom - r.top))
+}

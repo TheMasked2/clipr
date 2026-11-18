@@ -68,9 +68,7 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
     clipr_gpu::raise_thread_priority();
     let monitor = HMONITOR(settings.monitor as *mut _);
     let gpu = Gpu::for_monitor(monitor)?;
-    if settings.gpu_priority {
-        clipr_gpu::raise_gpu_priority(&gpu);
-    }
+    clipr_gpu::set_gpu_priority(settings.gpu_priority);
     let monitor_size = clipr_capture::list_monitors()?
         .into_iter()
         .find(|m| m.handle == monitor)
@@ -98,7 +96,7 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
         )
     };
     // A game window that Windows won't capture (some protect themselves) falls back to its monitor.
-    let (session, source_size) = match settings.window {
+    let (mut session, source_size) = match settings.window {
         Some(hwnd) => match start(Target::Window(HWND(hwnd as *mut _))) {
             Ok(session) => {
                 let size = session.content_size();
@@ -149,6 +147,8 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
     let mut live = Preview::default();
     let mut tick: i64 = 0;
     let t0 = now_100ns();
+    // A window that sends no picture at all (some exclusive-fullscreen games) falls back to the monitor.
+    let mut window_deadline = settings.window.map(|_| Instant::now() + WINDOW_FIRST_FRAME);
     let mut on_packet = |encoder: &HwEncoder, sample: clipr_encode::mf::Packet| -> Result<()> {
         let packet = clipr_mux::packet_from_sample(&sample)?;
         let mut s = shared.lock().unwrap();
@@ -194,6 +194,12 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
             shared.lock().unwrap().stats.repeated += 1;
         } else {
             // Nothing captured yet (WGC sends the first frame when the screen next changes).
+            if window_deadline.is_some_and(|d| Instant::now() >= d) {
+                tracing::warn!("the game window sent no picture; capturing its monitor instead");
+                window_deadline = None;
+                session.stop();
+                session = start(Target::Monitor(monitor))?;
+            }
             tick += 1;
             continue;
         }
@@ -216,6 +222,9 @@ struct Preview {
     snapshotter: Option<Snapshotter>,
     next: Option<Instant>,
 }
+
+/// How long a game window may take to send its first picture before capture falls back to the monitor.
+const WINDOW_FIRST_FRAME: Duration = Duration::from_secs(3);
 
 /// How long the preview waits after a GPU failure before it tries again.
 const RETRY: Duration = Duration::from_secs(10);

@@ -185,19 +185,21 @@ fn desc(adapter: &IDXGIAdapter1) -> Result<DXGI_ADAPTER_DESC1> {
 /// Gives clipr's GPU work a little priority over the game's, so a game running at uncapped FPS can't starve
 /// the capture (stutter and dropped frames in clips). Opt-in: beta.3 used the HIGH class and the top GPU
 /// thread priority, and clips skipped more frames with it on an RTX 4070 Ti, so this stays at ABOVE_NORMAL. Best effort.
-pub fn raise_gpu_priority(_gpu: &Gpu) {
+/// The setting is process-wide, so turning it off sets it back to normal.
+pub fn set_gpu_priority(raised: bool) {
+    const NORMAL: i32 = 2;
     const ABOVE_NORMAL: i32 = 3;
     // SAFETY: the current-process pseudo handle; a valid D3DKMT_SCHEDULINGPRIORITYCLASS.
     let status = unsafe {
         D3DKMTSetProcessSchedulingPriorityClass(
             windows::Win32::System::Threading::GetCurrentProcess(),
-            ABOVE_NORMAL,
+            if raised { ABOVE_NORMAL } else { NORMAL },
         )
     };
-    if status >= 0 {
-        tracing::info!("GPU scheduling priority: above normal");
-    } else {
-        tracing::info!("GPU scheduling priority left at normal (Windows refused)");
+    match (raised, status >= 0) {
+        (true, true) => tracing::info!("GPU scheduling priority: above normal"),
+        (true, false) => tracing::info!("GPU scheduling priority left at normal (Windows refused)"),
+        _ => {}
     }
 }
 

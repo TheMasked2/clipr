@@ -43,8 +43,29 @@ pub fn make_regular(path: &Path) -> Result<bool> {
         .write(true)
         .open(path)
         .with_context(|| format!("can't open {}", path.display()))?;
-    let len = file.metadata()?.len();
-    let boxes = top_boxes(&mut file, len)?;
+    let mut len = file.metadata()?.len();
+    let (mut boxes, mut complete) = top_boxes(&mut file, len)?;
+    // A fragment whose data is missing goes with it.
+    if complete < len && boxes.last().is_some_and(|b| &b.typ == b"moof") {
+        complete = boxes.pop().expect("checked").start;
+    }
+    // A box cut off at the end: the last fragment of a recording clipr didn't finish, or an index append
+    // that a crash interrupted. It can't be played or used, so it goes (only after the first fragment, so a
+    // file that's broken some other way is left alone).
+    if complete < len {
+        ensure!(
+            boxes.iter().any(|b| &b.typ == b"moof"),
+            "the file is cut off before its first fragment"
+        );
+        file.set_len(complete)?;
+        file.sync_data()?;
+        tracing::info!(
+            "dropped {} bytes cut off at the end of {}",
+            len - complete,
+            path.display()
+        );
+        len = complete;
+    }
 
     let mut fragmented_moov = None;
     let mut regular_moov = None;
@@ -92,6 +113,7 @@ pub fn make_regular(path: &Path) -> Result<bool> {
     if let Some((old, _)) = fragmented_moov {
         file.seek(SeekFrom::Start(old.start + 4))?;
         file.write_all(b"free")?;
+        file.sync_data()?;
         changed = true;
     }
     if let Some(moof) = first_moof.filter(|m| m.start < index_start) {
@@ -162,15 +184,20 @@ fn read_header(file: &mut File, pos: u64, len: u64) -> Result<TopBox> {
     })
 }
 
-fn top_boxes(file: &mut File, len: u64) -> Result<Vec<TopBox>> {
+/// The top-level boxes, and where the last complete one ends (short of `len` when the file is cut off).
+fn top_boxes(file: &mut File, len: u64) -> Result<(Vec<TopBox>, u64)> {
     let mut out = Vec::new();
     let mut pos = 0;
     while pos + 8 <= len {
-        let b = read_header(file, pos, len)?;
-        out.push(b);
-        pos = b.end();
+        match read_header(file, pos, len) {
+            Ok(b) => {
+                out.push(b);
+                pos = b.end();
+            }
+            Err(_) => break,
+        }
     }
-    Ok(out)
+    Ok((out, pos))
 }
 
 fn read_body(file: &mut File, b: &TopBox) -> Result<Vec<u8>> {

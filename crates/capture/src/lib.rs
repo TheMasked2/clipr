@@ -109,7 +109,7 @@ pub fn monitor_of_window(hwnd: HWND) -> HMONITOR {
 
 /// Whether Windows Graphics Capture works on this machine.
 pub fn is_supported() -> bool {
-    GraphicsCaptureSession::IsSupported().unwrap_or(false)
+    check_supported().is_ok()
 }
 
 /// Like [`is_supported`], but only a clear "no" from Windows stops capture. When the question itself

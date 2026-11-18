@@ -313,10 +313,40 @@ fn regular_files_are_left_alone() {
 }
 
 #[test]
-fn a_cut_off_file_is_refused_without_changes() {
-    let mut file = fragmented_file();
-    file.truncate(file.len() - 3);
-    let (_dir, path) = write_temp(&file);
+fn a_cut_off_recording_keeps_its_complete_fragments() {
+    let full = fragmented_file();
+    let boxes = top(&full);
+    let second_moof = boxes.iter().filter(|b| &b.0 == b"moof").nth(1).unwrap().1;
+    // Cut inside the last mdat, inside the last moof, and inside an appended index.
+    let mut appended = full.clone();
+    {
+        let (_d, p) = write_temp(&full);
+        make_regular(&p).unwrap();
+        let done = std::fs::read(&p).unwrap();
+        appended.extend_from_slice(&done[full.len()..done.len() - 5]);
+    }
+    for (cut, frags) in [
+        (full[..full.len() - 3].to_vec(), 1),
+        (full[..second_moof + 20].to_vec(), 1),
+        (appended, 2),
+    ] {
+        let (_dir, path) = write_temp(&cut);
+        assert!(make_regular(&path).unwrap());
+        let out = std::fs::read(&path).unwrap();
+        let kinds: Vec<[u8; 4]> = top(&out).iter().map(|b| b.0).collect();
+        assert_eq!(kinds, [*b"ftyp", *b"free", *b"mdat", *b"moov"]);
+        let moov_at = top(&out)[3].1;
+        let sizes = table(&stbl_of(&out[moov_at + 8..], 0), b"stsz");
+        assert_eq!(sizes[1], if frags == 1 { 3 } else { 5 });
+    }
+}
+
+#[test]
+fn a_file_cut_before_its_first_fragment_is_left_alone() {
+    let full = fragmented_file();
+    let first_moof = top(&full).iter().find(|b| &b.0 == b"moof").unwrap().1;
+    let cut = full[..first_moof + 10].to_vec();
+    let (_dir, path) = write_temp(&cut);
     assert!(make_regular(&path).is_err());
-    assert_eq!(std::fs::read(&path).unwrap(), file);
+    assert_eq!(std::fs::read(&path).unwrap(), cut);
 }

@@ -115,7 +115,7 @@
 <p class="keys"><button class="link small" onclick={() => (keysShown = !keysShown)}>{keysShown ? 'Hide address and keys' : 'Show address and keys'}</button></p>
 <div class="grid">
   <label>Endpoint
-    <input type={shownType} bind:value={cloud.endpoint} oninput={endpointChanged} placeholder={PLACEHOLDER[cloud.provider].endpoint} spellcheck="false" disabled={remote} />
+    <input type={shownType} bind:value={cloud.endpoint} autocomplete="off" oninput={endpointChanged} placeholder={PLACEHOLDER[cloud.provider].endpoint} spellcheck="false" disabled={remote} />
   </label>
   {#if cloud.provider !== 'r2'}
     <label>Region

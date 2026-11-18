@@ -194,11 +194,13 @@ fn make_regular(path: &Path) {
     }
 }
 
-/// Recordings made before beta.4 are fragmented: index them once, in the background.
+/// Recordings made before beta.4 are fragmented: index them once, in the background. It waits a minute,
+/// so the library's startup scan and thumbnails are done before files change under them.
 fn index_old_recordings(clips_dir: PathBuf) {
     let spawned = std::thread::Builder::new()
         .name("clipr-index".into())
         .spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(60));
             for path in recordings(&clips_dir) {
                 if clipr_mux::is_fragmented(&path).unwrap_or(false) {
                     make_regular(&path);
