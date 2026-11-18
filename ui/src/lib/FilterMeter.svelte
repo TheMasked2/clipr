@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { app } from './store.svelte';
+  import { app, watchLevelsWhileShown } from './store.svelte';
   import { FLOOR, fmtDb, pct } from './meter';
 
   // A source's live level before and after its filters, so the effect of each filter can be seen while
   // tuning it. The server measures the saved settings: unsaved changes show once they are saved.
   let { source, label, dirty }: { source: string; label: string; dirty: boolean } = $props();
+
+  $effect(() => watchLevelsWhileShown());
 
   const level = $derived(app.levels.find((l) => l.source === source));
   const rows = $derived(

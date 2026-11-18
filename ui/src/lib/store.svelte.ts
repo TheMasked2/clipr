@@ -5,6 +5,8 @@ import {
   getPosts,
   getUploads,
   putConfig,
+  setVolume,
+  watchLevels,
   onUnauthorized,
   type CloudStatus,
   type Config,
@@ -152,6 +154,29 @@ export async function saveConfig(c: Config): Promise<Config> {
   const saved = await putConfig(c);
   applyConfig(saved);
   return saved;
+}
+
+/** Sets one audio source's volume, saved and applied at once (the mixer's faders). */
+export async function setSourceVolume(source: string, volume: number): Promise<Config> {
+  const saved = await setVolume(source, volume);
+  applyConfig(saved);
+  return saved;
+}
+
+// Level meters: while any component showing them is mounted, ask the server to keep levels coming (it then
+// runs audio for the meters even while nothing is captured). Counted, so two meters on a page ask once.
+let levelWatchers = 0;
+let levelTimer: ReturnType<typeof setInterval> | undefined;
+/** Call from an `$effect` in a component that shows levels; returns the cleanup. */
+export function watchLevelsWhileShown(): () => void {
+  if (levelWatchers++ === 0) {
+    const ask = () => void watchLevels().catch(() => {});
+    ask();
+    levelTimer = setInterval(ask, 2000);
+  }
+  return () => {
+    if (--levelWatchers === 0) clearInterval(levelTimer);
+  };
 }
 
 // Confirm dialog (rendered by ConfirmDialog.svelte).

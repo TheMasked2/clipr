@@ -163,6 +163,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/mark", post(api::mark))
         .route("/api/mic", post(api::set_mic))
         .route("/api/sound/test", post(api::test_sound))
+        .route("/api/levels/watch", post(api::watch_levels))
+        .route("/api/audio/volume", post(api::set_volume))
         .route("/api/preview", get(api::preview))
         .route("/api/config", get(api::get_config).put(api::put_config))
         .route("/api/system", get(api::system))

@@ -91,12 +91,30 @@ pub struct AudioCapture {
     /// Each track's encoder output type, serialised (`IMFMediaType` itself isn't `Send`).
     media_types: Vec<Vec<u8>>,
     levels: Arc<Levels>,
+    /// Each source's key, by lane.
+    keys: Vec<String>,
+    /// Each lane's volume as f32 bits; the capture thread picks changes up on its next poll.
+    gains: Arc<Vec<AtomicU32>>,
 }
 
 impl AudioCapture {
     /// Starts capture and encoding on its own thread. Errors if no source is enabled or the encoder
     /// can't start. `on_packet` is called on the capture thread.
     pub fn start(config: &AudioConfig, on_packet: impl FnMut(AudioPacket) + Send + 'static) -> Result<Self> {
+        Self::start_inner(config, true, on_packet)
+    }
+
+    /// Starts capture for the level meters only: the same sources, filters and volumes, but nothing is
+    /// encoded. [`AudioCapture::tracks`] and [`AudioCapture::media_type`] have nothing then.
+    pub fn start_meter(config: &AudioConfig) -> Result<Self> {
+        Self::start_inner(config, false, |_| {})
+    }
+
+    fn start_inner(
+        config: &AudioConfig,
+        encode: bool,
+        on_packet: impl FnMut(AudioPacket) + Send + 'static,
+    ) -> Result<Self> {
         let plan = plan::plan(
             config.system,
             config.mic,
@@ -114,15 +132,28 @@ impl AudioCapture {
         let levels = Arc::new(Levels::new(
             plan.sources.iter().map(|s| (s.key(), s.label())).collect(),
         ));
+        let keys: Vec<String> = plan.sources.iter().map(SourceKind::key).collect();
+        let gains = Arc::new(
+            keys.iter()
+                .map(|k| AtomicU32::new(gain(config.volume(k)).to_bits()))
+                .collect::<Vec<_>>(),
+        );
 
         let config = config.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = mpsc::channel();
         let thread = {
-            let (stop, levels) = (stop.clone(), levels.clone());
+            let (stop, levels, gains) = (stop.clone(), levels.clone(), gains.clone());
             std::thread::Builder::new()
                 .name("clipr-audio".into())
-                .spawn(move || run(&config, plan, &stop, levels, ready_tx, on_packet))
+                .spawn(move || {
+                    let shared = Shared {
+                        stop: &stop,
+                        levels,
+                        gains: &gains,
+                    };
+                    run(&config, plan, encode, shared, ready_tx, on_packet)
+                })
                 .context("can't start the audio thread")?
         };
         let media_types = match ready_rx.recv() {
@@ -142,7 +173,19 @@ impl AudioCapture {
             tracks,
             media_types,
             levels,
+            keys,
+            gains,
         })
+    }
+
+    /// Applies new volumes without restarting: they take effect within ~10 ms, ramped so they don't click.
+    /// Everything else in `config` is ignored (other changes need a new capture).
+    pub fn set_volumes(&self, config: &AudioConfig) {
+        for (lane, key) in self.keys.iter().enumerate() {
+            let g = gain(config.volume(key));
+            self.gains[lane].store(g.to_bits(), Ordering::Relaxed);
+            self.levels.set_gain(lane, g);
+        }
     }
 
     /// The track names; the index is [`AudioPacket::track`]. Track 0 is always "Mix".
@@ -234,11 +277,12 @@ fn build_sources(config: &AudioConfig, plan: &Plan, levels: &Arc<Levels>) -> (Ve
     let mut earliest_shift = 0i64;
     for (lane, kind) in plan.sources.iter().enumerate() {
         let key = kind.key();
-        let (offset_ms, volume) = match kind {
-            SourceKind::System => (config.system_offset_ms, config.system_volume),
-            SourceKind::Mic => (config.mic_offset_ms, config.mic_volume),
-            SourceKind::Game | SourceKind::App(_) => (0, 100),
+        let offset_ms = match kind {
+            SourceKind::System => config.system_offset_ms,
+            SourceKind::Mic => config.mic_offset_ms,
+            SourceKind::Game | SourceKind::App(_) => 0,
         };
+        let volume = config.volume(&key);
         let filters = config
             .filters
             .iter()
@@ -278,16 +322,28 @@ fn build_sources(config: &AudioConfig, plan: &Plan, levels: &Arc<Levels>) -> (Ve
     (sources, gains, -earliest_shift)
 }
 
+/// What the capture thread shares with its [`AudioCapture`].
+struct Shared<'a> {
+    stop: &'a AtomicBool,
+    levels: Arc<Levels>,
+    gains: &'a [AtomicU32],
+}
+
 /// The capture thread: reports each track's encoder media type (or why it can't start) on `ready`, then
-/// loops until `stop`.
+/// loops until `stop`. Without `encode` it only feeds the level meters.
 fn run(
     config: &AudioConfig,
     plan: Plan,
-    stop: &AtomicBool,
-    levels: Arc<Levels>,
+    encode: bool,
+    shared: Shared,
     ready: mpsc::Sender<Result<Vec<Vec<u8>>>>,
     mut on_packet: impl FnMut(AudioPacket),
 ) {
+    let Shared {
+        stop,
+        levels,
+        gains: shared_gains,
+    } = shared;
     // The timeline starts now, before the (slow) encoder and device setup: sources place data by QPC
     // time, so the setup time simply becomes leading silence.
     let start = now_100ns();
@@ -299,7 +355,7 @@ fn run(
         let mf = MfRuntime::start()?;
         let mut encoders = Vec::new();
         let mut blobs = Vec::new();
-        for track in 0..plan.tracks.len() {
+        for track in (0..plan.tracks.len()).filter(|_| encode) {
             let encoder = AacEncoder::new(track, config.bitrate_kbps, start)?;
             blobs.push(encoder.media_type_blob()?);
             encoders.push(encoder);
@@ -328,6 +384,7 @@ fn run(
         plan.tracks.iter().map(|t| t.sources.clone()).collect(),
     );
     let mut pcm: Vec<Vec<i16>> = vec![Vec::new(); plan.tracks.len()];
+    let mut lane_gains = gains.clone();
 
     let mut encode = |timeline: &mut Timeline, until: i64, encoders: &mut [AacEncoder]| {
         pcm.iter_mut().for_each(Vec::clear);
@@ -343,6 +400,13 @@ fn run(
     };
 
     while !stop.load(Ordering::Acquire) {
+        for (lane, (now, shared)) in lane_gains.iter_mut().zip(shared_gains).enumerate() {
+            let wanted = f32::from_bits(shared.load(Ordering::Relaxed));
+            if wanted != *now {
+                *now = wanted;
+                timeline.set_gain(lane, wanted);
+            }
+        }
         for source in &mut sources {
             source.poll(&devices, &mut timeline);
         }

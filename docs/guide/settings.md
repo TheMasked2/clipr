@@ -94,21 +94,24 @@ Clips hold up to 6 tracks; a source that doesn't fit is still in the mix. The cl
 track, and video editors show them all, so you can mute voice chat or your mic afterwards. The free editor
 [Kdenlive](https://kdenlive.org) puts each track on its own audio lane when you drop a clip in.
 
-**Live levels** shows what each source records right now, after its filters, push-to-talk and volume, from -60
-to 0 dB (hover the number to see the level before the filters). **CLIP** means the source is already distorting
-before clipr gets it: lower its level in Windows (for a mic: Windows Sound settings → input volume or boost).
-The meters show while the buffer runs and follow the saved settings.
+**Mixer** shows what each source records right now, after its filters, push-to-talk and volume, from -60 to 0 dB
+(hover a meter to see the level before the filters), with a volume fader for each, like OBS. Faders apply and
+save right away, even while recording (double-click one for 100 %); other changes show once saved. The mixer
+works even when nothing is recording, so you can set levels first: while it's on screen, clipr listens to your
+sources for the meters only (it records nothing, but Windows shows the mic as in use if the mic is on).
+**CLIP** means the source is already distorting before clipr gets it: lower its level in Windows (for a mic:
+Windows Sound settings → input volume or boost).
 
 ### System audio
 
 - **Record system audio** (on): record what you hear (game, voice chat, music) from your default output device.
-- **Volume** (100 %): 0 to 200 %, applied after the filters. 100 % leaves it unchanged.
+- **Volume** (100 %): 0 to 200 %, applied after the filters. 100 % leaves it unchanged. Applies right away.
 - **Filters**: see [Filters](#filters).
 
 ### Microphone
 
 - **Record the microphone** (off): record your default microphone.
-- **Volume** (100 %): 0 to 200 %, applied after the mic's filters.
+- **Volume** (100 %): 0 to 200 %, applied after the mic's filters. Applies right away.
 - **Push-to-talk key** (empty): record the mic only while this key is held, for example the push-to-talk key of
   your voice chat, like `V` or `Mouse4`. Empty means the mic is always recorded.
 - **Push-to-talk release (ms)** (200): keep the mic open this long after you let go, so the end of a word isn't

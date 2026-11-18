@@ -76,12 +76,11 @@
   const info = (k: Kind) => KINDS.find((x) => x.kind === k)!;
 
   const list = $derived(audio.filters[source] ?? []);
-  // The meter measures the saved filters (the volume too, since it applies after them).
+  // The meter measures the saved filters (volumes are saved as soon as they change).
   const dirty = $derived.by(() => {
     const saved = app.config?.audio;
     if (!saved) return false;
-    const vol = (a: Config['audio']) => (source === 'system' ? a.system_volume : source === 'mic' ? a.mic_volume : 100);
-    return JSON.stringify(saved.filters[source] ?? []) !== JSON.stringify(list) || vol(saved) !== vol(audio);
+    return JSON.stringify(saved.filters[source] ?? []) !== JSON.stringify(list);
   });
   let adding = $state<Kind | ''>('');
 

@@ -1395,3 +1395,28 @@ async fn cloud_settings_are_checked_and_the_bucket_stays_on_the_pc() {
         .await;
     assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
 }
+
+#[tokio::test]
+async fn volume_endpoint_saves_one_source() {
+    let env = env();
+    let app = router(env.state.clone());
+    let post = |body: &'static str| call("POST", "/api/audio/volume").body(body);
+
+    let (code, _, body) = post(r#"{"source":"Game","volume":150}"#).send(&app).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(json(&body)["audio"]["volumes"]["game"], 150);
+    let (code, _, body) = post(r#"{"source":"mic","volume":40}"#).send(&app).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(json(&body)["audio"]["mic_volume"], 40);
+    assert_eq!(env.control.config.lock().unwrap().audio.volume("game"), 150);
+    // Back to 100 % drops the entry.
+    let (_, _, body) = post(r#"{"source":"game","volume":100}"#).send(&app).await;
+    assert!(json(&body)["audio"]["volumes"].as_object().unwrap().is_empty());
+
+    let (code, _, _) = post(r#"{"source":"game","volume":201}"#).send(&app).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    let (code, _, _) = post(r#"{"source":"C:\x","volume":50}"#).send(&app).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    let (code, _, _) = call("POST", "/api/levels/watch").send(&app).await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+}

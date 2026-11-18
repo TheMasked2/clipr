@@ -117,7 +117,14 @@ struct Wanted {
 pub struct Engine {
     tx: mpsc::Sender<Command>,
     levels: Levels,
+    levels_watched: LevelsWatched,
 }
+
+/// Until when a page shows the level meters (see [`Engine::watch_levels`]).
+type LevelsWatched = Arc<Mutex<Option<Instant>>>;
+
+/// How long one [`Engine::watch_levels`] keeps the meters running.
+const LEVELS_WATCH: Duration = Duration::from_secs(5);
 
 /// Audio levels in dBFS per source, refreshed by the supervisor ~10 times a second.
 type Levels = Arc<Mutex<Vec<Level>>>;
@@ -130,6 +137,12 @@ impl Engine {
     /// The latest audio levels; empty when no audio is running.
     pub fn levels(&self) -> Vec<Level> {
         self.levels.lock().unwrap().clone()
+    }
+
+    /// A page shows the level meters: keep levels coming for the next few seconds even while nothing is
+    /// captured (audio then runs for the meters only, recording nothing). Pages call it every couple of seconds.
+    pub fn watch_levels(&self) {
+        *self.levels_watched.lock().unwrap() = Some(Instant::now() + LEVELS_WATCH);
     }
 }
 
@@ -144,6 +157,8 @@ pub fn start(
     watcher.set_config(&config.games);
     let levels = Levels::default();
     let shared_levels = levels.clone();
+    let levels_watched = LevelsWatched::default();
+    let shared_watched = levels_watched.clone();
     let thread = std::thread::Builder::new()
         .name("clipr-engine".into())
         .spawn(move || {
@@ -167,13 +182,23 @@ pub fn start(
                 capture_window: None,
                 toast: crate::overlay::start(),
                 levels: shared_levels,
+                levels_watched: shared_watched,
+                meter: None,
+                meter_retry: None,
                 presence: clipr_discord::Presence::start(),
                 presence_shown: None,
             };
             sup.run(rx);
         })
         .expect("can't start a thread");
-    (Engine { tx, levels }, thread)
+    (
+        Engine {
+            tx,
+            levels,
+            levels_watched,
+        },
+        thread,
+    )
 }
 
 struct Pipeline {
@@ -219,6 +244,12 @@ struct Supervisor {
     capture_window: Option<(u32, isize)>,
     toast: crate::overlay::Toast,
     levels: Levels,
+    levels_watched: LevelsWatched,
+    /// Audio for the level meters alone, while a page shows them and nothing else captures, with the
+    /// settings it runs with.
+    meter: Option<(AudioCapture, AudioConfig)>,
+    /// When to try the meter again after it failed to start.
+    meter_retry: Option<Instant>,
     /// Rich Presence in the user's Discord profile, and what it was last told.
     presence: clipr_discord::Presence,
     presence_shown: Option<Option<clipr_discord::PresenceStatus>>,
@@ -247,6 +278,7 @@ impl Supervisor {
                 }
                 Err(RecvTimeoutError::Timeout) => {}
             }
+            self.drive_meter();
             self.refresh_levels();
             if Instant::now() >= tick_at {
                 tick_at = Instant::now() + TICK;
@@ -258,6 +290,7 @@ impl Supervisor {
             }
         }
         self.stop_pipeline();
+        self.meter = None;
         for save in self.saves.drain(..) {
             let _ = save.join();
         }
@@ -273,9 +306,50 @@ impl Supervisor {
             .pipeline
             .as_ref()
             .and_then(|p| p.audio.as_ref())
+            .or(self.meter.as_ref().map(|(m, _)| m))
             .map(|a| a.levels())
             .unwrap_or_default();
         *self.levels.lock().unwrap() = levels;
+    }
+
+    /// Runs audio for the meters alone while a page shows them and no pipeline runs (OBS shows levels before
+    /// you record, too). It records nothing; it does open the microphone, if that is on.
+    fn drive_meter(&mut self) {
+        let now = Instant::now();
+        let watched = self.levels_watched.lock().unwrap().is_some_and(|t| now < t);
+        let config = &self.config.audio;
+        let any_source = config.system || config.mic || config.game || !config.apps.is_empty();
+        if !watched || self.pipeline.is_some() || !any_source {
+            if self.meter.take().is_some() {
+                tracing::debug!("level meters stopped");
+            }
+            self.meter_retry = None;
+            return;
+        }
+        if let Some((meter, running)) = &mut self.meter {
+            if running.without_volumes() == config.without_volumes() {
+                if running != config {
+                    meter.set_volumes(config);
+                    *running = config.clone();
+                }
+                return;
+            }
+            self.meter = None; // other sources or filters: start again with them
+        }
+        if self.meter_retry.is_some_and(|t| now < t) {
+            return;
+        }
+        match AudioCapture::start_meter(config) {
+            Ok(meter) => {
+                tracing::debug!("level meters started");
+                self.meter = Some((meter, config.clone()));
+                self.meter_retry = None;
+            }
+            Err(e) => {
+                tracing::warn!("can't start audio for the level meters: {e:#}");
+                self.meter_retry = Some(now + RETRY_AFTER);
+            }
+        }
     }
 
     fn handle(&mut self, command: Command) {
@@ -361,6 +435,17 @@ impl Supervisor {
         }
 
         let wanted = self.wanted();
+        // Only volumes changed: the running audio takes them as they are (like OBS faders).
+        if let (Some(w), Some(p)) = (&wanted, self.pipeline.as_mut())
+            && w.video == p.settings.video
+            && w.audio != p.settings.audio
+            && w.audio.without_volumes() == p.settings.audio.without_volumes()
+        {
+            if let Some(audio) = &p.audio {
+                audio.set_volumes(&w.audio);
+            }
+            p.settings.audio = w.audio.clone();
+        }
         let current = self.pipeline.as_ref().map(|p| &p.settings);
         if let (Some(w), Some(c)) = (&wanted, current)
             && w.video == c.video
@@ -450,6 +535,8 @@ impl Supervisor {
     }
 
     fn start_pipeline(&mut self, settings: Wanted) {
+        // The pipeline's own audio feeds the meters now; two captures would open the devices twice.
+        self.meter = None;
         let keep = self.config.replay.buffer_secs.max(self.config.replay.clip_secs);
         {
             let mut s = self.shared.lock().unwrap();

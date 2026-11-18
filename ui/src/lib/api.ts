@@ -92,6 +92,8 @@ export interface Config {
     /** The detected game's own sound on a track of its own. */
     game: boolean;
     apps: string[];
+    /** Volume of the game and each app (exe name in lower case), 0–200 %; missing = 100. */
+    volumes: Record<string, number>;
     separate_tracks: boolean;
     /** Filters per source: `system`, `mic`, or an app's exe name, in the order they run. */
     filters: Record<string, AudioFilter[]>;
@@ -402,6 +404,17 @@ export const setRecording = (on: boolean) => request<void>('POST', '/api/recordi
 export const markMoment = () => request<void>('POST', '/api/mark');
 export const setMicMuted = (muted: boolean) => request<void>('POST', '/api/mic', { muted });
 export const testSound = (volume: number) => request<void>('POST', '/api/sound/test', { volume });
+/** A page shows level meters: keeps levels coming for 5 s, even while nothing is captured. */
+export const watchLevels = () => request<void>('POST', '/api/levels/watch');
+/** Sets one source's volume (0–200 %), saved and applied at once. */
+export const setVolume = (source: string, volume: number) =>
+  request<Config>('POST', '/api/audio/volume', { source, volume });
+/** A source's volume in %, by its key. */
+export function volumeOf(audio: Config['audio'], source: string): number {
+  if (source === 'system') return audio.system_volume;
+  if (source === 'mic') return audio.mic_volume;
+  return audio.volumes?.[source] ?? 100;
+}
 export const getPosts = () => request<Job[]>('GET', '/api/discord/posts');
 export const discordConnect = (channel: boolean) =>
   request<{ url: string; state: string }>('POST', '/api/discord/connect', { channel });
