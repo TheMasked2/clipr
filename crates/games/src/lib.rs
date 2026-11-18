@@ -27,6 +27,8 @@ pub struct Game {
     pub pid: u32,
     /// The game's icon on Discord's CDN, when Discord knows the game.
     pub icon: Option<String>,
+    /// From the user's custom list, not Discord's: `name` is then the window title, which can be private.
+    pub custom: bool,
     pub hwnd: isize,
     /// HMONITOR of the game's window.
     pub monitor: isize,
@@ -147,6 +149,7 @@ impl GameWatcher {
         let mut st = lock(&self.state);
         if let Some(fg) = foreground {
             let verdict = classify(&fg.exe, &st.known, &st.lists);
+            let custom = verdict == Verdict::Custom;
             let name = match verdict {
                 Verdict::Known(name) => Some(name),
                 Verdict::Custom => Some(if fg.title.trim().is_empty() {
@@ -160,6 +163,7 @@ impl GameWatcher {
                 let game = Game {
                     name,
                     icon: st.icons.get(&fg.exe).cloned(),
+                    custom,
                     auto_record: st.lists.auto_record.contains(&fg.exe),
                     monitor: monitor_of(fg.hwnd),
                     exe: fg.exe,

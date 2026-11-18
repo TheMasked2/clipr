@@ -49,8 +49,13 @@ away, game or not. This works with any channel mode, Off included.
 The Home page lists recent posts with their state: waiting for you, waiting for the game to close, posting,
 posted, skipped or failed. A failed post has a **Retry** button.
 
+## Your Discord status
+
+While clipr clips or records, your Discord profile shows the game with its icon: *Playing clipr · VALORANT ·
+Clipping with clipr*. It's on by default; turn it off with **Show in my Discord status** in Settings → Discord.
+It talks to the Discord app on this PC, so there's nothing to sign in to.
+
 ## Coming later
 
-A Discord bot inside clipr, on your own bot token: commands like `/last` and `/clips` to fetch clips from your
-phone, posts to your DMs, and Rich Presence ("Recording with clipr"). This guide gets a bot setup tutorial when
-it ships.
+**Connect Discord:** sign in through Discord to pick a channel in Discord's own picker instead of pasting a
+webhook URL. clipr has no bot: webhooks post, and clipr itself asks before posting.

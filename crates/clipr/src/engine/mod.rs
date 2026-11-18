@@ -570,8 +570,15 @@ impl Supervisor {
             mic_muted: clipr_audio::mic_muted(),
         });
         // Discord shows the game while clipr buffers or records it (and nothing while clipr is idle).
+        // A custom game's name is its window title (a document, a tab), so Discord gets its program name.
         let presence = (self.config.discord.presence && running).then(|| clipr_discord::PresenceStatus {
-            game: self.game.as_ref().map(|g| g.name.clone()),
+            game: self.game.as_ref().map(|g| {
+                if g.custom {
+                    g.exe.strip_suffix(".exe").unwrap_or(&g.exe).to_string()
+                } else {
+                    g.name.clone()
+                }
+            }),
             icon: self.game.as_ref().and_then(|g| g.icon.clone()),
             recording_since,
         });

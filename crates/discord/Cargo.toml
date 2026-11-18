@@ -1,6 +1,6 @@
 [package]
 name = "clipr-discord"
-description = "clipr: Discord integration: webhooks, the bot on the user's own token, slash commands, the post queue and Rich Presence."
+description = "clipr: Discord integration: webhooks, the post queue and Rich Presence."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -20,6 +20,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 ureq = { workspace = true }
+windows-sys = { workspace = true, features = ["Win32_System_Pipes"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
