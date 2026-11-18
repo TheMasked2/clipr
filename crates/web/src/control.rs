@@ -6,6 +6,15 @@ use std::path::Path;
 use anyhow::Result;
 use clipr_core::config::Config;
 
+/// A program that ran fullscreen but isn't a game to clipr.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct UnlistedGame {
+    /// Lower-case exe file name: what goes in `games.custom`.
+    pub exe: String,
+    /// Its window title.
+    pub title: String,
+}
+
 pub trait Control: Send + Sync + 'static {
     /// Saves the last `seconds` of the replay buffer (`None` = `replay.clip_secs`). Returns at once; the
     /// result arrives on the event bus as `Event::ClipSaved` or `Event::ClipFailed`.
@@ -54,6 +63,12 @@ pub trait Control: Send + Sync + 'static {
 
     /// Hardware facts for the settings page: GPUs, encoders, monitors. Free-form JSON.
     fn system_info(&self) -> serde_json::Value;
+
+    /// Fullscreen programs clipr saw lately but didn't record as games, newest first (Settings → Games offers
+    /// to add them).
+    fn unlisted_games(&self) -> Vec<UnlistedGame> {
+        Vec::new()
+    }
 
     /// The current level of each audio source in dBFS (-100 = silence, 0 = full scale), before and after
     /// its filters. Empty when audio isn't running.

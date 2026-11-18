@@ -711,6 +711,20 @@ pub async fn games(State(s): State<AppState>) -> ApiResult<Json<Vec<clipr_librar
     Ok(Json(blocking(move || lib.games()).await?))
 }
 
+/// Fullscreen programs seen lately that aren't games to clipr (Settings → Games → "add as a game").
+/// Window titles stay on this PC: another device only gets the exe names (a title can be a video, a document
+/// or a web page that is nobody else's business).
+pub async fn unlisted_games(
+    State(s): State<AppState>,
+    ext: Extensions,
+) -> Json<Vec<crate::control::UnlistedGame>> {
+    let mut list = s.control.unlisted_games();
+    if auth::is_remote(&ext) {
+        list.iter_mut().for_each(|g| g.title.clear());
+    }
+    Json(list)
+}
+
 pub async fn shelves(State(s): State<AppState>) -> ApiResult<Json<Vec<String>>> {
     let lib = s.library.clone();
     Ok(Json(blocking(move || lib.shelves()).await?))

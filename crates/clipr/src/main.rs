@@ -128,7 +128,7 @@ fn run() -> Result<()> {
         updater,
         crash_dir: paths.crash_dir(),
         log_dir: paths.log_dir(),
-        known_games: Arc::new(move || watcher.list_len()),
+        games: watcher,
     });
     let in_game = {
         let status = status.clone();

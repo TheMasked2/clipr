@@ -34,8 +34,10 @@ To open the page again later, use **Open clipr** in the tray menu.
 ## Saving clips
 
 clipr starts buffering when it sees a game and stays idle otherwise: no capture, no GPU work. It recognises
-games from Discord's public list of games. You can add your own or block false hits under
-[Settings → Games](settings.md#games).
+games from Discord's public list of games. Brand-new and small games that aren't on that list yet still count
+when they run fullscreen from a game library folder (Steam, Epic, Xbox, GOG, EA, Ubisoft, Riot, Amazon, itch).
+You can add your own, by exe or by the game's name, or block false hits under [Settings → Games](settings.md#games),
+which also lists fullscreen programs clipr saw lately but didn't record, to add with one click.
 
 While a game runs, clipr keeps the last two minutes in memory (the **replay buffer**). Press the hotkey to save
 part of it:

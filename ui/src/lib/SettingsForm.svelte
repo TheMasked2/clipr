@@ -81,6 +81,26 @@
   let error = $state('');
   let justSaved = $state(false);
   let sys = $state<api.SystemInfo | null>(null);
+  // Fullscreen programs seen lately that aren't games yet (Games tab), to add one with a click.
+  let unlisted = $state<api.UnlistedGame[]>([]);
+  // Refreshed while the tab shows, so a game started meanwhile turns up.
+  $effect(() => {
+    if (tab !== 'Games') return;
+    const load = () => api.getUnlistedGames().then((u) => (unlisted = u)).catch(() => {});
+    load();
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  });
+  const customLower = $derived(new Set(draft.games.custom.map((c) => c.trim().toLowerCase())));
+  const notAdded = $derived(unlisted.filter((u) => !customLower.has(u.exe)));
+  let seenList = $state<HTMLElement>();
+  const addGame = (exe: string) => {
+    if (!customLower.has(exe)) draft.games.custom.push(exe);
+    // The row goes away: keep the keyboard in the list, or on the Save button once it's empty.
+    queueMicrotask(() =>
+      ((seenList?.querySelector('button') ?? document.querySelector('.savebar .primary')) as HTMLElement | null)?.focus(),
+    );
+  };
   // The monitor being captured, to say when the output height scales the picture.
   const capturedMonitor = $derived(
     (sys?.monitors ?? []).find((m) => (draft.video.monitor ? m.index === draft.video.monitor : m.primary)),
@@ -404,7 +424,18 @@
     {/if}
     <p class="muted small note">{app.status?.game ? `Detected right now: ${app.status.game}` : 'No game detected right now.'}</p>
     <p class="muted small note">{sys?.known_games != null ? `clipr knows ${sys.known_games.toLocaleString()} games.` : 'Loading the known games list…'}</p>
-    <Field title="Extra games" hint="Games to detect by exe name (mygame.exe) on top of the known list." stacked><ListEditor bind:items={draft.games.custom} /></Field>
+    <Field title="Find new games" hint="clipr knows games from Discord's list, which can miss brand-new and small games. On, a program that runs fullscreen from a game library (Steam, Epic, Xbox, GOG, EA, Ubisoft, Riot, Amazon, itch) counts as a game too, named after its folder. Launchers, installers and helpers don't, nor do blocked programs."><Toggle bind:checked={draft.games.detect_unlisted} label="Find new games" /></Field>
+    <Field title="Extra games" hint="Games clipr should always record: the exe name (mygame.exe), or the game's name (Trust Your Gut). A name counts when it's the game's folder in a game library, or starts the window title of a fullscreen program." stacked><ListEditor bind:items={draft.games.custom} placeholder="mygame.exe or Game Name" /></Field>
+    {#if notAdded.length}
+      <div class="seen">
+        <p class="muted small">Ran fullscreen lately, not recorded as a game. Add yours (then Save):</p>
+        <ul bind:this={seenList}>
+          {#each notAdded as u (u.exe)}
+            <li><span class="t">{u.title || u.exe}</span> <code>{u.exe}</code> <button class="small" onclick={() => addGame(u.exe)} aria-label={`Add ${u.title || u.exe} as a game`}>Add as a game</button></li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
     <Field title="Blocked programs" hint="Exe names never treated as games, even if the known list has them." stacked><ListEditor bind:items={draft.games.blocked} placeholder="program.exe" /></Field>
     <Field title="Auto-record" hint="Start a full recording by itself when one of these games starts (exe names)." stacked><ListEditor bind:items={draft.games.auto_record} /></Field>
   {:else if tab === 'Library'}
@@ -522,4 +553,8 @@
   .msg { flex: 1; font-size: 0.9rem; color: var(--text-muted); }
   .errt { color: var(--danger); }
   .okt { color: #4ade80; }
+  .seen { margin: -.3rem 0 .9rem; }
+  .seen ul { list-style: none; margin: .3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+  .seen li { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+  .seen .t { font-weight: 600; }
 </style>
