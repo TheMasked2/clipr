@@ -53,7 +53,7 @@
   <p class="muted small">{SERVICES.find((s) => s.v === stream.service)?.text}</p>
 </Field>
 
-{#if stream.service === 'custom'}
+{#if stream.service === 'custom' && !remote}
   <Field title="Server" hint="The address the service gives you, without the key: rtmp://… or rtmps://…" stacked>
     <input type="text" bind:value={stream.server} placeholder="rtmp://live.example.com/app" class="wide" spellcheck="false" autocomplete="off" disabled={remote} />
   </Field>
@@ -78,7 +78,7 @@
   </Field>
 {/if}
 
-<Field title="Quality" hint="Never more than your clips (Video): with clips at 720p, a 1080p stream goes out at 720p, and with clips at 30 fps, at 30." stacked>
+<Field title="Quality" hint="Takes effect the next time you go live. Never more than your clips (Video): with clips at 720p, a 1080p stream goes out at 720p, and with clips at 30 fps, at 30." stacked>
   <div class="row chips">
     {#each QUALITIES as q (`${q.height}p${q.fps}`)}
       <button class="chip" class:on={stream.height === q.height && stream.fps === q.fps} onclick={() => { stream.height = q.height; stream.fps = q.fps; }}>{q.height}p{q.fps}</button>

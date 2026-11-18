@@ -528,7 +528,7 @@ pub enum StreamService {
 }
 
 /// Live streaming (`Start streaming` on Home, or its hotkey): clipr's own H.264 + the audio mix over RTMP(S).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StreamConfig {
     pub service: StreamService,
@@ -554,6 +554,21 @@ impl Default for StreamConfig {
             fps: 60,
             bitrate_kbps: 6000,
         }
+    }
+}
+
+/// Without the key or the server (a custom address can hold the key), so logging the settings can't leak them.
+impl std::fmt::Debug for StreamConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let hidden = |s: &str| if s.is_empty() { "" } else { "<hidden>" };
+        f.debug_struct("StreamConfig")
+            .field("service", &self.service)
+            .field("server", &hidden(&self.server))
+            .field("key", &hidden(&self.key))
+            .field("height", &self.height)
+            .field("fps", &self.fps)
+            .field("bitrate_kbps", &self.bitrate_kbps)
+            .finish()
     }
 }
 

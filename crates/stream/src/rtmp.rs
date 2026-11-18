@@ -321,13 +321,30 @@ fn noise(n: usize) -> Vec<u8> {
 impl Connection {
     /// Connects, shakes hands and publishes `key`. A [`Refused`] error means the server said no.
     pub fn publish(endpoint: &Endpoint, key: &str) -> Result<Self> {
-        let addr = (endpoint.host.as_str(), endpoint.port)
+        let mut addrs: Vec<_> = (endpoint.host.as_str(), endpoint.port)
             .to_socket_addrs()
             .with_context(|| format!("can't find {}", endpoint.host))?
-            .next()
-            .with_context(|| format!("can't find {}", endpoint.host))?;
-        let socket = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
-            .with_context(|| format!("can't reach {}:{}", endpoint.host, endpoint.port))?;
+            .collect();
+        // Every address in turn, IPv4 first: a network with broken IPv6 shouldn't stop the stream.
+        addrs.sort_by_key(|a| a.is_ipv6());
+        let mut last = None;
+        let mut socket = None;
+        for addr in &addrs {
+            match TcpStream::connect_timeout(addr, CONNECT_TIMEOUT) {
+                Ok(s) => {
+                    socket = Some(s);
+                    break;
+                }
+                Err(e) => last = Some(e),
+            }
+        }
+        let socket = match (socket, last) {
+            (Some(s), _) => s,
+            (None, Some(e)) => {
+                return Err(e).with_context(|| format!("can't reach {}:{}", endpoint.host, endpoint.port));
+            }
+            (None, None) => bail!("can't find {}", endpoint.host),
+        };
         socket.set_nodelay(true)?;
         socket.set_read_timeout(Some(REPLY_TIMEOUT))?;
         socket.set_write_timeout(Some(WRITE_TIMEOUT))?;

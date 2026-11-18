@@ -263,6 +263,8 @@ size and bitrate, so it doesn't change your clips.
 - **Bitrate** (6000 kbps): constant bitrate. Twitch takes up to 6000 (6000 for 1080p60, 4500 for 720p60);
   YouTube suggests 4500–9000 for 1080p60. Keep it well under your upload speed.
 
+Changes to these settings apply the next time you go live.
+
 The top bar shows **● LIVE** with how long you've been live, and the status bar on Home what the stream sends
 and any frames dropped because the connection couldn't keep up (clipr then skips ahead to the next keyframe
 rather than fall further behind). If the connection drops, clipr reconnects by itself and the pill says
@@ -270,7 +272,7 @@ rather than fall further behind). If the connection drops, clipr reconnects by i
 before it ever went live, ends the stream with the reason in the status bar.
 
 From another device (Network) you can go live, end the stream and change the quality, but not the service,
-server or key.
+server or key, and it never sees the key or a custom server's address.
 
 ## Discord
 

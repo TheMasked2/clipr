@@ -30,9 +30,15 @@ fn reply(sock: &mut TcpStream, stream: u32, values: &[Amf]) {
     sock.write_all(&out).unwrap();
 }
 
-/// Serves one client; every message after `publish` goes to `tx`.
+/// Serves every client in turn; every message after `publish` goes to `tx`.
 fn serve(listener: TcpListener, answer: Answer, tx: mpsc::Sender<Message>) {
-    let (mut sock, _) = listener.accept().unwrap();
+    for sock in listener.incoming() {
+        let Ok(sock) = sock else { return };
+        serve_one(sock, answer, &tx);
+    }
+}
+
+fn serve_one(mut sock: TcpStream, answer: Answer, tx: &mpsc::Sender<Message>) {
     sock.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let mut c0c1 = vec![0u8; 1537];
     sock.read_exact(&mut c0c1).unwrap();
@@ -96,7 +102,8 @@ fn serve(listener: TcpListener, answer: Answer, tx: mpsc::Sender<Message>) {
                     let info = Amf::Object(vec![
                         ("level".into(), Amf::str(level)),
                         ("code".into(), Amf::str(code)),
-                        ("description".into(), Amf::str("nope")),
+                        // Like servers that echo the stream name back: it must not show.
+                        ("description".into(), Amf::str("nope: secret-key")),
                     ]);
                     reply(
                         &mut sock,
@@ -148,7 +155,10 @@ const MS: i64 = 10_000;
 #[test]
 fn a_stream_goes_out_in_order() {
     let (streamer, rx) = start(Answer::Start);
-    assert_eq!(wait_for(&streamer, |s| *s == State::Live), State::Live);
+    // Published: the metadata comes first. Not live until a picture goes out.
+    let first = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!((first.kind, first.time, first.body[0]), (rtmp::DATA, 0, 2));
+    assert_eq!(streamer.health().state, State::Connecting);
     let sink = streamer.sink();
     let t0 = 5_000_000_000i64;
     // A picture before the first keyframe and audio before it don't go out.
@@ -164,7 +174,7 @@ fn a_stream_goes_out_in_order() {
 
     let mut got = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(10);
-    while got.len() < 5 && Instant::now() < deadline {
+    while got.len() < 4 && Instant::now() < deadline {
         if let Ok(m) = rx.recv_timeout(Duration::from_millis(200)) {
             got.push(m);
         }
@@ -183,7 +193,6 @@ fn a_stream_goes_out_in_order() {
     assert_eq!(
         summary,
         [
-            (rtmp::DATA, 0, 2, 0),      // @setDataFrame onMetaData
             (rtmp::AUDIO, 0, 0xAF, 0),  // AAC sequence header
             (rtmp::VIDEO, 0, 0x17, 0),  // AVC sequence header
             (rtmp::VIDEO, 0, 0x17, 1),  // the keyframe
@@ -193,6 +202,7 @@ fn a_stream_goes_out_in_order() {
     let next = rx.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!((next.kind, next.time, next.body[0]), (rtmp::VIDEO, 16, 0x27));
     let health = streamer.health();
+    assert_eq!(health.state, State::Live);
     assert!(health.since.is_some());
     assert_eq!(health.dropped, 0);
     streamer.stop();
@@ -203,7 +213,7 @@ fn a_refused_key_is_not_retried() {
     let (streamer, _rx) = start(Answer::BadName);
     let state = wait_for(&streamer, |s| matches!(s, State::Failed(_)));
     assert!(
-        matches!(&state, State::Failed(why) if why.contains("nope")),
+        matches!(&state, State::Failed(why) if why.contains("nope") && !why.contains("secret-key")),
         "{state:?}"
     );
     streamer.stop();

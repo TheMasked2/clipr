@@ -21,8 +21,8 @@ use amf::Amf;
 use flv::AvcConfig;
 use rtmp::{Connection, Endpoint, Refused};
 
-/// What to stream and how it's encoded (for the metadata players read).
-#[derive(Clone, Debug, PartialEq)]
+/// What to stream and how it's encoded (for the metadata players read). No `Debug`: it holds the key.
+#[derive(Clone, PartialEq)]
 pub struct Settings {
     /// `rtmp://host/app` or `rtmps://host/app`.
     pub url: String,
@@ -258,8 +258,23 @@ fn set_state(inner: &Inner, state: State) {
 /// Pauses between reconnects.
 const BACKOFF: [u64; 5] = [2, 4, 8, 15, 30];
 
+/// Takes the key out of a message that goes to the status (other devices see it) or the log: some servers
+/// echo the stream name back when they refuse it.
+fn mask(message: &str, key: &str) -> String {
+    if key.trim().is_empty() {
+        message.to_string()
+    } else {
+        message.replace(key.trim(), "<stream key>")
+    }
+}
+
+/// How often a refusal is tried again before it counts as a wrong key: a hang-up can also be a hiccup, or the
+/// server still holding the last stream with this key.
+const REFUSALS: usize = 2;
+
 fn run(inner: &Inner) {
     let mut failures = 0usize;
+    let mut refusals = 0usize;
     let mut ever_live = false;
     while !inner.stop.load(Ordering::Relaxed) {
         let settings = lock(&inner.settings).clone();
@@ -278,11 +293,15 @@ fn run(inner: &Inner) {
         if let Some(refused) = error.downcast_ref::<Refused>()
             && !ever_live
         {
-            tracing::warn!("stream refused: {refused}");
-            set_state(inner, State::Failed(refused.0.clone()));
-            return;
+            refusals += 1;
+            let why = mask(&refused.0, &settings.key);
+            tracing::warn!("stream refused: {why}");
+            if refusals >= REFUSALS {
+                set_state(inner, State::Failed(why));
+                return;
+            }
         }
-        let message = format!("{error:#}");
+        let message = mask(&format!("{error:#}"), &settings.key);
         tracing::warn!("stream connection lost: {message}");
         if !ever_live && failures >= 3 {
             // Never got on air: the address or the network is wrong, not a hiccup.
@@ -303,9 +322,9 @@ fn run(inner: &Inner) {
 fn session(inner: &Inner, settings: &Settings, went_live: &mut bool) -> Result<()> {
     let endpoint = Endpoint::parse(&settings.url).map_err(|e| Refused(format!("{e:#}")))?;
     let mut conn = Connection::publish(&endpoint, &settings.key)?;
-    tracing::info!("streaming to {}", endpoint.tc_url);
+    // The address only: a custom server's path can hold a key.
+    tracing::info!("streaming to {}:{}", endpoint.host, endpoint.port);
     *went_live = true;
-    set_state(inner, State::Live);
     lock(&inner.samples).clear();
     {
         // Anything queued while connecting is old by now: start fresh at the next keyframe.
@@ -359,9 +378,14 @@ fn session(inner: &Inner, settings: &Settings, went_live: &mut bool) -> Result<(
                     if sent_config.is_none() || (base.is_none() && !keyframe) {
                         continue;
                     }
+                    let first = base.is_none();
                     let b = *base.get_or_insert(pts);
                     last_video = ms(pts - b, last_video);
                     conn.send(rtmp::VIDEO, last_video, flv::avc_frame(keyframe, &nals))?;
+                    if first {
+                        // Live once viewers get a picture, not just once the server said yes.
+                        set_state(inner, State::Live);
+                    }
                 }
                 Item::Audio { pts, data } => {
                     // Audio starts with the first picture, so both begin at 0.

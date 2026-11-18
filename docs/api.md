@@ -88,9 +88,10 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
   Files, or the whole user profile. From another machine (LAN) `clips.folder` and everything under `web` are
   read-only: changing them gives `403`
 - `stream`: `service` (`twitch|youtube|custom`), `server` (for `custom`: `rtmp://` or `rtmps://`), `key`,
-  `height` (360–2160), `fps` (30 or 60), `bitrate_kbps` (500–51000); anything else is `400`. Another device
-  gets `key` blank and may change only the quality: a blank `key` keeps the saved one, and a different
-  `service`, `server` or `key` is `403`
+  `height` (360–2160), `fps` (30 or 60), `bitrate_kbps` (500–51000); anything else is `400`. They apply
+  the next time a stream starts. Another device gets `key` and `server` blank (in every answer that carries the
+  settings, `POST /api/audio/volume` too) and may change only the quality: a blank `key` or `server` keeps the
+  saved one, and a different `service`, `server` or `key` is `403`
 - `GET /api/system` → `{ "gpus": [{"name","vendor","encoders":["H.264","HEVC","AV1"]}], "monitors":
   [{"index":1,"name","width","height","primary"}], "known_games": 2600, "elevated": false }` (free-form; show
   what's there). `elevated`: clipr runs as administrator, which can break game capture.

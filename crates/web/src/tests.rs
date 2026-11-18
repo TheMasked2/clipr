@@ -1429,6 +1429,15 @@ async fn stream_settings_are_checked_and_the_key_stays_on_the_pc() {
     let mut seen = json(&body);
     assert_eq!(seen["stream"]["key"], "");
     assert!(!body.contains("live_123_abc"));
+    // Nor does any other answer that carries the settings (a mixer fader saves and returns them).
+    let (code, _, body) = lan_call(
+        "POST",
+        "/api/audio/volume",
+        Some(r#"{"source":"mic","volume":90}"#.into()),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert!(!body.contains("live_123_abc"));
     // The quality is fine to change; the blank key keeps the saved one.
     seen["stream"]["bitrate_kbps"] = 4500.into();
     let (code, _, body) = lan_call("PUT", "/api/config", Some(seen.to_string())).await;

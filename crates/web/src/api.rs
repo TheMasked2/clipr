@@ -187,7 +187,7 @@ struct SourceVolumeReq {
 
 /// Sets one audio source's volume, saved and applied right away without restarting audio (the mixer's
 /// faders). Returns the saved settings.
-pub async fn set_volume(State(s): State<AppState>, body: Bytes) -> ApiResult<Json<Config>> {
+pub async fn set_volume(State(s): State<AppState>, ext: Extensions, body: Bytes) -> ApiResult<Json<Config>> {
     let req: SourceVolumeReq = parse_json(&body)?;
     if req.volume > 200 {
         return Err(ApiError::bad_request("The volume must be between 0 and 200"));
@@ -211,7 +211,20 @@ pub async fn set_volume(State(s): State<AppState>, body: Bytes) -> ApiResult<Jso
         Ok(st.control.config())
     })
     .await?;
+    let mut saved = saved;
+    redact_for_remote(&ext, &mut saved);
     Ok(Json(saved))
+}
+
+/// Settings as another device may see them: no webhook URLs, cloud secret, stream key or stream server (a
+/// custom server address can hold the key too). Every handler that returns the settings goes through this.
+pub(crate) fn redact_for_remote(ext: &Extensions, config: &mut Config) {
+    if auth::is_remote(ext) {
+        crate::discord::hide_urls(config);
+        crate::cloud::hide_secret(&mut config.cloud);
+        config.stream.key.clear();
+        config.stream.server.clear();
+    }
 }
 
 #[derive(Deserialize)]
@@ -281,11 +294,7 @@ pub async fn preview(
 
 pub async fn get_config(State(s): State<AppState>, ext: Extensions) -> Json<Config> {
     let mut config = s.control.config();
-    if auth::is_remote(&ext) {
-        crate::discord::hide_urls(&mut config);
-        crate::cloud::hide_secret(&mut config.cloud);
-        config.stream.key.clear();
-    }
+    redact_for_remote(&ext, &mut config);
     Json(config)
 }
 
@@ -638,7 +647,8 @@ fn check_stream(s: &clipr_core::config::StreamConfig) -> Result<()> {
 }
 
 /// From another device, where the stream goes (service, server, key) can't change: it could send the stream,
-/// and with it the key, somewhere else. A blank key keeps the saved one. The quality is fine to change.
+/// and with it the key, somewhere else. A blank key or server keeps the saved one (other devices never see
+/// them). The quality is fine to change.
 fn keep_stream_target(
     ext: &Extensions,
     now: &clipr_core::config::StreamConfig,
@@ -649,6 +659,9 @@ fn keep_stream_target(
     }
     if new.key.is_empty() {
         new.key.clone_from(&now.key);
+    }
+    if new.server.is_empty() {
+        new.server.clone_from(&now.server);
     }
     if new.service != now.service || new.server != now.server || new.key != now.key {
         return Err(ApiError::new(
@@ -718,11 +731,7 @@ pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes)
     .await?;
     s.lan.set(saved.web.lan);
     let mut saved = saved;
-    if auth::is_remote(&ext) {
-        crate::discord::hide_urls(&mut saved);
-        crate::cloud::hide_secret(&mut saved.cloud);
-        saved.stream.key.clear();
-    }
+    redact_for_remote(&ext, &mut saved);
     Ok(Json(saved))
 }
 

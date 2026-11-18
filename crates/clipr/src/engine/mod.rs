@@ -345,7 +345,10 @@ impl Supervisor {
                 self.check_stats();
             }
         }
-        self.stop_streaming();
+        // Let a live stream hang up properly (the server frees the key at once), but not for long.
+        if let Some(ended) = self.stop_streaming() {
+            let _ = ended.recv_timeout(Duration::from_secs(3));
+        }
         self.stop_pipeline();
         self.meter = None;
         for save in self.saves.drain(..) {
@@ -438,13 +441,8 @@ impl Supervisor {
                 if config.replay.enabled != self.config.replay.enabled {
                     self.buffering = config.replay.enabled;
                 }
-                // A new quality applies to the running stream (its encoder starts over); a new key or server
-                // to the next one.
-                if let Some(s) = self.shared.lock().unwrap().stream.as_mut() {
-                    s.height = config.stream.height;
-                    s.fps = config.stream.fps;
-                    s.bitrate_kbps = config.stream.bitrate_kbps;
-                }
+                // New stream settings apply the next time the user goes live: changing the picture size
+                // mid-stream upsets some servers.
                 self.config = *config;
                 self.retry_at = None; // new settings deserve a fresh try
             }
@@ -453,8 +451,12 @@ impl Supervisor {
             Command::ToggleRecording if self.recording.is_some() => self.stop_recording(true),
             Command::ToggleRecording => self.start_recording(None),
             Command::SetStreaming(true) => self.start_streaming(),
-            Command::SetStreaming(false) => self.stop_streaming(),
-            Command::ToggleStreaming if self.stream.is_some() => self.stop_streaming(),
+            Command::SetStreaming(false) => {
+                self.stop_streaming();
+            }
+            Command::ToggleStreaming if self.stream.is_some() => {
+                self.stop_streaming();
+            }
             Command::ToggleStreaming => self.start_streaming(),
             Command::SetMicMuted(muted) => self.set_mic_muted(muted),
             Command::ToggleMic => self.set_mic_muted(!clipr_audio::mic_muted()),
@@ -589,15 +591,20 @@ impl Supervisor {
         self.stream_failed = None;
     }
 
-    fn stop_streaming(&mut self) {
+    /// Ends the stream. Hanging up can wait on a slow server, so it happens on its own thread; returns that
+    /// thread's end, for shutdown to wait on.
+    fn stop_streaming(&mut self) -> Option<std::sync::mpsc::Receiver<()>> {
         self.shared.lock().unwrap().stream = None;
-        if let Some(streamer) = self.stream.take() {
-            tracing::info!("streaming stopped");
-            // Hanging up can wait on a slow server: not on this thread.
-            let _ = std::thread::Builder::new()
-                .name("clipr-stream-stop".into())
-                .spawn(move || streamer.stop());
-        }
+        let streamer = self.stream.take()?;
+        tracing::info!("streaming stopped");
+        let (done, ended) = std::sync::mpsc::channel();
+        let _ = std::thread::Builder::new()
+            .name("clipr-stream-stop".into())
+            .spawn(move || {
+                streamer.stop();
+                let _ = done.send(());
+            });
+        Some(ended)
     }
 
     /// Ends a stream that can't go on (refused key, no encoder for it), keeping the reason on show.
