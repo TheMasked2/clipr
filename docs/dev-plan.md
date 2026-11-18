@@ -206,11 +206,24 @@ A capture restart (new monitor or video settings) finishes the file and continue
 3. **Voice:** wake word (custom), whisper tiny command parsing, length by voice, extra commands, configurable cues
 4. **Montage** and **vertical 9:16 export** (these need re-encoding through MF)
 5. **More themes:** Minimal / terminal, Playful, System
-6. **Cloudflare Tunnel** for remote full UI with login
-7. Optional real HDR saves (10-bit HEVC)
-8. **Linux:** PipeWire capture/audio, VA-API encode
+6. **Away from home:** the full UI from outside the LAN. Today that already works through
+   [Tailscale](https://tailscale.com) (the Network tab says how) with the LAN PIN on top. Built in later: a
+   Cloudflare Tunnel option with a proper login (accounts or passkeys, not the 6-digit PIN), HTTPS only, the
+   folder/web settings still PC-only
+7. **In-game overlay:** a small always-on-top, click-through layer (like the "Clip saved" toast, but optional and
+   movable) showing buffering/recording state, the mic mute, and the last save. A Direct3D present hook is out
+   of scope (anti-cheat), so it stays a layered window, which works over borderless games but not exclusive
+   fullscreen
+8. **Streaming:** go live from the same capture, so clipr can replace OBS for simple streams. The encoder output
+   already exists; the work is an RTMP(S) muxer to Twitch/YouTube (stream key typed in by the user, kept like
+   the cloud keys), a second encoder session when the stream and the buffer want different bitrates, a health
+   readout (dropped frames, bitrate) in the Performance card, and limits (one stream at a time, NVENC session
+   caps on consumer GPUs). Scenes and sources stay OBS's job
+9. Optional real HDR saves (10-bit HEVC)
+10. **Linux:** PipeWire capture/audio, VA-API encode
 
-Ideas, not planned yet: shared squad galleries, auto highlights (kill/death detection).
+Ideas, not planned yet: shared squad galleries, auto highlights (kill/death detection). For editing beyond trims,
+the settings point to [Kdenlive](https://kdenlive.org) (free); clipr won't grow a timeline editor.
 
 ## Risks to settle early
 
