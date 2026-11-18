@@ -2,19 +2,39 @@
 
 clipr can post your clips to Discord channels. Each post is one message with the clip attached and a small
 card showing the title, game, length and a thumbnail. It works through **webhooks**: a channel's own posting
-address. No bot, no server of ours and no Discord login are needed.
+address. No bot and no server of ours are needed; signing in to Discord is optional.
 
 Nothing is posted until you add a channel, and by default clipr asks before every post.
+
+## Connect Discord
+
+On the PC that runs clipr, open **Settings → Discord** and click **Connect Discord**. Discord's own page opens
+in a new tab: sign in there (clipr never sees your password) and click **Authorize**. The tab says
+"Connected" and closes, and Settings shows your name and picture. Click **Save** to keep it.
+
+clipr keeps only your name, username and picture. Discord's sign-in token is used once and thrown away, and
+there's no client secret in clipr: it signs in like a phone app does. **Disconnect** forgets the account;
+channels you added keep posting until you remove them.
+
+Connect Discord only works on the PC running clipr, with clipr on its usual port (7845), because that's where
+Discord sends the browser back.
 
 ## Add a channel
 
 You need the **Manage Webhooks** permission on the server (you have it on your own server).
 
+**The easy way:** click **Pick a channel in Discord**. Discord's page opens: sign in if you aren't, choose the
+server and channel, and click **Authorize**. Discord makes a webhook for that channel and clipr adds it to the
+list as a new channel set to **Ask**. Rename it if you like, then click **Save**. This also connects your
+account.
+
+**By hand:**
+
 1. In Discord, hover over the channel and click the gear (**Edit Channel**).
 2. Open **Integrations → Webhooks → New Webhook**. Optionally rename it (for example "clipr") and give it a
    picture.
 3. Click **Copy Webhook URL**.
-4. On the PC that runs clipr, open **Settings → Discord** and click **Add a channel**.
+4. On the PC that runs clipr, open **Settings → Discord** and click **Paste a webhook URL**.
 5. Give it a name (for example `#clips`) and paste the webhook URL.
 6. Click **Test**: a message "clipr is connected" should appear in the channel. Then click **Save**.
 
@@ -53,9 +73,4 @@ posted, skipped or failed. A failed post has a **Retry** button.
 
 While clipr clips or records, your Discord profile shows the game with its icon: *Playing clipr · VALORANT ·
 Clipping with clipr*. Only games show, never the desktop. It's on by default; turn it off with **Show in my Discord status** in Settings → Discord.
-It talks to the Discord app on this PC, so there's nothing to sign in to.
-
-## Coming later
-
-**Connect Discord:** sign in through Discord to pick a channel in Discord's own picker instead of pasting a
-webhook URL. clipr has no bot: webhooks post, and clipr itself asks before posting.
+It talks to the Discord app on this PC, so it works with or without Connect Discord.

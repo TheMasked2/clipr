@@ -1,14 +1,21 @@
-//! `/api/discord/*`: the post queue, sharing a clip by hand, and testing a webhook (see `docs/api.md`).
+//! `/api/discord/*`: the post queue, sharing a clip by hand, testing a webhook, and Connect Discord (see
+//! `docs/api.md`).
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use axum::http::{Extensions, StatusCode};
+use axum::response::IntoResponse;
 use clipr_core::config::{Config, DiscordConfig};
-use clipr_discord::{ClipInfo, webhook};
+use clipr_discord::{ClipInfo, account, webhook};
 use clipr_library::{Clip, Library};
 use serde::Deserialize;
+use serde_json::json;
 
 use crate::AppState;
 use crate::api::{ApiError, ApiResult, blocking, parse_json};
@@ -181,4 +188,245 @@ pub(crate) fn check(d: &DiscordConfig) -> Result<()> {
         }
     }
     Ok(())
+}
+
+// ---- Connect Discord ------------------------------------------------------------------------------------
+
+/// A sign-in on its way: started by the UI, finished by Discord's redirect, picked up by the UI.
+struct Login {
+    verifier: String,
+    purpose: account::Purpose,
+    started: Instant,
+    /// Set by the redirect.
+    result: Option<Result<serde_json::Value, String>>,
+}
+
+/// How long a sign-in may take before it's forgotten.
+const LOGIN_TTL: Duration = Duration::from_secs(15 * 60);
+
+static LOGINS: Mutex<Option<HashMap<String, Login>>> = Mutex::new(None);
+
+fn logins() -> std::sync::MutexGuard<'static, Option<HashMap<String, Login>>> {
+    LOGINS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn random_text(bytes: usize) -> String {
+    let mut b = vec![0u8; bytes];
+    auth::random_bytes(&mut b);
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn only_here(ext: &Extensions) -> ApiResult<()> {
+    if auth::is_remote(ext) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "Connect Discord on the PC running clipr: Discord sends you back to it.",
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct ConnectReq {
+    /// Also pick a channel (Discord makes a webhook for it).
+    #[serde(default)]
+    channel: bool,
+}
+
+/// Starts a sign-in: the UI opens `url` (Discord's page) and then asks `/api/discord/connect/{state}`.
+pub async fn connect(
+    State(s): State<AppState>,
+    ext: Extensions,
+    body: Bytes,
+) -> ApiResult<Json<serde_json::Value>> {
+    only_here(&ext)?;
+    let req: ConnectReq = parse_json(&body)?;
+    if s.lan.port() != account::REDIRECT_PORT {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            format!(
+                "Connect Discord needs clipr on port {} (Discord only sends you back there), but it runs on {}. \
+                 Close what uses port {} and restart clipr.",
+                account::REDIRECT_PORT,
+                s.lan.port(),
+                account::REDIRECT_PORT
+            ),
+        ));
+    }
+    let purpose = if req.channel {
+        account::Purpose::Channel
+    } else {
+        account::Purpose::Account
+    };
+    // 64 hex characters: within PKCE's 43-128 and all unreserved.
+    let verifier = random_text(32);
+    let state = random_text(16);
+    let url = account::authorize_url(purpose, &state, &verifier);
+    let mut all = logins();
+    let map = all.get_or_insert_with(HashMap::new);
+    map.retain(|_, l| l.started.elapsed() < LOGIN_TTL);
+    if map.len() >= 20 {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too many sign-ins at once; try again in a while.",
+        ));
+    }
+    map.insert(
+        state.clone(),
+        Login {
+            verifier,
+            purpose,
+            started: Instant::now(),
+            result: None,
+        },
+    );
+    Ok(Json(json!({ "url": url, "state": state })))
+}
+
+/// 202 while the user is still on Discord's page; then the account (and webhook) once, or the error.
+pub async fn connect_result(
+    ext: Extensions,
+    Path(state): Path<String>,
+) -> ApiResult<axum::response::Response> {
+    only_here(&ext)?;
+    let mut all = logins();
+    let map = all.get_or_insert_with(HashMap::new);
+    let Some(login) = map.get(&state) else {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "This sign-in expired. Start again.",
+        ));
+    };
+    if login.result.is_none() {
+        if login.started.elapsed() >= LOGIN_TTL {
+            map.remove(&state);
+            return Err(ApiError::new(
+                StatusCode::NOT_FOUND,
+                "This sign-in expired. Start again.",
+            ));
+        }
+        return Ok((StatusCode::ACCEPTED, Json(json!({ "pending": true }))).into_response());
+    }
+    match map.remove(&state).and_then(|l| l.result).expect("checked above") {
+        Ok(v) => Ok(Json(v).into_response()),
+        Err(e) => Err(ApiError::new(StatusCode::BAD_GATEWAY, e)),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CallbackQuery {
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    error_description: Option<String>,
+}
+
+/// Where Discord sends the browser back to. Finishes the sign-in and shows a short page to close.
+pub async fn callback(ext: Extensions, Query(q): Query<CallbackQuery>) -> axum::response::Response {
+    if auth::is_remote(&ext) {
+        return page(
+            StatusCode::FORBIDDEN,
+            "Not here",
+            "Discord sign-ins finish on the PC running clipr.",
+        );
+    }
+    let state = q.state.unwrap_or_default();
+    let (verifier, purpose) = {
+        let mut all = logins();
+        let map = all.get_or_insert_with(HashMap::new);
+        match map.get(&state) {
+            Some(l) if l.result.is_none() && l.started.elapsed() < LOGIN_TTL => {
+                (l.verifier.clone(), l.purpose)
+            }
+            _ => {
+                return page(
+                    StatusCode::BAD_REQUEST,
+                    "This sign-in expired",
+                    "Start it again from clipr's Discord settings.",
+                );
+            }
+        }
+    };
+    let result = match (q.code, q.error) {
+        (_, Some(e)) => Err(match e.as_str() {
+            "access_denied" => "You cancelled the sign-in on Discord.".to_string(),
+            _ => format!("Discord: {}", q.error_description.unwrap_or(e)),
+        }),
+        (Some(code), None) => tokio::task::spawn_blocking(move || account::finish(&code, &verifier))
+            .await
+            .map_err(|_| "the sign-in failed".to_string())
+            .and_then(|r| r.map_err(|e| format!("{e:#}")))
+            .and_then(|c| {
+                if purpose == account::Purpose::Channel && c.webhook.is_none() {
+                    Err("Discord didn't make a webhook for a channel. Pick a server and channel and try again.".into())
+                } else {
+                    Ok(connected_json(&c))
+                }
+            }),
+        (None, None) => Err("Discord sent no sign-in code.".to_string()),
+    };
+    let ok = result.is_ok();
+    if let Some(l) = logins().get_or_insert_with(HashMap::new).get_mut(&state) {
+        l.result = Some(result.clone());
+    }
+    if ok {
+        page(
+            StatusCode::OK,
+            "Connected",
+            "Back to clipr: you can close this tab.",
+        )
+    } else {
+        page(StatusCode::OK, "Not connected", &result.err().unwrap_or_default())
+    }
+}
+
+fn connected_json(c: &account::Connected) -> serde_json::Value {
+    json!({
+        "account": {
+            "id": c.user.id,
+            "username": c.user.username,
+            "name": c.user.global_name,
+            "avatar": c.user.avatar,
+        },
+        "webhook": c.webhook.as_ref().map(|w| json!({
+            "url": w.url,
+            "channel_id": w.channel_id,
+            "guild_id": w.guild_id,
+        })),
+    })
+}
+
+/// A small standalone page for the browser tab Discord sent back (it tries to close itself when done).
+fn page(status: StatusCode, title: &str, text: &str) -> axum::response::Response {
+    let esc = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
+    let close = if status == StatusCode::OK && title == "Connected" {
+        "<script>setTimeout(() => window.close(), 1200)</script>"
+    } else {
+        ""
+    };
+    let html = format!(
+        "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><title>clipr</title>\
+         <body style=\"background:#0b0b0f;color:#e5e5ea;font:16px system-ui;padding:2rem\">\
+         <h1>{}</h1><p>{}</p>{close}",
+        esc(title),
+        esc(text)
+    );
+    (
+        status,
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+        ],
+        html,
+    )
+        .into_response()
 }

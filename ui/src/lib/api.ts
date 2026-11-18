@@ -137,6 +137,21 @@ export interface DiscordConfig {
   upload_limit_mb: number;
   /** Rich Presence: the game clipr clips, in your Discord profile. */
   presence: boolean;
+  /** Who connected through Connect Discord (no token is kept). */
+  account: DiscordAccount | null;
+}
+
+export interface DiscordAccount {
+  id: string;
+  username: string;
+  name: string | null;
+  avatar: string | null;
+}
+
+/** What a finished Connect Discord brings: the account, and with `channel` the picked channel's webhook. */
+export interface DiscordConnected {
+  account: DiscordAccount;
+  webhook: { url: string; channel_id: string; guild_id: string | null } | null;
 }
 
 export type JobState = 'ask' | 'queued' | 'posting' | 'posted' | 'skipped' | 'failed';
@@ -343,6 +358,11 @@ export const markMoment = () => request<void>('POST', '/api/mark');
 export const setMicMuted = (muted: boolean) => request<void>('POST', '/api/mic', { muted });
 export const testSound = (volume: number) => request<void>('POST', '/api/sound/test', { volume });
 export const getPosts = () => request<Job[]>('GET', '/api/discord/posts');
+export const discordConnect = (channel: boolean) =>
+  request<{ url: string; state: string }>('POST', '/api/discord/connect', { channel });
+/** `{ pending: true }` while the user is still on Discord's page. */
+export const discordConnectResult = (state: string) =>
+  request<DiscordConnected | { pending: true }>('GET', `/api/discord/connect/${encodeURIComponent(state)}`);
 export const shareClip = (id: string, webhook: string) =>
   request<{ job: number }>('POST', '/api/discord/share', { id, webhook });
 export const answerPost = (job: number, yes: boolean) =>

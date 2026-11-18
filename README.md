@@ -90,7 +90,7 @@ webhook, and your Discord status shows the game you're clipping.
 - ✅ **Ask before posting** is the default: clipr itself asks (on Home), no bot needed. Nothing is posted unless
   you've configured a destination, and posts wait until the game closes (no lag mid-game).
 - ✅ **Rich Presence** (on by default): your Discord status shows the game you're clipping, with its icon.
-- [ ] **Connect your Discord account** (sign in through Discord, no secret, no server): pick a channel in
+- ✅ **Connect your Discord account** (sign in through Discord, no secret, no server): pick a channel in
   Discord's own picker instead of pasting a webhook URL.
 - ✅ Without cloud storage, clipr makes a size-fitted copy for Discord's upload limit. With cloud storage,
   Discord gets a link with a playable embed.
@@ -134,7 +134,7 @@ webhook, and your Discord status shows the game you're clipping.
                 │                         │                       │
                 │ games · hotkeys · overlay · tray · library (db) │
                 │ web server (axum) + embedded Svelte UI          │
-                │ discord bot / webhook · cloud · updater         │
+                │ discord webhook · presence · cloud · updater    │
                 └─────────────────────────────────────────────────┘
 ```
 
@@ -165,7 +165,7 @@ of it. Pumpkin and Ultron keep running from their own repos.
 
 ## Works well with
 
-- **Discord:** optional, through your own webhook or bot.
+- **Discord:** optional, through webhooks, with no bot.
 - **Cloudflare R2 / any S3:** optional cloud storage and share pages.
 
 ## License

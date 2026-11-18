@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { DiscordConfig, PostMode } from './api';
-  import { testWebhook } from './api';
+  import { discordConnect, discordConnectResult, testWebhook } from './api';
   import { app } from './store.svelte';
   import Field from './Field.svelte';
   import Toggle from './Toggle.svelte';
@@ -28,12 +28,62 @@
   let testing = $state<number | null>(null);
   let results = $state<Record<number, { ok: boolean; text: string }>>({});
 
-  function add() {
+  function freeName(): string {
     let n = discord.webhooks.length + 1;
     let name = n === 1 ? '#clips' : `#clips-${n}`;
     while (discord.webhooks.some((w) => w.name.toLowerCase() === name.toLowerCase())) name = `#clips-${++n}`;
-    discord.webhooks.push({ name, url: '', mode: 'ask', games: [] });
+    return name;
   }
+  function add() {
+    discord.webhooks.push({ name: freeName(), url: '', mode: 'ask', games: [] });
+  }
+
+  // Connect Discord: Discord's own page opens in a new tab; this page waits for the answer. Nothing is saved
+  // until Save, like any other change here.
+  let connecting = $state<'account' | 'channel' | null>(null);
+  let connectNote = $state<{ ok: boolean; text: string } | null>(null);
+  let cancelWait: (() => void) | null = null;
+
+  async function connect(channel: boolean) {
+    connectNote = null;
+    connecting = channel ? 'channel' : 'account';
+    let alive = true;
+    cancelWait = () => (alive = false);
+    try {
+      const { url, state } = await discordConnect(channel);
+      window.open(url, '_blank');
+      const until = Date.now() + 15 * 60 * 1000;
+      while (alive && Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 1500));
+        if (!alive) return;
+        const r = await discordConnectResult(state);
+        if ('pending' in r) continue;
+        discord.account = r.account;
+        if (r.webhook) {
+          discord.webhooks.push({ name: freeName(), url: r.webhook.url, mode: 'ask', games: [] });
+          connectNote = { ok: true, text: 'Channel added below. Rename it if you like, then Save.' };
+        } else {
+          connectNote = { ok: true, text: 'Connected. Save to keep it.' };
+        }
+        return;
+      }
+      if (alive) connectNote = { ok: false, text: 'The sign-in took too long. Try again.' };
+    } catch (e) {
+      if (alive) connectNote = { ok: false, text: e instanceof Error ? e.message : String(e) };
+    } finally {
+      if (alive) connecting = null;
+    }
+  }
+  function stopWaiting() {
+    cancelWait?.();
+    cancelWait = null;
+    connecting = null;
+  }
+  function disconnect() {
+    discord.account = null;
+    connectNote = { ok: true, text: 'Disconnected. Save to keep it. Channels you added keep posting until you remove them.' };
+  }
+  $effect(() => () => cancelWait?.());
   function remove(i: number) {
     discord.webhooks.splice(i, 1);
     results = {};
@@ -57,9 +107,30 @@
   <Toggle bind:checked={discord.presence} label="Show in my Discord status" />
 </Field>
 
+<Field title="Discord account" hint="Sign in on Discord's own page to show who's connected and to pick channels in Discord's own picker. clipr keeps no password or token, and there's no bot." stacked>
+  <div class="acct">
+    {#if discord.account}
+      {#if discord.account.avatar}<img class="avatar" src={discord.account.avatar} alt="" />{/if}
+      <div class="who">
+        <b>{discord.account.name ?? discord.account.username}</b>
+        <span class="muted small">@{discord.account.username}</span>
+      </div>
+      <button onclick={disconnect} disabled={remote}>Disconnect</button>
+    {:else if connecting === 'account'}
+      <span class="muted small">Finish signing in on the Discord tab…</span>
+      <button onclick={stopWaiting}>Cancel</button>
+    {:else}
+      <button class="primary" onclick={() => connect(false)} disabled={remote || connecting !== null}>Connect Discord</button>
+    {/if}
+  </div>
+  {#if remote}<p class="muted small">Connect Discord on the PC running clipr: Discord sends you back to it.</p>{/if}
+  {#if connectNote}<p class="small" class:okt={connectNote.ok} class:errt={!connectNote.ok}>{connectNote.text}</p>{/if}
+</Field>
+
 <p class="muted small note">
-  Post clips to a Discord channel through a webhook: in Discord, open the channel's settings → Integrations → Webhooks →
-  New Webhook → Copy Webhook URL, and paste it here. Anyone with the URL can post to that channel, so keep it to yourself.
+  Clips go to Discord channels through webhooks. <b>Pick a channel in Discord</b> signs you in and lets you choose the
+  server and channel on Discord's own page. Or paste a URL: in Discord, open the channel's settings → Integrations →
+  Webhooks → New Webhook → Copy Webhook URL. Anyone with a webhook URL can post to that channel, so keep it to yourself.
 </p>
 {#if remote}
   <div class="banner warn">Webhook URLs stay on the PC running clipr: paste or change them there. Here you can add channels and change when they post.</div>
@@ -93,7 +164,13 @@
     </div>
   </div>
 {/each}
-<div><button onclick={add} disabled={discord.webhooks.length >= 10}>Add a channel</button></div>
+<div class="row adds">
+  <button onclick={() => connect(true)} disabled={remote || connecting !== null || discord.webhooks.length >= 10}>
+    {connecting === 'channel' ? 'Pick the channel on the Discord tab…' : 'Pick a channel in Discord'}
+  </button>
+  {#if connecting === 'channel'}<button onclick={stopWaiting}>Cancel</button>{/if}
+  <button onclick={add} disabled={discord.webhooks.length >= 10}>Paste a webhook URL</button>
+</div>
 
 <Field title="Post while a game runs" hint="Off: posts wait until the game closes, so uploading never costs frames. Clips you share by hand go right away.">
   <Toggle bind:checked={discord.post_during_game} label="Post while a game runs" />
@@ -107,6 +184,10 @@
 <p class="muted small note">Recordings are never posted by themselves; share one from its page if you want to.</p>
 
 <style>
+  .acct { display: flex; align-items: center; gap: 0.7rem; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; }
+  .who { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .adds { gap: 0.5rem; flex-wrap: wrap; }
   .hook { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.8rem; margin-bottom: 0.8rem; border: 1px solid var(--border); border-radius: 10px; }
   .head { display: flex; gap: 0.5rem; }
   .name { flex: 1; min-width: 0; font-weight: 600; }
