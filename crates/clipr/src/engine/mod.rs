@@ -146,13 +146,13 @@ impl Engine {
         self.levels.lock().unwrap().clone()
     }
 
-    /// A page shows the level meters: keep levels coming for the next few seconds even while nothing is
-    /// captured (audio then runs for the meters only, recording nothing). Pages call it every couple of seconds.
     /// One performance sample a second over the last two minutes, oldest first.
     pub fn perf(&self) -> Vec<perf::Sample> {
         self.perf.lock().unwrap().iter().cloned().collect()
     }
 
+    /// A page shows the level meters: keep levels coming for the next few seconds even while nothing is
+    /// captured (audio then runs for the meters only, recording nothing). Pages call it every couple of seconds.
     pub fn watch_levels(&self) {
         *self.levels_watched.lock().unwrap() = Some(Instant::now() + LEVELS_WATCH);
     }
@@ -569,6 +569,7 @@ impl Supervisor {
             s.stats = Stats::default();
         }
         self.last_stats = Stats::default();
+        self.sampler.counters_reset();
         self.buffer_game = self.game.as_ref().map(|g| g.name.clone());
         let stop = Arc::new(AtomicBool::new(false));
         let video = video::spawn(settings.video.clone(), self.shared.clone(), stop.clone());

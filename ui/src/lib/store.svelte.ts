@@ -156,11 +156,32 @@ export async function saveConfig(c: Config): Promise<Config> {
   return saved;
 }
 
+// Quick saves from Home (faders, capture chips) run one after another, each from the settings as they are
+// then, so one can't put back a value another just changed.
+let quickSaves: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(f: () => Promise<T>): Promise<T> {
+  const run = quickSaves.then(f, f);
+  quickSaves = run.catch(() => {});
+  return run;
+}
+
 /** Sets one audio source's volume, saved and applied at once (the mixer's faders). */
-export async function setSourceVolume(source: string, volume: number): Promise<Config> {
-  const saved = await setVolume(source, volume);
-  applyConfig(saved);
-  return saved;
+export function setSourceVolume(source: string, volume: number): Promise<Config> {
+  return oneAtATime(async () => {
+    const saved = await setVolume(source, volume);
+    applyConfig(saved);
+    return saved;
+  });
+}
+
+/** Changes the saved settings with `edit` and saves them (Home's capture chips). */
+export function quickEdit(edit: (c: Config) => void): Promise<Config | null> {
+  return oneAtATime(async () => {
+    if (!app.config) return null;
+    const next = structuredClone($state.snapshot(app.config)) as Config;
+    edit(next);
+    return saveConfig(next);
+  });
 }
 
 // Level meters: while any component showing them is mounted, ask the server to keep levels coming (it then

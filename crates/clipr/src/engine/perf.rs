@@ -61,6 +61,11 @@ impl Sampler {
         }
     }
 
+    /// The capture's counters start again at zero (a new pipeline).
+    pub fn counters_reset(&mut self) {
+        self.last_stats = Stats::default();
+    }
+
     /// Records one sample from the counters as they are now. `stats` restarts at zero with each pipeline;
     /// a counter that went down counts from zero.
     pub fn sample(&mut self, stats: Stats, capturing: bool, buffer: (f64, usize)) {

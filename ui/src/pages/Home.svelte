@@ -179,7 +179,7 @@
   .pane { padding: 1.1rem 1.3rem; }
   @media (max-width: 1060px) {
     /* One column: the cards in the order they matter while playing. */
-    .home { display: flex; flex-direction: column; }
+    .home { display: flex; flex-direction: column; align-items: stretch; }
     .col { display: contents; }
     .home :global(> .col > *) { order: 5; }
     .home :global(> .col > .status) { order: 0; }

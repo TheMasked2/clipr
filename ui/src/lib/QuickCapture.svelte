@@ -1,30 +1,28 @@
 <script lang="ts">
   import type { Config } from './api';
-  import { app, saveConfig, toastError } from './store.svelte';
+  import { app, quickEdit, toastError } from './store.svelte';
   import { HEIGHTS, QUALITY } from './video';
 
   // The capture presets at a glance, like OBS's main window: what to record and how, one click each. Each
   // click saves at once (Settings has the details).
   const cfg = $derived(app.config);
-  let saving = $state(false);
+  /** Clicks waiting to be saved; each is saved in turn (none are dropped). */
+  let saving = $state(0);
 
   async function change(edit: (c: Config) => void): Promise<void> {
-    if (!app.config || saving) return;
-    const next = structuredClone($state.snapshot(app.config)) as Config;
-    edit(next);
-    saving = true;
+    saving++;
     try {
-      await saveConfig(next);
+      await quickEdit(edit);
     } catch (e) {
       toastError(e);
     } finally {
-      saving = false;
+      saving--;
     }
   }
 </script>
 
 {#if cfg}
-  <div class="quick" class:busy={saving}>
+  <div class="quick" class:busy={saving > 0}>
     <div class="line">
       <span class="label">Record</span>
       <div class="chips">
