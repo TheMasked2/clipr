@@ -16,6 +16,34 @@ export interface Status {
   mic_muted?: boolean;
   /** Every source muted in clips, by key ('mic' too when it is). Not saved: clipr starts with none. */
   muted?: string[];
+  /** The live stream, while one runs or for a minute after it failed. */
+  stream?: StreamStatus | null;
+}
+
+export type StreamState = 'connecting' | 'live' | 'reconnecting' | 'failed';
+
+export interface StreamStatus {
+  state: StreamState;
+  /** When it first went live, in seconds since the Unix epoch. */
+  since: number | null;
+  /** What went out over the last few seconds. */
+  kbps: number;
+  /** Video frames dropped because the connection couldn't keep up. */
+  dropped: number;
+  error: string | null;
+}
+
+export type StreamService = 'twitch' | 'youtube' | 'custom';
+
+export interface StreamConfig {
+  service: StreamService;
+  /** For `custom`: an rtmp:// or rtmps:// address. */
+  server: string;
+  /** Blank on other devices: it never leaves this PC. */
+  key: string;
+  height: number;
+  fps: number;
+  bitrate_kbps: number;
 }
 
 export type ClipKind = 'clip' | 'recording';
@@ -112,6 +140,8 @@ export interface Config {
     toggle_recording: string;
     mark: string;
     toggle_mic: string;
+    /** Starts or stops the live stream. */
+    toggle_stream: string;
     /** Opens or closes the in-game overlay. */
     overlay: string;
   };
@@ -131,6 +161,7 @@ export interface Config {
   recording: { max_minutes: number; folder: string };
   discord: DiscordConfig;
   cloud: CloudConfig;
+  stream: StreamConfig;
 }
 
 export type CloudProvider = 'r2' | 's3' | 'b2' | 'other';
@@ -439,6 +470,7 @@ export const saveClip = (seconds?: number) =>
 export const setBuffer = (on: boolean) => request<void>('POST', '/api/buffer', { on });
 export const setRecording = (on: boolean) => request<void>('POST', '/api/recording', { on });
 export const markMoment = () => request<void>('POST', '/api/mark');
+export const setStreaming = (on: boolean) => request<void>('POST', '/api/stream', { on });
 export const setMicMuted = (muted: boolean) => request<void>('POST', '/api/mic', { muted });
 /** Mutes or unmutes any source in clips, by key; it applies at once and isn't saved. */
 export const setMuted = (source: string, muted: boolean) => request<void>('POST', '/api/mute', { source, muted });

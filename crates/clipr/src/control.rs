@@ -58,6 +58,10 @@ impl Control for AppControl {
         self.engine.send(Command::SetRecording(on));
     }
 
+    fn set_streaming(&self, on: bool) {
+        self.engine.send(Command::SetStreaming(on));
+    }
+
     fn set_mic_muted(&self, muted: bool) {
         self.engine.send(Command::SetMicMuted(muted));
     }

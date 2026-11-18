@@ -1,6 +1,6 @@
 <script lang="ts">
   import * as api from './api';
-  import { app, toastError } from './store.svelte';
+  import { app, toast, toastError } from './store.svelte';
   import { HEIGHTS, QUALITY } from './video';
   import QuickCapture from './QuickCapture.svelte';
 
@@ -12,6 +12,18 @@
   const paused = $derived(st?.paused ?? false);
   const recording = $derived(st?.state === 'recording');
   const run = (p: Promise<unknown>) => p.catch(toastError);
+  // Connecting, live or reconnecting: the button ends it. A failed stream shows its reason in the status bar.
+  const streaming = $derived(!!st?.stream && st.stream.state !== 'failed');
+  async function goLive() {
+    if (streaming) return run(api.setStreaming(false));
+    // This page never sees the key on another device (it's blank there): only on this PC can a blank one mean
+    // there is none.
+    if (!app.config?.stream.key) {
+      const remote = await api.getSystem().then((s) => s.remote ?? false, () => false);
+      if (!remote) return toast('err', 'Add your stream key first.', '#/settings/stream', 'Settings → Stream');
+    }
+    return run(api.setStreaming(true));
+  }
 
   const output = $derived.by(() => {
     if (!v) return '';
@@ -56,6 +68,9 @@
   <button class="act" class:danger={recording} class:solid={recording} onclick={() => run(api.setRecording(!recording))}>
     {recording ? 'Stop recording' : 'Start recording'}{#if hk?.toggle_recording}<kbd>{hk.toggle_recording}</kbd>{/if}
   </button>
+  <button class="act" class:danger={streaming} class:solid={streaming} onclick={goLive} title={streaming ? 'End the live stream' : 'Stream to Twitch, YouTube or your own server (Settings → Stream)'}>
+    <span class="lbl">{#if !streaming}<span class="dot" aria-hidden="true"></span>{/if}{streaming ? 'End stream' : 'Go live'}</span>{#if hk?.toggle_stream}<kbd>{hk.toggle_stream}</kbd>{/if}
+  </button>
   {#if paused}
     <!-- A paused buffer can't save clips: resuming it is the next thing to do, so it comes out of More. -->
     <button class="act warn" onclick={() => run(api.setBuffer(true))}>Resume buffer{#if hk?.toggle_buffer}<kbd>{hk.toggle_buffer}</kbd>{/if}</button>
@@ -92,6 +107,8 @@
   .act kbd { margin-left: auto; font-size: .68rem; padding: 0 .35rem; }
   .primary.act kbd { background: transparent; color: inherit; opacity: .75; border-color: color-mix(in srgb, currentColor 40%, transparent); }
   .danger.solid.act kbd { background: transparent; color: inherit; border-color: #fff6; }
+  .lbl { display: inline-flex; align-items: center; gap: .45rem; }
+  .dot { width: .5rem; height: .5rem; border-radius: 50%; background: #e5484d; }
   .warn { color: #f5b942; border-color: #f5b94266; }
   .caret { margin-left: auto; font-size: .7rem; color: var(--text-muted); }
   .menu-wrap { position: relative; }

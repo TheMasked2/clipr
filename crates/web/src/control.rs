@@ -26,6 +26,9 @@ pub trait Control: Send + Sync + 'static {
     /// Starts (`true`) or stops (`false`) a full recording. The finished file arrives as `Event::ClipSaved`.
     fn set_recording(&self, on: bool);
 
+    /// Goes live (`true`) or ends the stream (Settings → Stream). How it goes shows in the status (`stream`).
+    fn set_streaming(&self, _on: bool) {}
+
     /// Adds a marker at this moment (to the running recording and to the next clip saved).
     fn mark(&self);
 

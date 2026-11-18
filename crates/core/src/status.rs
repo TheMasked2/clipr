@@ -20,6 +20,31 @@ pub enum RecState {
     Recording,
 }
 
+/// Where a live stream stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamState {
+    Connecting,
+    Live,
+    /// The connection dropped; clipr tries again by itself.
+    Reconnecting,
+    /// It couldn't start (wrong key, unreachable server); `error` says why.
+    Failed,
+}
+
+/// The live stream, while one runs (or just failed).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamStatus {
+    pub state: StreamState,
+    /// When it first went live, in seconds since the Unix epoch.
+    pub since: Option<u64>,
+    /// What went out over the last few seconds.
+    pub kbps: u32,
+    /// Video frames dropped because the connection couldn't keep up.
+    pub dropped: u64,
+    pub error: Option<String>,
+}
+
 /// The part of the status that changes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Activity {
@@ -38,6 +63,7 @@ pub struct Activity {
     pub mic_muted: bool,
     /// Every source muted in clips, by its `audio.filters` key (`mic` too, when it is).
     pub muted: Vec<String>,
+    pub stream: Option<StreamStatus>,
 }
 
 /// What `/api/status` returns and the WebSocket pushes.
@@ -56,6 +82,9 @@ pub struct StatusSnapshot {
     /// Every source muted in clips, by key (`system`, `mic`, `game`, an app's exe name in lower case).
     #[serde(default)]
     pub muted: Vec<String>,
+    /// The live stream, while one runs or right after it failed.
+    #[serde(default)]
+    pub stream: Option<StreamStatus>,
     pub uptime_secs: u64,
 }
 
@@ -109,6 +138,7 @@ impl Status {
             paused: activity.paused,
             mic_muted: activity.mic_muted,
             muted: activity.muted,
+            stream: activity.stream,
             uptime_secs: self.started.elapsed().as_secs(),
         }
     }

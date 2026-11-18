@@ -184,6 +184,7 @@ it off. A hotkey turns red when two actions share the same combination.
 - **Mark moment** (off): marks this moment. Markers show on the clip's timeline.
 - **Mute / unmute microphone** (off): mutes your mic in clips (not in your voice chat), with a short blip.
   Press it again to unmute.
+- **Start / stop streaming** (off): goes live or ends the stream (see [Stream](#stream)).
 - **In-game overlay** (`Alt+F11`): opens the Gallery and Settings over your game, and closes them again (see
   [the in-game overlay](getting-started.md#the-in-game-overlay)). Not `Alt+Z`, which NVIDIA's overlay uses.
 
@@ -242,6 +243,36 @@ While a recording runs it's written so that a crash or power cut keeps everythin
 it stops, clipr adds an index to the file (a second or two, even for hours of video), so it opens and seeks at
 once in the gallery and in editors. Recordings made with beta.3 or older get that index the next time clipr
 starts.
+
+## Stream
+
+Go live on Twitch, YouTube or any RTMP server from what clipr captures: your game, or the desktop when no game
+runs, with the audio mix (track 1). Start and end it with **Go live** in Controls on Home, or a hotkey. Clips
+and recordings keep working while you stream: the stream has its own encoder session on your GPU, at its own
+size and bitrate, so it doesn't change your clips.
+
+- **Service** (Twitch): **Twitch** and **YouTube** go over a secure connection (RTMPS) to the service's own
+  ingest. **Custom** takes any `rtmp://` or `rtmps://` address in **Server** (Kick, Owncast, Restream, your
+  own), without the key.
+- **Stream key**: from your [Twitch creator dashboard](https://dashboard.twitch.tv/settings/stream) (Settings
+  → Stream → Primary stream key) or [YouTube Studio](https://studio.youtube.com) (Create → Go live → Stream
+  settings). Anyone with the key can stream to your channel, so it stays hidden until you click **Show**, is kept
+  in clipr's settings file on this PC, and is never sent to other devices.
+- **Quality** (1080p60): 720p30, 720p60, 1080p30 or 1080p60. Never more than your clips (Video): with clips at
+  720p, a 1080p stream goes out at 720p, and with clips at 30 fps, a 60 fps stream at 30.
+- **Bitrate** (6000 kbps): constant bitrate. Twitch takes up to 6000 (6000 for 1080p60, 4500 for 720p60);
+  YouTube suggests 4500–9000 for 1080p60. Keep it well under your upload speed.
+
+Changes to these settings apply the next time you go live.
+
+The top bar shows **● LIVE** with how long you've been live, and the status bar on Home what the stream sends
+and any frames dropped because the connection couldn't keep up (clipr then skips ahead to the next keyframe
+rather than fall further behind). If the connection drops, clipr reconnects by itself and the pill says
+**Stream reconnecting…**. A wrong key, or a server it still can't reach after about 15 seconds of trying
+before it ever went live, ends the stream with the reason in the status bar.
+
+From another device (Network) you can go live, end the stream and change the quality, but not the service,
+server or key, and it never sees the key or a custom server's address.
 
 ## Discord
 

@@ -404,7 +404,7 @@ async fn actions_reach_control() {
         .send(&app)
         .await;
     assert_eq!(code, StatusCode::BAD_REQUEST);
-    for uri in ["/api/buffer", "/api/recording"] {
+    for uri in ["/api/buffer", "/api/recording", "/api/stream"] {
         let (code, _, _) = call("POST", uri).body(r#"{"on":true}"#).send(&app).await;
         assert_eq!(code, StatusCode::NO_CONTENT);
     }
@@ -1349,6 +1349,119 @@ async fn connect_discord_stays_on_this_pc() {
         .send(&app)
         .await;
     assert_eq!(code, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn stream_settings_are_checked_and_the_key_stays_on_the_pc() {
+    let env = env();
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
+    let app = router(env.state.clone());
+    let mut config = serde_json::to_value(env.control.config()).unwrap();
+    config["stream"] = serde_json::json!({
+        "service": "twitch", "server": "", "key": " live_123_abc ", "height": 1080, "fps": 60,
+        "bitrate_kbps": 6000
+    });
+    let (code, _, body) = call("PUT", "/api/config")
+        .body(&config.to_string())
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(env.control.config().stream.key, "live_123_abc", "trimmed");
+    assert_eq!(
+        json(&body)["stream"]["key"],
+        "live_123_abc",
+        "the PC sees its own key"
+    );
+    config["stream"]["key"] = "live_123_abc".into();
+
+    for (field, bad) in [
+        ("height", serde_json::json!(100)),
+        ("fps", serde_json::json!(45)),
+        ("bitrate_kbps", serde_json::json!(100)),
+    ] {
+        let mut c = config.clone();
+        c["stream"][field] = bad;
+        let (code, _, body) = call("PUT", "/api/config").body(&c.to_string()).send(&app).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{field}: {body}");
+    }
+    let mut c = config.clone();
+    c["stream"]["service"] = "custom".into();
+    c["stream"]["server"] = "http://example.com/live".into();
+    let (code, _, _) = call("PUT", "/api/config").body(&c.to_string()).send(&app).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST, "not an RTMP address");
+
+    // Another device with the PIN: the key never goes out, and the stream can't be sent elsewhere.
+    let lan = "192.168.1.50";
+    let (_, headers, _) = call("POST", "/api/login")
+        .peer(lan)
+        .header("host", "192.168.1.5:7845")
+        .body(r#"{"pin":"123456"}"#)
+        .send(&app)
+        .await;
+    let cookie = headers
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let lan_call = |method: &'static str, uri: &'static str, body: Option<String>| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        async move {
+            let c = call(method, uri)
+                .peer(lan)
+                .header("host", "192.168.1.5:7845")
+                .header("cookie", &cookie);
+            match body {
+                Some(b) => c.body(&b).send(&app).await,
+                None => c.send(&app).await,
+            }
+        }
+    };
+    let (_, _, body) = lan_call("GET", "/api/config", None).await;
+    let mut seen = json(&body);
+    assert_eq!(seen["stream"]["key"], "");
+    assert!(!body.contains("live_123_abc"));
+    // Nor does any other answer that carries the settings (a mixer fader saves and returns them).
+    let (code, _, body) = lan_call(
+        "POST",
+        "/api/audio/volume",
+        Some(r#"{"source":"mic","volume":90}"#.into()),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert!(!body.contains("live_123_abc"));
+    // The quality is fine to change; the blank key keeps the saved one.
+    seen["stream"]["bitrate_kbps"] = 4500.into();
+    let (code, _, body) = lan_call("PUT", "/api/config", Some(seen.to_string())).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let saved = env.control.config().stream;
+    assert_eq!((saved.bitrate_kbps, saved.key.as_str()), (4500, "live_123_abc"));
+    assert!(!body.contains("live_123_abc"));
+    for (field, value) in [
+        ("service", "youtube"),
+        ("server", "rtmp://evil.example/live"),
+        ("key", "another-key"),
+    ] {
+        let mut c = seen.clone();
+        c["stream"][field] = value.into();
+        let (code, _, _) = lan_call("PUT", "/api/config", Some(c.to_string())).await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "{field}");
+    }
+    assert_eq!(
+        env.control.config().stream.service,
+        clipr_core::config::StreamService::Twitch
+    );
+    // Going live from the phone is fine: the key stays on the PC.
+    let (code, _, _) = lan_call("POST", "/api/stream", Some(r#"{"on":true}"#.into())).await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]

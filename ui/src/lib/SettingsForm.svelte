@@ -18,6 +18,7 @@
   import AudioFilters from './AudioFilters.svelte';
   import DiscordSettings from './DiscordSettings.svelte';
   import CloudSettings from './CloudSettings.svelte';
+  import StreamSettings from './StreamSettings.svelte';
   import UpdatePanel from './UpdatePanel.svelte';
   import FolderField from './FolderField.svelte';
   import CleanupWarning from './CleanupWarning.svelte';
@@ -58,8 +59,13 @@
     savedJson = JSON.stringify(saved);
   }
 
-  const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Discord', 'Cloud', 'Network', 'Appearance'] as const;
+  const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Stream', 'Discord', 'Cloud', 'Network', 'Appearance'] as const;
   let tab = $state<(typeof tabs)[number]>('General');
+  // #/settings/stream opens that section (Go live without a key points here).
+  $effect(() => {
+    const want = tabs.find((t) => t.toLowerCase() === router.id.toLowerCase());
+    if (want) untrack(() => (tab = want));
+  });
   // Simple or Advanced is remembered on this device.
   const readAdvanced = () => {
     try {
@@ -167,6 +173,7 @@
       toggle_recording: draft.hotkeys.toggle_recording,
       mark: draft.hotkeys.mark,
       toggle_mic: draft.hotkeys.toggle_mic,
+      toggle_stream: draft.hotkeys.toggle_stream,
       overlay: draft.hotkeys.overlay,
     }),
   );
@@ -406,6 +413,7 @@
     <Field title="Start / stop recording" hint="Starts or stops a full recording." error={bad.has('toggle_recording')}><HotkeyInput bind:value={draft.hotkeys.toggle_recording} conflict={bad.has('toggle_recording')} /></Field>
     <Field title="Mark moment" hint="Marks this moment; markers show on the clip's timeline." error={bad.has('mark')}><HotkeyInput bind:value={draft.hotkeys.mark} conflict={bad.has('mark')} /></Field>
     <Field title="Mute / unmute microphone" hint="Mutes your mic in clips (not in your voice chat), with a short blip. Press again to unmute. Empty (the default) turns it off." error={bad.has('toggle_mic')}><HotkeyInput bind:value={draft.hotkeys.toggle_mic} conflict={bad.has('toggle_mic')} /></Field>
+    <Field title="Start / stop streaming" hint="Goes live or ends the stream (set it up under Stream). Empty (the default) turns it off." error={bad.has('toggle_stream')}><HotkeyInput bind:value={draft.hotkeys.toggle_stream} conflict={bad.has('toggle_stream')} /></Field>
     <Field title="In-game overlay" hint="Opens the Gallery and Settings over your game, so you can watch, trim or share a clip without alt-tabbing. Press again (or Esc) to go back to the game. It's never in your clips. Empty turns it off." error={bad.has('overlay')}><HotkeyInput bind:value={draft.hotkeys.overlay} conflict={bad.has('overlay')} /></Field>
   {:else if tab === 'Games'}
     <Field title="Mode" hint="Game only buffers while a known game runs and does nothing otherwise. Desktop buffers your monitor all the time, game or not.">
@@ -451,6 +459,8 @@
     </Field>
   {:else if tab === 'Recording'}
     <Field title="Maximum length (minutes)" hint="Stop a recording after this many minutes. 0 = no limit."><input type="number" min="0" bind:value={draft.recording.max_minutes} /></Field>
+  {:else if tab === 'Stream'}
+    <StreamSettings stream={draft.stream} remote={sys?.remote ?? false} />
   {:else if tab === 'Discord'}
     <DiscordSettings discord={draft.discord} remote={sys?.remote ?? false} cloudReady={draft.cloud.enabled && !!draft.cloud.public_url} onCloud={() => (tab = 'Cloud')} />
   {:else if tab === 'Cloud'}

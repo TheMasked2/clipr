@@ -1,0 +1,18 @@
+[package]
+name = "clipr-stream"
+description = "clipr: live streaming over RTMP(S) to Twitch, YouTube or any RTMP server."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+rustls = { workspace = true }
+tracing = { workspace = true }
+webpki-roots = { workspace = true }
