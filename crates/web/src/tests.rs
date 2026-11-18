@@ -740,6 +740,17 @@ async fn lan_peers_cannot_change_the_folder_or_web_settings() {
     let (code, _, body) = put(bad).await;
     assert_eq!(code, StatusCode::FORBIDDEN, "{body}");
     let mut bad = config.clone();
+    bad["recording"]["folder"] = r"C:\Users\Public\rec".into();
+    assert_eq!(put(bad).await.0, StatusCode::FORBIDDEN);
+    let (code, _, _) = call("POST", "/api/pick-folder")
+        .peer(lan)
+        .header("host", "192.168.1.5:7845")
+        .header("cookie", &cookie)
+        .body("{}")
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    let mut bad = config.clone();
     bad["web"]["lan_pin"] = "000000".into();
     assert_eq!(put(bad).await.0, StatusCode::FORBIDDEN);
     let mut bad = config.clone();
@@ -772,6 +783,54 @@ async fn invalid_clips_folder_is_rejected_over_the_api() {
             .await;
         assert_eq!(code, StatusCode::BAD_REQUEST, "{folder}: {body}");
     }
+}
+
+#[tokio::test]
+async fn the_recordings_folder_is_checked_and_kept_apart_from_the_clips_folder() {
+    let env = env();
+    let app = router(env.state.clone());
+    let mut config = serde_json::to_value(env.control.config()).unwrap();
+    let root = env.root.to_string_lossy().into_owned();
+    config["clips"]["folder"] = root.clone().into();
+    let put = |config: &serde_json::Value| {
+        let (app, body) = (app.clone(), config.to_string());
+        async move { call("PUT", "/api/config").body(&body).send(&app).await }
+    };
+    for folder in [
+        r"C:\".to_string(),
+        "relative".into(),
+        format!(r"{root}\Recordings"),
+    ] {
+        config["recording"]["folder"] = folder.clone().into();
+        let (code, _, body) = put(&config).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{folder}: {body}");
+    }
+    let apart = tempfile::tempdir().unwrap();
+    config["recording"]["folder"] = apart.path().to_string_lossy().into_owned().into();
+    let (code, _, body) = put(&config).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(env.state.library.recordings_dir().as_deref(), Some(apart.path()));
+    // The clips folder inside the recordings folder is refused too.
+    config["clips"]["folder"] = format!(r"{}\Clips", apart.path().display()).into();
+    assert_eq!(put(&config).await.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn cleanup_preview_deletes_nothing() {
+    let env = env();
+    let app = router(env.state.clone());
+    let (code, _, body) = call("POST", "/api/cleanup/preview")
+        .body(r#"{"clips":{"max_age_days":1},"hours":48}"#)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let v = json(&body);
+    assert!(
+        v["count"].is_u64() && v["bytes"].is_u64() && v["clips"].is_array(),
+        "{body}"
+    );
+    let (code, _, _) = call("POST", "/api/cleanup/preview").send(&app).await;
+    assert_eq!(code, StatusCode::OK);
 }
 
 #[tokio::test]

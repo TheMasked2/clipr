@@ -7,6 +7,7 @@
   import DiscordPosts from '../lib/DiscordPosts.svelte';
   import CloudUploads from '../lib/CloudUploads.svelte';
   import CrashNotice from '../lib/CrashNotice.svelte';
+  import CleanupWarning from '../lib/CleanupWarning.svelte';
   import CapturePreview from '../lib/CapturePreview.svelte';
   import Mixer from '../lib/Mixer.svelte';
   import PerfPanel from '../lib/PerfPanel.svelte';
@@ -133,6 +134,7 @@
 </section>
 
 <CrashNotice />
+<CleanupWarning />
 <DiscordPosts />
 <CloudUploads />
 
@@ -183,6 +185,7 @@
     .col { display: contents; }
     .home :global(> .col > *) { order: 5; }
     .home :global(> .col > .status) { order: 0; }
+    .home :global(> .col > .cleanup) { order: 0; }
     .home :global(> .col > .capture) { order: 1; }
     .home :global(> .col > .audio) { order: 2; }
     .home :global(> .col > .preview) { order: 3; }

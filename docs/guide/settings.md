@@ -200,11 +200,20 @@ runs, right-click it and choose **Go to details**: the highlighted name is the e
 
 ## Library
 
-- **Clips folder** (empty = `Videos\clipr`): where clips go. Each game gets its own subfolder.
+- **Clips folder** (empty = `Videos\clipr`): where clips go. Each game gets its own subfolder. Type a path or
+  click **Browse…** to pick one with the Windows folder picker (only on the PC itself, not from your phone).
+- **Recordings folder** (empty = the clips folder): where full recordings go, also in a folder per game. Handy
+  for a big second drive. It can't be inside the clips folder, or the other way round. Recordings there show up
+  in the gallery like any other.
 - **Delete after (days)** (0 = keep forever): delete clips older than this. Favorites are never deleted.
 - **Maximum total size (GB)** (0 = no limit): keep the clips folder under this size by deleting the oldest
   clips. Favorites are never deleted.
-- **Minimum free space (GB)** (5): stop recording and warn when the clips drive has less than this free.
+
+  While you change these two, a note says how many clips the cleanup would delete in the next 24 hours, before
+  you save. And when clips are due to go within a day, Home shows them in a **Clips will be deleted soon** card:
+  favorite one to keep it. Dismiss the card and it stays away until other clips are due.
+- **Minimum free space (GB)** (5): stop recording and warn when the clips or recordings drive has less than this
+  free.
 - **Clean up now:** runs the age and size limits on the saved settings right away. It also runs every hour.
 
 The Home page shows your newest clip, how many clips you have, how much space is free and how much your

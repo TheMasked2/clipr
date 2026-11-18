@@ -452,25 +452,25 @@ fn check_audio(a: &AudioConfig) -> Result<()> {
     Ok(())
 }
 
-/// The clips folder may be empty (the default) or an absolute path that isn't a drive root or somewhere
+/// A clips or recordings folder may be empty (the default) or an absolute path that isn't a drive root or somewhere
 /// Windows or the user's profile lives.
-fn check_clips_folder(folder: &str) -> Result<()> {
+fn check_folder(what: &str, folder: &str) -> Result<()> {
     let folder = folder.trim();
     if folder.is_empty() {
         return Ok(());
     }
     let path = FsPath::new(folder);
     if !path.is_absolute() {
-        bail!("The clips folder must be a full path like D:\\Clips");
+        bail!("{what} must be a full path like D:\\Clips");
     }
     if path
         .components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
     {
-        bail!("The clips folder can't contain ..");
+        bail!("{what} can't contain ..");
     }
     if path.parent().is_none() {
-        bail!("The clips folder can't be a whole drive; pick a folder on it");
+        bail!("{what} can't be a whole drive; pick a folder on it");
     }
     let here = norm_path(folder);
     let inside = |vars: &[&str]| {
@@ -486,13 +486,13 @@ fn check_clips_folder(folder: &str) -> Result<()> {
         "ProgramFiles(x86)",
         "ProgramW6432",
     ]) {
-        bail!("The clips folder can't be inside Windows or Program Files");
+        bail!("{what} can't be inside Windows or Program Files");
     }
     let profile = std::env::var("USERPROFILE")
         .map(|p| norm_path(&p))
         .unwrap_or_default();
     if !profile.is_empty() && here == profile {
-        bail!("The clips folder can't be your whole user folder; pick a folder inside it");
+        bail!("{what} can't be your whole user folder; pick a folder inside it");
     }
     Ok(())
 }
@@ -547,7 +547,17 @@ pub fn validate_config(c: &Config) -> Result<()> {
     {
         bail!("The LAN PIN must be 6 digits");
     }
-    check_clips_folder(&c.clips.folder)?;
+    check_folder("The clips folder", &c.clips.folder)?;
+    check_folder("The recordings folder", &c.recording.folder)?;
+    if let Some(rec) = c.recording.own_dir(&c.clips) {
+        let (rec, clips) = (
+            norm_path(&rec.to_string_lossy()),
+            norm_path(&c.clips.dir().to_string_lossy()),
+        );
+        if rec == clips || rec.starts_with(&format!("{clips}\\")) || clips.starts_with(&format!("{rec}\\")) {
+            bail!("The recordings folder can't be inside the clips folder (or the other way round)");
+        }
+    }
     crate::discord::check(&c.discord)?;
     clipr_cloud::check(&c.cloud)?;
     let accent = c.ui.accent.as_bytes();
@@ -599,25 +609,30 @@ pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes)
     if auth::is_remote(&ext) {
         // Where files go and who can reach the API are for the PC's own user to decide.
         let now = s.control.config();
-        if config.clips.folder != now.clips.folder || config.web != now.web {
+        if config.clips.folder != now.clips.folder
+            || config.recording.folder != now.recording.folder
+            || config.web != now.web
+        {
             return Err(ApiError::new(
                 StatusCode::FORBIDDEN,
-                "the clips folder and the web settings can only be changed on the PC running clipr",
+                "the clips and recordings folders and the web settings can only be changed on the PC running clipr",
             ));
         }
     }
     if config.web.lan && config.web.lan_pin.is_empty() {
         config.web.lan_pin = auth::generate_pin();
     }
-    let before = s.control.config().clips.dir();
-    let after = config.clips.dir();
+    let folders = |c: &Config| (c.clips.dir(), c.recording.own_dir(&c.clips));
+    let before = folders(&s.control.config());
+    let after = folders(&config);
     let st = s.clone();
     let saved = blocking(move || {
         st.control
             .set_config(config)
             .map_err(|e| LibraryError::Invalid(format!("{e:#}")))?;
         if before != after {
-            st.library.set_clips_dir(after);
+            st.library.set_clips_dir(after.0);
+            st.library.set_recordings_dir(after.1);
             st.library.scan()?;
             st.library.notify_changed();
         }
@@ -836,6 +851,94 @@ pub async fn cleanup(State(s): State<AppState>) -> ApiResult<Json<Value>> {
         s.library.notify_changed();
     }
     Ok(Json(json!({ "removed": removed, "freed_bytes": freed })))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct CleanupPreviewReq {
+    /// The limits to try (the settings page's unsaved ones); the saved ones when missing.
+    clips: Option<clipr_core::config::ClipsConfig>,
+    /// How far ahead to look, in hours.
+    hours: Option<u32>,
+}
+
+/// What the cleanup would delete in the next `hours` (default 24) with the given or saved limits. Deletes
+/// nothing. `{count, bytes, clips}` with the first few clips, oldest first.
+pub async fn cleanup_preview(State(s): State<AppState>, body: Bytes) -> ApiResult<Json<Value>> {
+    let req: CleanupPreviewReq = if body.is_empty() {
+        CleanupPreviewReq::default()
+    } else {
+        parse_json(&body)?
+    };
+    let mut clips = req.clips.unwrap_or_else(|| s.control.config().clips);
+    // Only the limits come from the request; the folder is always the saved one.
+    clips.folder = s.control.config().clips.folder;
+    let hours = req.hours.unwrap_or(24).min(24 * 365);
+    let lib = s.library.clone();
+    let doomed = blocking(move || {
+        lib.cleanup_preview(&clips, std::time::Duration::from_secs(u64::from(hours) * 3600))
+    })
+    .await?;
+    let bytes: u64 = doomed.iter().map(|c| c.size_bytes).sum();
+    let count = doomed.len();
+    let first: Vec<Clip> = doomed.into_iter().take(5).collect();
+    Ok(Json(json!({ "count": count, "bytes": bytes, "clips": first })))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct PickFolderReq {
+    title: String,
+    start: String,
+}
+
+/// Opens the Windows folder picker on the PC and waits for it: `{path}`, null when cancelled. Only on the PC
+/// itself; one picker at a time.
+pub async fn pick_folder(State(s): State<AppState>, ext: Extensions, body: Bytes) -> ApiResult<Json<Value>> {
+    if auth::is_remote(&ext) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "Folders can only be picked on the PC clipr runs on.",
+        ));
+    }
+    static OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if OPEN.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "A folder picker is already open.",
+        ));
+    }
+    struct Close;
+    impl Drop for Close {
+        fn drop(&mut self) {
+            OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let close = Close;
+    let req: PickFolderReq = if body.is_empty() {
+        PickFolderReq::default()
+    } else {
+        parse_json(&body)?
+    };
+    let control = s.control.clone();
+    let picked = tokio::task::spawn_blocking(move || {
+        let _close = close;
+        let title = if req.title.trim().is_empty() {
+            "Pick a folder"
+        } else {
+            req.title.trim()
+        };
+        control.pick_folder(title, req.start.trim())
+    })
+    .await
+    .map_err(|e| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("the folder picker failed: {e}"),
+        )
+    })?
+    .map_err(|m| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, m))?;
+    Ok(Json(json!({ "path": picked })))
 }
 
 pub async fn disk(State(s): State<AppState>) -> ApiResult<Json<Value>> {

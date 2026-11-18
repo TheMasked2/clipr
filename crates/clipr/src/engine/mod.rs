@@ -283,6 +283,9 @@ impl Supervisor {
             )
         };
         record::recover(&self.config.clips.dir());
+        if let Some(dir) = self.config.recording.own_dir(&self.config.clips) {
+            record::recover(&dir);
+        }
         let mut stats_at = Instant::now() + Duration::from_secs(10);
         let mut perf_at = Instant::now() + Duration::from_secs(1);
         let mut tick_at = Instant::now();
@@ -813,7 +816,7 @@ impl Supervisor {
             );
             return;
         };
-        if let Some(message) = self.low_disk() {
+        if let Some(message) = self.low_disk(&self.config.clips.dir()) {
             self.fail(&message, "Disk almost full");
             return;
         }
@@ -863,7 +866,7 @@ impl Supervisor {
         if self.recording.is_some() {
             return;
         }
-        if let Some(message) = self.low_disk() {
+        if let Some(message) = self.low_disk(&self.config.recording.dir(&self.config.clips)) {
             self.fail(&message, "Disk almost full");
             self.decline_auto(); // don't retry an auto recording every poll
             return;
@@ -939,7 +942,7 @@ impl Supervisor {
                 if let Some(r) = self.recording.as_mut() {
                     r.next_disk_check = now + Duration::from_secs(10);
                 }
-                if let Some(message) = self.low_disk() {
+                if let Some(message) = self.low_disk(&self.config.recording.dir(&self.config.clips)) {
                     self.stop_recording(true);
                     self.fail(
                         &format!("The recording was stopped. {message}"),
@@ -964,7 +967,11 @@ impl Supervisor {
             .as_ref()
             .map_or("Desktop", |g| g.name.as_str())
             .to_string();
-        let reserved = save::clip_path(&self.config.clips.dir(), &game, "_recording");
+        let reserved = save::clip_path(
+            &self.config.recording.dir(&self.config.clips),
+            &game,
+            "_recording",
+        );
         let recorder = record::Recorder::start(reserved.path().to_path_buf(), video, audio);
         self.shared.lock().unwrap().record = Some(recorder.sink());
         if let Some(r) = self.recording.as_mut() {
@@ -1003,15 +1010,15 @@ impl Supervisor {
         drop(reserved);
     }
 
-    /// A message when the clips drive has less free space than `clips.min_free_gb` (0 = never).
-    fn low_disk(&self) -> Option<String> {
+    /// A message when the drive of `dir` (the clips or recordings folder) has less free space than
+    /// `clips.min_free_gb` (0 = never).
+    fn low_disk(&self, dir: &std::path::Path) -> Option<String> {
         let min_gb = u64::from(self.config.clips.min_free_gb);
         if min_gb == 0 {
             return None;
         }
-        let dir = self.config.clips.dir();
-        let _ = std::fs::create_dir_all(&dir);
-        let free = crate::win::free_bytes(&dir)?;
+        let _ = std::fs::create_dir_all(dir);
+        let free = crate::win::free_bytes(dir)?;
         const GB: u64 = 1 << 30;
         (free < min_gb * GB).then(|| {
             format!(

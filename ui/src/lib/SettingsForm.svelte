@@ -19,6 +19,8 @@
   import DiscordSettings from './DiscordSettings.svelte';
   import CloudSettings from './CloudSettings.svelte';
   import UpdatePanel from './UpdatePanel.svelte';
+  import FolderField from './FolderField.svelte';
+  import CleanupWarning from './CleanupWarning.svelte';
 
   let { initial }: { initial: Config } = $props();
 
@@ -385,10 +387,12 @@
     <Field title="Blocked programs" hint="Exe names never treated as games, even if the known list has them." stacked><ListEditor bind:items={draft.games.blocked} placeholder="program.exe" /></Field>
     <Field title="Auto-record" hint="Start a full recording by itself when one of these games starts (exe names)." stacked><ListEditor bind:items={draft.games.auto_record} /></Field>
   {:else if tab === 'Library'}
-    <Field title="Clips folder" hint="Where clips go. Empty = Videos\clipr. Each game gets its own subfolder." stacked><input type="text" bind:value={draft.clips.folder} placeholder="Videos\clipr" /></Field>
+    <Field title="Clips folder" hint="Where clips go. Empty = Videos\clipr. Each game gets its own subfolder." stacked><FolderField bind:value={draft.clips.folder} placeholder="Videos\clipr" label="Clips folder" title="Where should clips go?" remote={sys?.remote ?? false} /></Field>
+    <Field title="Recordings folder" hint="Where full recordings go, also in game folders. Empty = the clips folder. Handy for a big second drive. It can't be inside the clips folder or the other way round." stacked><FolderField bind:value={draft.recording.folder} placeholder="Same as the clips folder" label="Recordings folder" title="Where should recordings go?" remote={sys?.remote ?? false} /></Field>
     <Field title="Delete after (days)" hint="Delete clips older than this many days (favorites never). 0 = keep forever."><input type="number" min="0" bind:value={draft.clips.max_age_days} /></Field>
     <Field title="Maximum total size (GB)" hint="Keep the clips folder under this by deleting the oldest (favorites never). 0 = no limit."><input type="number" min="0" bind:value={draft.clips.max_total_gb} /></Field>
-    <Field title="Minimum free space (GB)" hint="Stop recording and warn when the clips drive has less than this free."><input type="number" min="0" bind:value={draft.clips.min_free_gb} /></Field>
+    <CleanupWarning limits={draft.clips} />
+    <Field title="Minimum free space (GB)" hint="Stop recording and warn when the clips or recordings drive has less than this free."><input type="number" min="0" bind:value={draft.clips.min_free_gb} /></Field>
     <Field title="Clean up now" hint="Runs the age and size limits above on the saved settings (it also runs hourly). Save first if you changed them.">
       <button onclick={cleanNow} disabled={cleaning}>{cleaning ? 'Cleaning…' : 'Clean up now'}</button>
       {#if cleanMsg}<span class="muted small">{cleanMsg}</span>{/if}
