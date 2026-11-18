@@ -43,6 +43,12 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `POST /api/mark` → `204`
 - `POST /api/mic` body `{"muted": true}` → `204`: mutes or unmutes the microphone in clips (with a blip)
 - `POST /api/sound/test` body `{"volume": 60}` (0–100) → `204`: plays the save sound once at that volume
+- `GET /api/perf` → `200` JSON array, one sample a second over the last two minutes, oldest first:
+  `{"at_ms", "fps", "fresh", "late", "dropped", "frame_ms", "kbps", "cpu", "mem_mb", "buffer_secs", "buffer_mb",
+  "capturing"}`. `fps` counts encoded frames per second, `fresh` those with a new picture; `late` and `dropped`
+  are frames encoded after their slot and slots skipped in that second; `frame_ms` is the capture thread's
+  average time per frame; `kbps` the video actually written; `cpu` clipr's share of all cores in %; `mem_mb`
+  its working set; `buffer_*` what the replay buffer holds.
 - `POST /api/levels/watch` → `204`: a page shows level meters. For the next 5 seconds clipr keeps sending
   levels, and while nothing is captured it runs audio for the meters alone (recording nothing; it opens the
   microphone if that source is on). Pages call it every 2 seconds while a meter is on screen.

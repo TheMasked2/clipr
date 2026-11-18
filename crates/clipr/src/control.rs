@@ -120,6 +120,10 @@ impl Control for AppControl {
         self.engine.watch_levels();
     }
 
+    fn perf(&self) -> serde_json::Value {
+        serde_json::to_value(self.engine.perf()).unwrap_or_default()
+    }
+
     fn crashes(&self) -> serde_json::Value {
         if !self.config().privacy.crash_reports {
             return json!([]);

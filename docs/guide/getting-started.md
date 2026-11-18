@@ -49,7 +49,17 @@ part of it:
 | Mark a moment | off |
 
 Set or change them under [Settings → Hotkeys](settings.md#hotkeys). The **Home** page has the same actions as
-buttons, plus a status card that shows whether clipr is buffering or recording.
+buttons, plus an overview like OBS's main window:
+
+- a status card that shows whether clipr is buffering or recording, and the live preview;
+- **Capture**: what to record (games only, or always) and the quality, resolution and frame rate, one click
+  each. These save at once and restart capture, so the replay buffer starts over;
+- **Audio**: the mixer, with each source's live level and a volume fader (see
+  [Settings → Audio](settings.md#audio));
+- **Performance**: the frame rate against your target, how many frames had a new picture, the time clipr spends
+  per frame, the video bitrate, clipr's CPU and memory, each with the last two minutes as a small graph (hover it
+  for the numbers, or click **Show numbers** for a table). Late or skipped frames in the last minute are named
+  below, with what to try.
 
 When a clip is saved you hear a short sound and see a small "Clip saved" note in the top-right corner. The note
 never shows up in your clips. The sound plays through your speakers like any other sound, so with system audio

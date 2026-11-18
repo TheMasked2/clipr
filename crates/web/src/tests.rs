@@ -1420,3 +1420,11 @@ async fn volume_endpoint_saves_one_source() {
     let (code, _, _) = call("POST", "/api/levels/watch").send(&app).await;
     assert_eq!(code, StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn perf_endpoint_returns_samples() {
+    let env = env();
+    let (code, body) = get_body(router(env.state.clone()), "/api/perf").await;
+    assert_eq!(code, StatusCode::OK);
+    assert!(json(&body).as_array().is_some());
+}

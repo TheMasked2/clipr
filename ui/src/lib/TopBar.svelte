@@ -11,7 +11,7 @@
 </script>
 
 <header>
-  <div class="inner">
+  <div class="inner" class:wide={router.route === 'home'}>
     <a class="brand" href="#/"><img src="/icon.png" alt="" width="24" height="24" />clipr</a>
     <StatusPill />
     <nav>
@@ -34,6 +34,9 @@
     position: sticky;
     top: 0;
     z-index: 1;
+  }
+  .inner.wide {
+    max-width: 1280px;
   }
   .inner {
     max-width: 960px;

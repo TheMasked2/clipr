@@ -18,7 +18,8 @@
   <PinScreen />
 {:else}
   <TopBar />
-  <main>
+  <!-- Home is an overview with two columns, so it gets more room. -->
+  <main class:wide={router.route === 'home'}>
     {#if router.route === 'gallery'}
       <Gallery />
     {:else if router.route === 'clip'}
@@ -40,5 +41,8 @@
     max-width: 960px;
     margin: 0 auto;
     padding: 1.25rem 1rem 3rem;
+  }
+  main.wide {
+    max-width: 1280px;
   }
 </style>

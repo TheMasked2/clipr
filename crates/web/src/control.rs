@@ -57,6 +57,11 @@ pub trait Control: Send + Sync + 'static {
     /// A page shows the level meters: keep levels coming for a few seconds, even while nothing is captured.
     fn watch_levels(&self) {}
 
+    /// Performance samples, one a second over the last two minutes (see `GET /api/perf` in `docs/api.md`).
+    fn perf(&self) -> serde_json::Value {
+        serde_json::json!([])
+    }
+
     /// Crash reports from earlier runs, newest first, for `GET /api/crashes` (see `docs/api.md`). Empty
     /// unless `privacy.crash_reports` is on.
     fn crashes(&self) -> serde_json::Value {

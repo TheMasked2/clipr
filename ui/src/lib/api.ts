@@ -404,6 +404,22 @@ export const setRecording = (on: boolean) => request<void>('POST', '/api/recordi
 export const markMoment = () => request<void>('POST', '/api/mark');
 export const setMicMuted = (muted: boolean) => request<void>('POST', '/api/mic', { muted });
 export const testSound = (volume: number) => request<void>('POST', '/api/sound/test', { volume });
+/** One second of capture, for Home's performance numbers (see `GET /api/perf`). */
+export interface PerfSample {
+  at_ms: number;
+  fps: number;
+  fresh: number;
+  late: number;
+  dropped: number;
+  frame_ms: number;
+  kbps: number;
+  cpu: number;
+  mem_mb: number;
+  buffer_secs: number;
+  buffer_mb: number;
+  capturing: boolean;
+}
+export const getPerf = () => request<PerfSample[]>('GET', '/api/perf');
 /** A page shows level meters: keeps levels coming for 5 s, even while nothing is captured. */
 export const watchLevels = () => request<void>('POST', '/api/levels/watch');
 /** Sets one source's volume (0–200 %), saved and applied at once. */

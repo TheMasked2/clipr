@@ -175,6 +175,7 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
         }
 
         let frame = latest.lock().unwrap().take();
+        let work_start = now_100ns();
         if let Some(frame) = frame {
             let input = (frame.width, frame.height);
             // A new size (resolution change, window resize) needs a new converter; the output size stays.
@@ -206,6 +207,7 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
         let frame = last.as_ref().expect("checked above");
         live.tick(&gpu, frame);
         encoder.encode(frame, deadline, &mut on_packet)?;
+        shared.lock().unwrap().stats.work_100ns += (now_100ns() - work_start).max(0) as u64;
         tick += 1;
     }
 
