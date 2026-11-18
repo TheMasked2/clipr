@@ -164,13 +164,23 @@ fn fit(text: &str) -> String {
     }
 }
 
+/// The second line while clipr buffers. One is picked per session (by its start time), so it varies from
+/// game to game but doesn't flicker.
+const CLIPPING: [&str; 4] = [
+    "Clipping with clipr",
+    "Ready to clip the highlights · clipr",
+    "Replay buffer rolling · clipr",
+    "Saving the good bits with clipr",
+];
+
 /// The activity Discord shows: the game on the first line, what clipr does on the second, the elapsed time,
-/// and the game's icon with clipr's logo on top.
+/// and the game's icon with clipr's logo on top. The member list shows the game ("Playing VALORANT")
+/// instead of the app's name (`status_display_type` 2 = details).
 pub fn activity(status: &Status, start: u64) -> Value {
     let doing = if status.recording_since.is_some() {
         "Recording with clipr"
     } else {
-        "Clipping with clipr"
+        CLIPPING[(start % CLIPPING.len() as u64) as usize]
     };
     let details = fit(status.game.as_deref().unwrap_or("Desktop"));
     let assets = match &status.icon {
@@ -183,6 +193,8 @@ pub fn activity(status: &Status, start: u64) -> Value {
         None => json!({ "large_image": "clipr", "large_text": "clipr" }),
     };
     json!({
+        "type": 0,
+        "status_display_type": 2,
         "details": details,
         "state": doing,
         "timestamps": { "start": start },
@@ -385,7 +397,14 @@ mod tests {
         };
         let a = activity(&game, 100);
         assert_eq!(a["details"], "VALORANT");
-        assert_eq!(a["state"], "Clipping with clipr");
+        assert_eq!(a["status_display_type"], 2);
+        assert_eq!(a["state"], CLIPPING[0]);
+        assert_eq!(activity(&game, 101)["state"], CLIPPING[1]);
+        assert!(
+            CLIPPING
+                .iter()
+                .all(|l| l.contains("clipr") && (2..=128).contains(&l.chars().count()))
+        );
         assert_eq!(a["timestamps"]["start"], 100);
         assert_eq!(a["assets"]["large_image"], game.icon.as_deref().unwrap());
         assert_eq!(a["assets"]["small_image"], "clipr");

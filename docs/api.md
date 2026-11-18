@@ -60,7 +60,8 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
   Files, or the whole user profile. From another machine (LAN) `clips.folder` and everything under `web` are
   read-only: changing them gives `403`
 - `GET /api/system` → `{ "gpus": [{"name","vendor","encoders":["H.264","HEVC","AV1"]}], "monitors":
-  [{"index":1,"name","width","height","primary"}], "known_games": 2600 }` (free-form; show what's there)
+  [{"index":1,"name","width","height","primary"}], "known_games": 2600, "elevated": false }` (free-form; show
+  what's there). `elevated`: clipr runs as administrator, which can break game capture.
 
 ## Crash reports
 

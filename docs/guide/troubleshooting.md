@@ -46,9 +46,11 @@ Add its exe under Settings → Games → **Blocked programs**.
 **I don't see the "Clip saved" note.**
 Games in exclusive fullscreen hide it; the sound still plays. Borderless or windowed mode shows it.
 
-**My clips stutter while the game runs at a high frame rate.**
-Make sure **High priority** is on (Settings → Video → Advanced). Capping the game's frame rate a little under
-your monitor's refresh rate also helps.
+**My clips stutter or skip frames.**
+Cap the game's frame rate a little under your monitor's refresh rate, and don't run clipr as administrator.
+**GPU priority** (Settings → Video → Advanced) helps on some PCs and hurts on others: try it both ways. If it
+still stutters, send the log from `%LOCALAPPDATA%\clipr\logs`: clipr notes there how many frames it got
+from Windows while a game ran.
 
 **My voice is too quiet, too loud or noisy.**
 Use the filters under Settings → Audio, and watch the Before / After meter while you tune them. If the meter

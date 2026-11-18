@@ -16,6 +16,7 @@
   let disk = $state<api.Disk | null>(null);
   let fresh = $state('');
   let now = $state(Date.now());
+  let elevated = $state(false);
 
   const st = $derived(app.status);
   const hk = $derived(app.config?.hotkeys);
@@ -40,6 +41,7 @@
   onMount(() => {
     void refetch();
     void loadDisk();
+    api.getSystem().then((s) => (elevated = !!s.elevated)).catch(() => {});
     const tick = setInterval(() => (now = Date.now()), 500);
     const off = onServerEvent((e) => {
       if (e.type === 'clip_saved') {
@@ -85,6 +87,7 @@
     {#if st?.encoder}<span class="sep">·</span>Encoder: {st.encoder}{/if}
   </div>
   {#if st?.error}<div class="banner err">{st.error}</div>{/if}
+  {#if elevated}<div class="banner warn">clipr is running as administrator. Windows can then block game capture, and your settings may belong to another account. Quit clipr and start it normally.</div>{/if}
   {#if !app.connected && st}<div class="banner warn">Disconnected from clipr, retrying…</div>{/if}
 
   <div class="actions">

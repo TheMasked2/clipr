@@ -11,6 +11,10 @@
 
 #![cfg(windows)]
 
+mod regular;
+
+pub use regular::{is_fragmented, make_regular};
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};

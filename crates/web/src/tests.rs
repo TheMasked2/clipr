@@ -188,7 +188,7 @@ async fn list_filter_games_and_shelves() {
         .iter()
         .find(|c| c["id"] == "Valorant/a.mp4")
         .unwrap();
-    assert_eq!(a["url"], "/media/Valorant/a.mp4");
+    assert!(a["url"].as_str().unwrap().starts_with("/media/Valorant/a.mp4?v="));
     assert_eq!(a["thumb"], serde_json::Value::Null);
     assert_eq!(a["sprite_frames"], 10);
 
@@ -233,7 +233,12 @@ async fn patch_renames_and_delete_removes() {
     let clip = json(&body);
     assert_eq!(clip["id"], "G/Ace round.mp4");
     assert_eq!(clip["title"], "Ace round");
-    assert_eq!(clip["url"], "/media/G/Ace%20round.mp4");
+    assert!(
+        clip["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("/media/G/Ace%20round.mp4?v=")
+    );
     assert!(env.root.join("G/Ace round.mp4").exists());
     assert!(!env.root.join("G/old.mp4").exists());
 

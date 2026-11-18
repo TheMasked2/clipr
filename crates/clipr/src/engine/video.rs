@@ -18,6 +18,7 @@ use clipr_encode::EncodeSettings;
 use clipr_encode::mf::HwEncoder;
 use clipr_gpu::{Gpu, Nv12Converter, ScaleMode, Snapshotter};
 use clipr_mux::MediaFormat;
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
 use windows::Win32::Graphics::Gdi::HMONITOR;
 
@@ -26,12 +27,14 @@ use crate::preview;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoSettings {
-    /// The monitor to capture (an `HMONITOR` value).
+    /// The monitor to capture (an `HMONITOR` value). With `window` set, the monitor that window is on.
     pub monitor: isize,
+    /// The game window to capture (an `HWND` value) instead of the whole monitor.
+    pub window: Option<isize>,
     pub encode: EncodeSettings,
     /// Height asked for in the settings (0 = native); the width follows the monitor's shape.
     pub height: u32,
-    pub high_priority: bool,
+    pub gpu_priority: bool,
 }
 
 /// Starts the pipeline thread. It runs until `stop` is set or something fails.
@@ -61,14 +64,11 @@ pub fn output_size((w, h): (u32, u32), height: u32) -> (u32, u32) {
 }
 
 fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Result<()> {
-    if settings.high_priority {
-        clipr_gpu::raise_thread_priority();
-    }
+    // Only clipr's own frame thread: keeps capture smooth when a game loads every core, at no cost to it.
+    clipr_gpu::raise_thread_priority();
     let monitor = HMONITOR(settings.monitor as *mut _);
     let gpu = Gpu::for_monitor(monitor)?;
-    if settings.high_priority {
-        clipr_gpu::raise_gpu_priority(&gpu);
-    }
+    clipr_gpu::set_gpu_priority(settings.gpu_priority);
     let monitor_size = clipr_capture::list_monitors()?
         .into_iter()
         .find(|m| m.handle == monitor)
@@ -79,19 +79,12 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
             )
         })
         .context("the monitor to capture is gone")?;
-    let size = output_size(monitor_size, settings.height);
-    let encode = EncodeSettings {
-        width: size.0,
-        height: size.1,
-        ..settings.encode.clone()
-    };
-
     let latest: Arc<Mutex<Option<CapturedFrame>>> = Arc::default();
-    let session = {
+    let start = |target: Target| {
         let latest = latest.clone();
         CaptureSession::start(
             &gpu,
-            Target::Monitor(monitor),
+            target,
             CaptureOptions {
                 buffers: 3,
                 ..Default::default()
@@ -100,13 +93,44 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
                 // Keep only the newest; dropping the older one hands its surface back to WGC.
                 *latest.lock().unwrap() = Some(frame);
             },
-        )?
+        )
+    };
+    // A game window that Windows won't capture (some protect themselves) falls back to its monitor.
+    let (mut session, source_size) = match settings.window {
+        Some(hwnd) => match start(Target::Window(HWND(hwnd as *mut _))) {
+            Ok(session) => {
+                let size = session.content_size();
+                let size = if size.0 >= 2 && size.1 >= 2 {
+                    size
+                } else {
+                    monitor_size
+                };
+                (session, size)
+            }
+            Err(e) => {
+                tracing::warn!("can't capture the game window, capturing its monitor instead: {e:#}");
+                (start(Target::Monitor(monitor))?, monitor_size)
+            }
+        },
+        None => (start(Target::Monitor(monitor))?, monitor_size),
+    };
+    // The output keeps this size; a window resized later is scaled to fit it.
+    let size = output_size(source_size, settings.height);
+    let encode = EncodeSettings {
+        width: size.0,
+        height: size.1,
+        ..settings.encode.clone()
     };
     let mut encoder = HwEncoder::new(&gpu, &encode)?;
     tracing::info!(
-        "capturing {}x{} → {}x{} {:?} {} fps {} kbps with {}",
-        monitor_size.0,
-        monitor_size.1,
+        "capturing the {} {}x{} → {}x{} {:?} {} fps {} kbps with {}",
+        if settings.window.is_some() {
+            "game window"
+        } else {
+            "monitor"
+        },
+        source_size.0,
+        source_size.1,
         size.0,
         size.1,
         encode.codec,
@@ -123,6 +147,8 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
     let mut live = Preview::default();
     let mut tick: i64 = 0;
     let t0 = now_100ns();
+    // A window that sends no picture at all (some exclusive-fullscreen games) falls back to the monitor.
+    let mut window_deadline = settings.window.map(|_| Instant::now() + WINDOW_FIRST_FRAME);
     let mut on_packet = |encoder: &HwEncoder, sample: clipr_encode::mf::Packet| -> Result<()> {
         let packet = clipr_mux::packet_from_sample(&sample)?;
         let mut s = shared.lock().unwrap();
@@ -168,6 +194,12 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
             shared.lock().unwrap().stats.repeated += 1;
         } else {
             // Nothing captured yet (WGC sends the first frame when the screen next changes).
+            if window_deadline.is_some_and(|d| Instant::now() >= d) {
+                tracing::warn!("the game window sent no picture; capturing its monitor instead");
+                window_deadline = None;
+                session.stop();
+                session = start(Target::Monitor(monitor))?;
+            }
             tick += 1;
             continue;
         }
@@ -190,6 +222,9 @@ struct Preview {
     snapshotter: Option<Snapshotter>,
     next: Option<Instant>,
 }
+
+/// How long a game window may take to send its first picture before capture falls back to the monitor.
+const WINDOW_FIRST_FRAME: Duration = Duration::from_secs(3);
 
 /// How long the preview waits after a GPU failure before it tries again.
 const RETRY: Duration = Duration::from_secs(10);

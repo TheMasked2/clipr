@@ -54,7 +54,7 @@
     <h1>{step === 4 ? 'You are set' : 'Welcome to clipr'}</h1>
 
     {#if step === 0}
-      <p class="muted">Pick an accent colour. You can change it any time in Settings → Look.</p>
+      <p class="muted">Pick an accent colour. You can change it any time in Settings → Appearance.</p>
       <div class="row">
         {#each swatches as c (c)}
           <button

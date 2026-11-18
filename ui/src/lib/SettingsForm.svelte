@@ -24,6 +24,7 @@
   const clone = (c: Config): Config => structuredClone($state.snapshot(c)) as Config;
   const draft = $state<Config>(untrack(() => clone(initial)));
   let savedJson = $state(untrack(() => JSON.stringify(initial)));
+  let pinShown = $state(false);
   const dirty = $derived(JSON.stringify(draft) !== savedJson);
 
   const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Discord', 'Cloud', 'Network', 'Appearance'] as const;
@@ -211,7 +212,7 @@
           {/if}
         </select>
       </Field>
-      <Field title="High priority" hint="Let clipr's capture go first on the GPU and CPU, so a game at uncapped FPS can't make your clips stutter. The game doesn't notice: clipr's GPU work is about 0.1 ms a frame. On by default."><Toggle bind:checked={draft.video.high_priority} label="High priority" /></Field>
+      <Field title="GPU priority" hint="Let clipr's capture go a little ahead of the game on the GPU. It helps on some PCs and makes clips skip frames on others: if your clips stutter, try it both ways. Off by default."><Toggle bind:checked={draft.video.gpu_priority} label="GPU priority" /></Field>
     {/if}
     <Field title="Per-game profiles" hint="Use other video settings while a particular game runs. Match by the game's name or exe (cs2.exe), any case. Leave a box empty to keep the normal value above. Capture restarts when the game changes." stacked>
       <div class="profiles">
@@ -331,6 +332,15 @@
         <button class="chip" class:on={draft.games.mode === 'always'} onclick={() => (draft.games.mode = 'always')}>Desktop</button>
       </div>
     </Field>
+    {#if draft.games.mode === 'auto'}
+      <Field title="Capture" hint="Game window records only the game, so alt-tabbing, notifications and your other screens stay out of clips. Pick Whole monitor if a game's clips come out black.">
+        <div class="row">
+          <button class="chip" class:on={draft.games.capture === 'window'} onclick={() => (draft.games.capture = 'window')}>Game window</button>
+          <button class="chip" class:on={draft.games.capture === 'monitor'} onclick={() => (draft.games.capture = 'monitor')}>Whole monitor</button>
+        </div>
+      </Field>
+    {/if}
+    <p class="muted small note">{app.status?.game ? `Detected right now: ${app.status.game}` : 'No game detected right now.'}</p>
     <p class="muted small note">{sys?.known_games != null ? `clipr knows ${sys.known_games.toLocaleString()} games.` : 'Loading the known games list…'}</p>
     <Field title="Extra games" hint="Games to detect by exe name (mygame.exe) on top of the known list." stacked><ListEditor bind:items={draft.games.custom} /></Field>
     <Field title="Blocked programs" hint="Exe names never treated as games, even if the known list has them." stacked><ListEditor bind:items={draft.games.blocked} placeholder="program.exe" /></Field>
@@ -359,7 +369,9 @@
     {#if app.config?.web.lan && app.config.web.lan_pin}
       <div class="pin">
         <div class="muted small">PIN for other devices</div>
-        <div class="pinv">{app.config.web.lan_pin}</div>
+        <!-- Hidden until asked, so clicking through Settings while recording doesn't put it in a clip. -->
+        <div class="pinv">{pinShown ? app.config.web.lan_pin : '••••••'}</div>
+        <button class="link small" onclick={() => (pinShown = !pinShown)}>{pinShown ? 'Hide PIN' : 'Show PIN'}</button>
         <div class="muted small">Open <code>{lanUrl}</code> on the other device and enter it.</div>
       </div>
       {#if sys?.lan_error}

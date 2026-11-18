@@ -83,7 +83,7 @@ export interface Config {
     sound_volume: number;
     toast_on_save: boolean;
   };
-  video: { codec: Codec; fps: number; height: number; bitrate_kbps: number; monitor: number; high_priority: boolean };
+  video: { codec: Codec; fps: number; height: number; bitrate_kbps: number; monitor: number; gpu_priority: boolean };
   audio: {
     system: boolean;
     system_volume: number;
@@ -112,6 +112,8 @@ export interface Config {
   clips: { folder: string; max_age_days: number; max_total_gb: number; min_free_gb: number };
   games: {
     mode: GameMode;
+    /** What "Game only" captures: the game's window, or the whole monitor it's on. */
+    capture: 'window' | 'monitor';
     custom: string[];
     blocked: string[];
     auto_record: string[];
@@ -210,6 +212,8 @@ export interface SystemInfo {
   gpus?: { name: string; vendor?: string; encoders?: string[] }[];
   monitors?: { index: number; name: string; width: number; height: number; primary: boolean }[];
   known_games?: number;
+  /** clipr runs as administrator, which can break game capture. */
+  elevated?: boolean;
   /** This page is open on another device (webhook URLs are hidden from it). */
   remote?: boolean;
   /** Access from the local network is on, but its port couldn't be opened. */

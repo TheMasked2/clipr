@@ -203,6 +203,7 @@ impl Control for AppControl {
             "gpus": gpus,
             "monitors": monitors,
             "known_games": (self.known_games)(),
+            "elevated": crate::win::is_elevated(),
             "preset": PRESET.get().cloned().flatten(),
         })
     }

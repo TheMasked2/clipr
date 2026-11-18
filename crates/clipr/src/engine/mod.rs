@@ -25,7 +25,7 @@ use clipr_audio::AudioCapture;
 
 use crate::sound::{self, Cue};
 use clipr_buffer::{Packet, ReplayBuffer, SECOND};
-use clipr_core::config::{AudioConfig, Config, GameMode, VideoCodec};
+use clipr_core::config::{AudioConfig, Config, GameCapture, GameMode, VideoCodec};
 use clipr_core::events::{Bus, Event};
 use clipr_core::status::{Activity, Level, RecState, Status};
 use clipr_encode::{Codec, EncodeSettings};
@@ -164,6 +164,7 @@ pub fn start(
                 error: None,
                 shared: Arc::default(),
                 last_stats: Stats::default(),
+                capture_window: None,
                 toast: crate::overlay::start(),
                 levels: shared_levels,
                 presence: clipr_discord::Presence::start(),
@@ -213,6 +214,9 @@ struct Supervisor {
     error: Option<String>,
     shared: Arc<Mutex<Shared>>,
     last_stats: Stats,
+    /// The game window "Game only" captures, as (pid, HWND): latched per game process, so focus moving to a
+    /// launcher or dialog of the same game doesn't restart capture.
+    capture_window: Option<(u32, isize)>,
     toast: crate::overlay::Toast,
     levels: Levels,
     /// Rich Presence in the user's Discord profile, and what it was last told.
@@ -321,6 +325,10 @@ impl Supervisor {
         if now >= self.next_poll {
             self.next_poll = now + GAME_POLL;
             self.game = self.watcher.poll();
+            self.capture_window = self
+                .game
+                .as_ref()
+                .and_then(|g| latch_window(self.capture_window, g.pid));
             // The game audio source records whatever game runs now, unless the game is also one of the apps
             // on their own track: then that track has it, and recording it twice would double it in the mix.
             let apps = &self.config.audio.apps;
@@ -384,6 +392,14 @@ impl Supervisor {
         if !self.buffering && !recording {
             return None;
         }
+        // "Game only" captures just the game's window (unless set to its monitor); "Desktop" the monitor.
+        let window = match (&self.game, self.config.games.mode, self.config.games.capture) {
+            (Some(game), GameMode::Auto, GameCapture::Window) => self
+                .capture_window
+                .filter(|&(pid, _)| pid == game.pid)
+                .map(|(_, hwnd)| hwnd),
+            _ => None,
+        };
         let monitor = match (&self.game, self.config.games.mode) {
             (Some(game), _) => game.monitor,
             (None, GameMode::Always) => self.configured_monitor(),
@@ -401,6 +417,7 @@ impl Supervisor {
         };
         let video = VideoSettings {
             monitor,
+            window,
             encode: EncodeSettings {
                 codec: match v.codec {
                     VideoCodec::H264 => Codec::H264,
@@ -413,7 +430,7 @@ impl Supervisor {
                 ..Default::default()
             },
             height: v.height,
-            high_priority: v.high_priority,
+            gpu_priority: v.gpu_priority,
         };
         Some(Wanted {
             video,
@@ -627,7 +644,20 @@ impl Supervisor {
         if self.pipeline.is_none() {
             return;
         }
-        tracing::debug!("last 10 s: {d:?}");
+        // Logged at info level so a log sent in with "my clips stutter" shows what happened.
+        let total = d.fresh + d.repeated;
+        // A still desktop repeats frames by design (Windows sends a picture only when something changes).
+        if self.game.is_some() && total > 0 && (d.repeated * 5 > total || d.dropped + d.late > 0) {
+            tracing::info!(
+                "last 10 s: {} new frames, {} repeated (no new picture from Windows), {} late, {} dropped",
+                d.fresh,
+                d.repeated,
+                d.late,
+                d.dropped
+            );
+        } else {
+            tracing::debug!("last 10 s: {d:?}");
+        }
         if d.dropped + d.late > 30 {
             tracing::warn!(
                 "{} late and {} dropped frames in 10 s: something is starving clipr (a game at uncapped \
@@ -885,4 +915,20 @@ fn cue(volume: Option<u32>, ok: bool) {
     if let Some(volume) = volume {
         sound::play(if ok { Cue::Saved } else { Cue::Failed }, volume);
     }
+}
+
+/// Keeps the captured game window while it stays a visible window of the game, unless the game opens one
+/// at least twice as big (a splash screen giving way to the game). Otherwise picks the game's main window.
+fn latch_window(prev: Option<(u32, isize)>, pid: u32) -> Option<(u32, isize)> {
+    let best = clipr_games::main_window(pid);
+    if let Some((p, hwnd)) = prev
+        && p == pid
+        && let Some(area) = clipr_games::window_of(hwnd, pid)
+    {
+        return match best {
+            Some((other, bigger)) if other != hwnd && bigger > area.saturating_mul(2) => Some((pid, other)),
+            _ => prev,
+        };
+    }
+    best.map(|(hwnd, _)| (pid, hwnd))
 }

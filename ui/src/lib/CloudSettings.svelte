@@ -8,6 +8,10 @@
   // Your own bucket. `cloud` is the settings draft, changed in place. `remote`: this page is open on another
   // device, which never sees the secret and can't change the bucket.
   let { cloud, remote }: { cloud: CloudConfig; remote: boolean } = $props();
+  // The endpoint (it holds the account ID) and the keys stay hidden until asked, so clicking through
+  // Settings while recording doesn't put them in a clip.
+  let keysShown = $state(false);
+  const shownType = $derived(keysShown ? 'text' : 'password');
 
   const PROVIDERS: { v: CloudProvider; name: string; text: string }[] = [
     { v: 'r2', name: 'Cloudflare R2', text: 'Recommended: 10 GB free, and no fees when people watch your clips.' },
@@ -108,9 +112,10 @@
   {/if}
 </details>
 
+<p class="keys"><button class="link small" onclick={() => (keysShown = !keysShown)}>{keysShown ? 'Hide address and keys' : 'Show address and keys'}</button></p>
 <div class="grid">
   <label>Endpoint
-    <input type="text" bind:value={cloud.endpoint} oninput={endpointChanged} placeholder={PLACEHOLDER[cloud.provider].endpoint} spellcheck="false" disabled={remote} />
+    <input type={shownType} bind:value={cloud.endpoint} autocomplete="off" oninput={endpointChanged} placeholder={PLACEHOLDER[cloud.provider].endpoint} spellcheck="false" disabled={remote} />
   </label>
   {#if cloud.provider !== 'r2'}
     <label>Region
@@ -121,11 +126,11 @@
     <input type="text" bind:value={cloud.bucket} placeholder="clipr-clips" spellcheck="false" disabled={remote} />
   </label>
   <label>Access key ID
-    <input type="text" bind:value={cloud.access_key_id} autocomplete="off" spellcheck="false" disabled={remote} />
+    <input type={shownType} bind:value={cloud.access_key_id} autocomplete="off" spellcheck="false" disabled={remote} />
   </label>
   {#if !remote}
     <label>Secret access key
-      <input type="password" bind:value={cloud.secret_access_key} autocomplete="off" spellcheck="false" />
+      <input type={shownType} bind:value={cloud.secret_access_key} autocomplete="off" spellcheck="false" />
     </label>
   {/if}
   <label>Public address

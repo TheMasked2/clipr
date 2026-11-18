@@ -789,7 +789,16 @@ pub async fn disk(State(s): State<AppState>) -> ApiResult<Json<Value>> {
 async fn serve_file(path: PathBuf, mime: &str, req: Request) -> Response {
     let mime: mime_guess::mime::Mime = mime.parse().expect("a valid mime type");
     match ServeFile::new_with_mime(path, &mime).oneshot(req).await {
-        Ok(response) => response.map(Body::new).into_response(),
+        Ok(response) => {
+            let mut response = response.map(Body::new).into_response();
+            // Ask the file's date each time (a cheap 304 when unchanged): a clip replaced by a trim keeps
+            // its name, and the browser must not keep playing the old one.
+            response.headers_mut().insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-cache"),
+            );
+            response
+        }
         Err(never) => match never {},
     }
 }

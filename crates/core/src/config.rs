@@ -87,9 +87,10 @@ pub struct VideoConfig {
     pub bitrate_kbps: u32,
     /// Which monitor to capture: 0 = the primary monitor, 1, 2, … = that monitor in Windows' order.
     pub monitor: u32,
-    /// Give clipr's capture work priority on the GPU and CPU, so a game running at uncapped FPS can't
-    /// starve it (stutter in clips). Never slows the game noticeably: clipr's GPU work is ~0.1 ms a frame.
-    pub high_priority: bool,
+    /// Give clipr's capture work a raised GPU priority, so a game running at uncapped FPS can't starve it
+    /// (stutter in clips). Off by default: on some PCs (seen on an RTX 4070 Ti) clips skipped more frames with it.
+    /// Replaces beta.3's `high_priority`, which was on by default and used a higher GPU class.
+    pub gpu_priority: bool,
 }
 
 impl Default for VideoConfig {
@@ -100,7 +101,7 @@ impl Default for VideoConfig {
             height: 1080,
             bitrate_kbps: 15_000,
             monitor: 0,
-            high_priority: true,
+            gpu_priority: false,
         }
     }
 }
@@ -365,10 +366,23 @@ pub enum GameMode {
     Always,
 }
 
+/// What "Game only" captures while a game runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GameCapture {
+    /// Only the game's window: alt-tabbing, notifications and other monitors stay out of clips. The default.
+    #[default]
+    Window,
+    /// The whole monitor the game is on (for games whose window can't be captured).
+    Monitor,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GamesConfig {
     pub mode: GameMode,
+    /// What is captured while a game runs.
+    pub capture: GameCapture,
     /// Extra games to detect, by exe name (`mygame.exe`).
     pub custom: Vec<String>,
     /// Exe names never treated as games, even if Discord lists them.

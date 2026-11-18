@@ -167,6 +167,7 @@ fn write(
         return Ok(None);
     };
     let path = writer.finish()?;
+    make_regular(&path);
     super::save::write_markers(&path, start, i64::MAX, &markers);
     match first_error {
         Some(e) => Err(e.context(format!("the recording {} may be incomplete", path.display()))),
@@ -180,9 +181,63 @@ fn part_of(path: &Path) -> PathBuf {
     PathBuf::from(part)
 }
 
+/// Turns a finished recording into a regular MP4 (see [`clipr_mux::make_regular`]): long fragmented files
+/// take minutes to open in a browser. A failure keeps the fragmented file, which still plays.
+fn make_regular(path: &Path) {
+    match clipr_mux::make_regular(path) {
+        Ok(true) => tracing::info!("indexed the recording {}", path.display()),
+        Ok(false) => {}
+        Err(e) => tracing::warn!(
+            "couldn't index the recording {} (it still plays): {e:#}",
+            path.display()
+        ),
+    }
+}
+
+/// Recordings made before beta.4 are fragmented: index them once, in the background. It waits a minute,
+/// so the library's startup scan and thumbnails are done before files change under them.
+fn index_old_recordings(clips_dir: PathBuf) {
+    let spawned = std::thread::Builder::new()
+        .name("clipr-index".into())
+        .spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            for path in recordings(&clips_dir) {
+                if clipr_mux::is_fragmented(&path).unwrap_or(false) {
+                    make_regular(&path);
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        tracing::warn!("couldn't start indexing old recordings: {e}");
+    }
+}
+
+/// Finished recordings (`*_recording.mp4`), one folder level per game.
+fn recordings(clips_dir: &Path) -> Vec<PathBuf> {
+    let Ok(games) = std::fs::read_dir(clips_dir) else {
+        return Vec::new();
+    };
+    games
+        .flatten()
+        .filter_map(|g| std::fs::read_dir(g.path()).ok())
+        .flat_map(|files| files.flatten().map(|f| f.path()))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with("_recording.mp4") && !n.starts_with('.'))
+        })
+        .collect()
+}
+
 /// Renames recordings left as `*_recording.mp4.part` by a crash (one folder level per game) so they show
-/// up in the gallery. Fragmented MP4 plays fine up to the last complete fragment.
+/// up in the gallery, then indexes them and older recordings in the background. Fragmented MP4 plays fine
+/// up to the last complete fragment.
 pub fn recover(clips_dir: &Path) {
+    rename_parts(clips_dir);
+    index_old_recordings(clips_dir.to_path_buf());
+}
+
+fn rename_parts(clips_dir: &Path) {
     let Ok(games) = std::fs::read_dir(clips_dir) else {
         return;
     };

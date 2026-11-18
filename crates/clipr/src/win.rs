@@ -187,3 +187,62 @@ pub fn free_bytes(path: &std::path::Path) -> Option<u64> {
     };
     (ok != 0).then_some(free)
 }
+
+/// clipr runs as administrator ("Run as administrator", or started from an elevated program). Windows
+/// then keeps it apart from normal programs: screen capture of the game can fail, and the settings may
+/// belong to another Windows account.
+pub fn is_elevated() -> bool {
+    use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    let mut token: HANDLE = std::ptr::null_mut();
+    // SAFETY: the current-process pseudo handle and a valid out pointer.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return false;
+    }
+    let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+    let mut len = 0u32;
+    // SAFETY: `token` is open; the buffer is a TOKEN_ELEVATION of the size passed.
+    let ok = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            (&raw mut elevation).cast(),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut len,
+        )
+    };
+    // SAFETY: opened above.
+    unsafe { CloseHandle(token) };
+    ok != 0 && elevation.TokenIsElevated != 0
+}
+
+/// Opts clipr out of Windows 11's power throttling (EcoQoS). Windows applies it to background programs
+/// without a window, which is what clipr is while you play: its threads then move to efficiency cores and
+/// its timers get coalesced, and a 60 fps frame loop misses its deadlines (seen on an i7-13700K). OBS
+/// opts out for the same reason. Best effort.
+pub fn disable_power_throttling() {
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+        PROCESS_POWER_THROTTLING_STATE, ProcessPowerThrottling, SetProcessInformation,
+    };
+    let state = PROCESS_POWER_THROTTLING_STATE {
+        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+            | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+        // Controlled, and off.
+        StateMask: 0,
+    };
+    // SAFETY: the current-process pseudo handle and a valid struct of the size passed.
+    let ok = unsafe {
+        SetProcessInformation(
+            GetCurrentProcess(),
+            ProcessPowerThrottling,
+            (&raw const state).cast(),
+            size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+        )
+    };
+    if ok == 0 {
+        tracing::debug!("couldn't opt out of power throttling (older Windows?)");
+    }
+}

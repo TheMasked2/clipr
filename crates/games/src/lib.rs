@@ -249,6 +249,16 @@ fn refresh(state: &Mutex<State>, cache_file: &std::path::Path) -> bool {
 }
 
 /// Makes a game name safe as a Windows folder or file name. Never empty.
+/// The window to capture for a game: see [`win::main_window`]. `None` when it has no visible window.
+pub fn main_window(pid: u32) -> Option<(isize, i64)> {
+    win::main_window(pid)
+}
+
+/// Whether `hwnd` is still a visible window of `pid`, and its area (`i64::MAX` while minimised).
+pub fn window_of(hwnd: isize, pid: u32) -> Option<i64> {
+    win::window_of(hwnd, pid)
+}
+
 pub fn safe_folder_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
