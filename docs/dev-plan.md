@@ -115,7 +115,7 @@ per frame, 0 dropped frames, keyframe every 1.0 s, no B-frames. What we learned:
 - [x] Idle when no game runs; optional "always buffer desktop" mode
 - [x] Follow the game's monitor; a resolution change keeps the output size (the converter rescales)
 - [ ] HDR detection + tonemap shader to SDR
-- [x] Sound cue (optional); overlay toast: later
+- [x] Sound cue (optional) and a "Clip saved" toast
 - [x] Uncapped-FPS protection instead of a game-priority mode: clipr's GPU work gets high scheduling priority
       and its capture thread joins MMCSS (always; the GPU side is the opt-in `video.gpu_priority`, off by default since beta.4); the frame loop repeats or
       skips frames to stay on time, and the log warns when a game starves it
@@ -206,11 +206,24 @@ A capture restart (new monitor or video settings) finishes the file and continue
 3. **Voice:** wake word (custom), whisper tiny command parsing, length by voice, extra commands, configurable cues
 4. **Montage** and **vertical 9:16 export** (these need re-encoding through MF)
 5. **More themes:** Minimal / terminal, Playful, System
-6. **Cloudflare Tunnel** for remote full UI with login
-7. Optional real HDR saves (10-bit HEVC)
-8. **Linux:** PipeWire capture/audio, VA-API encode
+6. **Away from home:** the full UI from outside the LAN. Today that already works through
+   [Tailscale](https://tailscale.com) (the Network tab says how) with the LAN PIN on top. Built in later: a
+   Cloudflare Tunnel option with a proper login (accounts or passkeys, not the 6-digit PIN), HTTPS only, the
+   folder/web settings still PC-only
+7. **In-game overlay:** a small always-on-top, click-through layer (like the "Clip saved" toast, but optional and
+   movable) showing buffering/recording state, the mic mute, and the last save. A Direct3D present hook is out
+   of scope (anti-cheat), so it stays a layered window, which works over borderless games but not exclusive
+   fullscreen
+8. **Streaming:** go live from the same capture, so clipr can replace OBS for simple streams. The encoder output
+   already exists; the work is an RTMP(S) muxer to Twitch/YouTube (stream key typed in by the user, kept on this PC
+   and hidden from other devices, like the cloud keys), a second encoder session when the stream and the buffer want different bitrates, a health
+   readout (dropped frames, bitrate) in the Performance card, and limits (one stream at a time, NVENC session
+   limits on consumer GPUs). Scenes and sources stay OBS's job
+9. Optional real HDR saves (10-bit HEVC)
+10. **Linux:** PipeWire capture/audio, VA-API encode
 
-Ideas, not planned yet: shared squad galleries, auto highlights (kill/death detection).
+Ideas, not planned yet: shared squad galleries, auto highlights (kill/death detection). For editing beyond trims,
+the settings point to [Kdenlive](https://kdenlive.org) (free); clipr won't grow a timeline editor.
 
 ## Risks to settle early
 
