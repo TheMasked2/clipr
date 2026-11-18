@@ -1,6 +1,6 @@
 [package]
 name = "clipr-cloud"
-description = "clipr: (v1.x) Bring-your-own S3/R2/B2 uploads, share pages and the online gallery."
+description = "clipr: bring-your-own S3/R2/B2 cloud storage for clips."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,3 +12,14 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
+clipr-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+ureq = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

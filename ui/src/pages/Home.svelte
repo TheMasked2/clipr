@@ -5,6 +5,7 @@
   import { fmtBytes, fmtDateTime, fmtTime } from '../lib/format';
   import Wizard from '../lib/Wizard.svelte';
   import DiscordPosts from '../lib/DiscordPosts.svelte';
+  import CloudUploads from '../lib/CloudUploads.svelte';
   import CrashNotice from '../lib/CrashNotice.svelte';
   import CapturePreview from '../lib/CapturePreview.svelte';
   import { clipHref } from '../lib/router.svelte';
@@ -121,6 +122,7 @@
 
 <CrashNotice />
 <DiscordPosts />
+<CloudUploads />
 
 <section class="card info">
   {#if latest}

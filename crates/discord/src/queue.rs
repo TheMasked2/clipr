@@ -11,6 +11,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+pub use clipr_core::clip::ClipInfo;
 use clipr_core::config::{DiscordConfig, PostMode};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -25,22 +26,6 @@ const RECHECK: Duration = Duration::from_secs(5);
 
 /// Room left under the upload limit for the thumbnail and the message itself.
 const POST_OVERHEAD: u64 = 256 * 1024;
-
-/// What clipr knows about a clip when it queues it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ClipInfo {
-    /// The library's id (for the UI).
-    pub id: String,
-    pub path: PathBuf,
-    pub title: String,
-    pub game: String,
-    pub duration_secs: Option<f64>,
-    pub size_bytes: u64,
-    /// The library's thumbnail, if it has one yet.
-    pub thumb: Option<PathBuf>,
-    /// `clip` or `recording`.
-    pub kind: String,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -89,6 +74,9 @@ struct Saved {
     jobs: Vec<Job>,
 }
 
+/// Finds a clip's cloud link (see [`Inner::link`]).
+type LinkFn = dyn Fn(&ClipInfo) -> Result<Option<String>> + Send + Sync;
+
 struct Inner {
     file: PathBuf,
     /// Where smaller copies are made (and removed after posting).
@@ -98,6 +86,8 @@ struct Inner {
     config: Box<dyn Fn() -> DiscordConfig + Send + Sync>,
     /// Whether a game runs right now.
     in_game: Box<dyn Fn() -> bool + Send + Sync>,
+    /// The clip's link in the user's cloud bucket (uploading it first), when cloud storage is set up.
+    link: Box<LinkFn>,
     changed: broadcast::Sender<()>,
 }
 
@@ -115,12 +105,13 @@ fn now_secs() -> u64 {
 
 impl Poster {
     /// Loads the queue from `file` and starts the worker. `config` returns the current Discord settings;
-    /// `in_game` whether a game runs.
+    /// `in_game` whether a game runs; `link` the clip's cloud link, if it has one (see [`Inner::link`]).
     pub fn start(
         file: PathBuf,
         work_dir: PathBuf,
         config: impl Fn() -> DiscordConfig + Send + Sync + 'static,
         in_game: impl Fn() -> bool + Send + Sync + 'static,
+        link: impl Fn(&ClipInfo) -> Result<Option<String>> + Send + Sync + 'static,
     ) -> Self {
         // Smaller copies left by a crash or a kill mid-post: nothing refers to them any more.
         if let Ok(dir) = std::fs::read_dir(&work_dir) {
@@ -128,7 +119,8 @@ impl Poster {
                 let _ = std::fs::remove_file(entry.path());
             }
         }
-        let poster = Self::load(file, work_dir, config, in_game);
+        let mut poster = Self::load(file, work_dir, config, in_game);
+        Arc::get_mut(&mut poster.inner).expect("not shared yet").link = Box::new(link);
         let worker = poster.clone();
         std::thread::Builder::new()
             .name("clipr-discord".into())
@@ -161,6 +153,7 @@ impl Poster {
                 wake: Condvar::new(),
                 config: Box::new(config),
                 in_game: Box::new(in_game),
+                link: Box::new(|_| Ok(None)),
                 changed: broadcast::Sender::new(16),
             }),
         }
@@ -362,6 +355,21 @@ impl Poster {
         if !clip.path.is_file() {
             bail!("The clip isn't there any more");
         }
+        fn post<'a>(clip: &'a ClipInfo, video: &'a Path) -> webhook::Post<'a> {
+            webhook::Post {
+                title: &clip.title,
+                game: &clip.game,
+                duration_secs: clip.duration_secs,
+                video,
+                thumb: clip.thumb.as_deref(),
+            }
+        }
+        // With cloud storage, Discord gets a link to the full clip instead of a (smaller) file.
+        match (self.inner.link)(clip) {
+            Ok(Some(link)) => return webhook::post_link(&hook.url, &post(clip, &clip.path), &link),
+            Ok(None) => {}
+            Err(e) => tracing::warn!("posting {} as a file: {e:#}", clip.title),
+        }
         let limit = (u64::from(config.upload_limit_mb.max(1)) * 1_000_000).saturating_sub(POST_OVERHEAD);
         let size = std::fs::metadata(&clip.path).map_or(clip.size_bytes, |m| m.len());
         let small = self.inner.work_dir.join(format!("discord-{}.mp4", job.id));
@@ -380,16 +388,7 @@ impl Poster {
             }
             small.clone()
         };
-        let result = webhook::post(
-            &hook.url,
-            &webhook::Post {
-                title: &clip.title,
-                game: &clip.game,
-                duration_secs: clip.duration_secs,
-                video: &video,
-                thumb: clip.thumb.as_deref(),
-            },
-        );
+        let result = webhook::post(&hook.url, &post(clip, &video));
         if video == small {
             let _ = std::fs::remove_file(&small);
         }

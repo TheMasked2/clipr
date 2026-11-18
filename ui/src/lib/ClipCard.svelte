@@ -2,7 +2,8 @@
   import { patchClip, type Clip } from './api';
   import { fmtBytes, fmtDateTime, fmtTime } from './format';
   import { clipHref } from './router.svelte';
-  import { toastError } from './store.svelte';
+  import { app, toastError } from './store.svelte';
+  import CloudBadge from './CloudBadge.svelte';
 
   let { clip, highlight = false, onupdate, showGame = true }: { clip: Clip; highlight?: boolean; onupdate?: (c: Clip) => void; showGame?: boolean } = $props();
 
@@ -43,6 +44,7 @@
     {/if}
     {#if clip.duration_secs != null}<span class="dur">{fmtTime(clip.duration_secs)}</span>{/if}
     {#if clip.kind === 'recording'}<span class="kind">REC</span>{/if}
+    {#if app.cloud[clip.id]}<span class="cloud"><CloudBadge status={app.cloud[clip.id]} /></span>{/if}
     <button class="star" class:on={clip.favorite} aria-label={clip.favorite ? 'Remove favorite' : 'Add favorite'} onclick={star}>{clip.favorite ? '★' : '☆'}</button>
     {#if frame >= 0 && clip.sprite}
       <div class="bar"><i style:width="{((frame + 1) / clip.sprite_frames) * 100}%"></i></div>
@@ -69,6 +71,7 @@
     background: #000b; color: #fff; padding: .05rem .4rem; border-radius: 5px;
   }
   .kind { right: auto; left: .4rem; background: var(--danger); }
+  .cloud { position: absolute; top: .4rem; left: .4rem; display: flex; }
   .star {
     position: absolute; top: .3rem; right: .3rem; padding: .1rem .45rem; font-size: 1.1rem; line-height: 1.2;
     background: #000a; border-color: transparent; color: #fff; opacity: 0; transition: opacity .12s;

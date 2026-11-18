@@ -188,6 +188,35 @@ pub fn post(url: &str, post: &Post) -> Result<()> {
     send(url, &format!("multipart/form-data; boundary={boundary}"), &body)
 }
 
+/// Posts a link to the clip in the user's cloud bucket instead of the file: Discord shows a player for a
+/// public `.mp4` link, and the clip stays at full quality with no upload limit.
+pub fn post_link(url: &str, post: &Post, link: &str) -> Result<()> {
+    check_url(url)?;
+    send(
+        url,
+        "application/json",
+        link_payload(post, link).to_string().as_bytes(),
+    )
+}
+
+fn link_payload(post: &Post, link: &str) -> Value {
+    // One line of text (no pings: `allowed_mentions` is empty), then the link Discord turns into a player.
+    let title: String = post
+        .title
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(200)
+        .collect();
+    let mut line = format!("**{}** · {}", title.replace('*', "\\*"), post.game);
+    if let Some(d) = post.duration_secs {
+        line.push_str(&format!(" · {}", length(d)));
+    }
+    json!({
+        "content": format!("{line}\n{link}"),
+        "allowed_mentions": { "parse": [] },
+    })
+}
+
 /// Sends a short text message, to check a webhook works.
 pub fn test(url: &str) -> Result<()> {
     check_url(url)?;
@@ -298,6 +327,24 @@ mod tests {
         assert_eq!(v["attachments"][1]["filename"], "thumb.jpg");
         let no_thumb = payload(&Post { thumb: None, ..p }, "ace.mp4");
         assert!(no_thumb["embeds"][0].get("thumbnail").is_none());
+    }
+
+    #[test]
+    fn link_posts_are_one_line_and_the_link() {
+        let p = Post {
+            title: "@everyone *ace*\nline",
+            game: "VALORANT",
+            duration_secs: Some(31.6),
+            video: Path::new("x.mp4"),
+            thumb: None,
+        };
+        let v = link_payload(&p, "https://pub-1.r2.dev/clipr/a.mp4");
+        assert_eq!(v["allowed_mentions"]["parse"], json!([]));
+        assert_eq!(
+            v["content"],
+            "**@everyone \\*ace\\* line** · VALORANT · 0:32\nhttps://pub-1.r2.dev/clipr/a.mp4"
+        );
+        assert!(v.get("embeds").is_none());
     }
 
     #[test]

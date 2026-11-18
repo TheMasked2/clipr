@@ -28,6 +28,7 @@ pub struct Config {
     pub games: GamesConfig,
     pub recording: RecordingConfig,
     pub discord: DiscordConfig,
+    pub cloud: CloudConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -608,6 +609,115 @@ impl std::fmt::Debug for Webhook {
             .field("games", &self.games)
             .finish()
     }
+}
+
+/// Your own bucket on Cloudflare R2, Amazon S3, Backblaze B2 or another S3-compatible service. Clips are
+/// copied there; the files on this PC stay.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CloudConfig {
+    /// Copy clips to the bucket.
+    pub enabled: bool,
+    /// Which service (only picks the setup steps and fills in the endpoint).
+    pub provider: CloudProvider,
+    /// The S3 endpoint, `https://<account id>.r2.cloudflarestorage.com` on R2.
+    pub endpoint: String,
+    /// The bucket's region; `auto` on R2.
+    pub region: String,
+    pub bucket: String,
+    pub access_key_id: String,
+    /// A secret: never logged, and other devices never see or set it.
+    pub secret_access_key: String,
+    /// The bucket's public address (an `r2.dev` link or your own domain). Discord gets links under it;
+    /// without one, Discord gets a smaller copy of the file instead.
+    pub public_url: String,
+    /// Folder in the bucket clips go to.
+    pub prefix: String,
+    /// When new clips go up.
+    pub upload: UploadTiming,
+    /// Upload speed limit in Mbit/s (0 = no limit).
+    pub max_mbps: u32,
+    /// Copy full recordings too (they can be large).
+    pub recordings: bool,
+}
+
+impl Default for CloudConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: CloudProvider::R2,
+            endpoint: String::new(),
+            region: "auto".into(),
+            bucket: String::new(),
+            access_key_id: String::new(),
+            secret_access_key: String::new(),
+            public_url: String::new(),
+            prefix: "clipr/".into(),
+            upload: UploadTiming::AfterGame,
+            max_mbps: 0,
+            recordings: false,
+        }
+    }
+}
+
+// Not derived: the secret must never reach a log through `{:?}`.
+impl std::fmt::Debug for CloudConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudConfig")
+            .field("enabled", &self.enabled)
+            .field("provider", &self.provider)
+            .field("endpoint", &self.endpoint)
+            .field("region", &self.region)
+            .field("bucket", &self.bucket)
+            .field("access_key_id", &self.access_key_id)
+            .field(
+                "secret_access_key",
+                &if self.secret_access_key.is_empty() {
+                    ""
+                } else {
+                    "<hidden>"
+                },
+            )
+            .field("public_url", &self.public_url)
+            .field("prefix", &self.prefix)
+            .field("upload", &self.upload)
+            .field("max_mbps", &self.max_mbps)
+            .field("recordings", &self.recordings)
+            .finish()
+    }
+}
+
+impl CloudConfig {
+    /// Whether everything needed to upload is filled in.
+    pub fn ready(&self) -> bool {
+        self.enabled
+            && !self.endpoint.trim().is_empty()
+            && !self.bucket.trim().is_empty()
+            && !self.access_key_id.trim().is_empty()
+            && !self.secret_access_key.is_empty()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CloudProvider {
+    #[default]
+    R2,
+    S3,
+    B2,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UploadTiming {
+    /// Once no game runs, so uploading never costs frames.
+    #[default]
+    AfterGame,
+    /// Right away (the speed limit keeps games playable).
+    Now,
+    /// Only clips you upload by hand.
+    Manual,
 }
 
 impl Webhook {

@@ -119,6 +119,46 @@ export interface Config {
   };
   recording: { max_minutes: number };
   discord: DiscordConfig;
+  cloud: CloudConfig;
+}
+
+export type CloudProvider = 'r2' | 's3' | 'b2' | 'other';
+export type UploadTiming = 'after_game' | 'now' | 'manual';
+
+export interface CloudConfig {
+  enabled: boolean;
+  provider: CloudProvider;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  access_key_id: string;
+  /** Blank on other devices: only the PC running clipr sees it. */
+  secret_access_key: string;
+  /** The bucket's public address; Discord gets links under it. */
+  public_url: string;
+  prefix: string;
+  upload: UploadTiming;
+  max_mbps: number;
+  recordings: boolean;
+}
+
+/** A clip's cloud state, from `GET /api/cloud/status`. */
+export interface CloudStatus {
+  state: 'uploaded' | 'queued' | 'uploading' | 'failed';
+  url: string | null;
+  progress: number | null;
+  error: string | null;
+}
+
+export interface Upload {
+  id: number;
+  clip: { id: string; title: string; game: string; duration_secs: number | null; size_bytes: number; kind: ClipKind };
+  key: string;
+  state: 'queued' | 'uploading' | 'done' | 'failed' | 'cancelled';
+  now: boolean;
+  error: string | null;
+  created: number;
+  done_bytes: number;
 }
 
 export type PostMode = 'ask' | 'auto' | 'off';
@@ -254,7 +294,8 @@ export type ServerEvent =
   | { type: 'clip_failed'; message: string }
   | { type: 'library' }
   | { type: 'levels'; levels: Level[] }
-  | { type: 'discord' };
+  | { type: 'discord' }
+  | { type: 'cloud' };
 
 export class ApiError extends Error {
   status: number;
@@ -370,6 +411,13 @@ export const answerPost = (job: number, yes: boolean) =>
 /** Sends a test message: a URL typed in, or a saved webhook by name. */
 export const testWebhook = (w: { url?: string; name?: string }) =>
   request<void>('POST', '/api/discord/test', w);
+export const getUploads = () => request<Upload[]>('GET', '/api/cloud/uploads');
+export const getCloudStatus = () => request<Record<string, CloudStatus>>('GET', '/api/cloud/status');
+export const uploadClip = (id: string) => request<{ job: number }>('POST', '/api/cloud/upload', { id });
+export const cancelUpload = (job: number) => request<void>('POST', '/api/cloud/cancel', { job });
+export const removeFromCloud = (id: string) => request<void>('POST', '/api/cloud/remove', { id });
+/** Tries bucket settings (a blank secret means the saved one). */
+export const testCloud = (c: CloudConfig) => request<{ message: string }>('POST', '/api/cloud/test', c);
 export const login = (pin: string) => request<void>('POST', '/api/login', { pin }, true);
 
 export interface Connection {

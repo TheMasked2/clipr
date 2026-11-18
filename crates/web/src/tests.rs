@@ -40,6 +40,12 @@ fn env() -> Env {
             tmp.path().join("discord-tmp"),
             DiscordConfig::default,
             || false,
+            |_| Ok(None),
+        ),
+        cloud: clipr_cloud::Uploader::start(
+            tmp.path().join("cloud.json"),
+            clipr_core::config::CloudConfig::default,
+            || false,
         ),
         library: Arc::new(library),
         lan: crate::Lan::new(0, false),
@@ -1266,4 +1272,121 @@ async fn connect_discord_stays_on_this_pc() {
         .send(&app)
         .await;
     assert_eq!(code, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn cloud_settings_are_checked_and_the_bucket_stays_on_the_pc() {
+    let env = env();
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
+    let app = router(env.state.clone());
+    let mut config = serde_json::to_value(env.control.config()).unwrap();
+    config["cloud"] = serde_json::json!({
+        "enabled": true, "provider": "r2", "endpoint": " https://acc.r2.cloudflarestorage.com ",
+        "region": "auto", "bucket": "my-clips", "access_key_id": "key", "secret_access_key": "shh",
+        "public_url": "https://pub-1.r2.dev", "prefix": "clipr/", "upload": "after_game",
+        "max_mbps": 20, "recordings": false
+    });
+    let (code, _, body) = call("PUT", "/api/config")
+        .body(&config.to_string())
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(
+        env.control.config().cloud.endpoint,
+        "https://acc.r2.cloudflarestorage.com"
+    );
+    assert_eq!(
+        json(&body)["cloud"]["secret_access_key"],
+        "shh",
+        "the PC sees its own key"
+    );
+
+    for (field, bad) in [
+        ("endpoint", serde_json::json!("http://evil.example")),
+        ("bucket", serde_json::json!("No_Caps")),
+        ("public_url", serde_json::json!("javascript:alert(1)")),
+        ("prefix", serde_json::json!("../x")),
+        ("secret_access_key", serde_json::json!("")),
+    ] {
+        let mut c = config.clone();
+        c["cloud"][field] = bad;
+        let (code, _, body) = call("PUT", "/api/config").body(&c.to_string()).send(&app).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{field}: {body}");
+    }
+
+    // Another device with the PIN: no secret out, no bucket changes in.
+    let lan = "192.168.1.50";
+    let (_, headers, _) = call("POST", "/api/login")
+        .peer(lan)
+        .header("host", "192.168.1.5:7845")
+        .body(r#"{"pin":"123456"}"#)
+        .send(&app)
+        .await;
+    let cookie = headers
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let lan_call = |method: &'static str, uri: &'static str, body: Option<String>| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        async move {
+            let c = call(method, uri)
+                .peer(lan)
+                .header("host", "192.168.1.5:7845")
+                .header("cookie", &cookie);
+            match body {
+                Some(b) => c.body(&b).send(&app).await,
+                None => c.send(&app).await,
+            }
+        }
+    };
+    let (_, _, body) = lan_call("GET", "/api/config", None).await;
+    let mut seen = json(&body);
+    assert_eq!(seen["cloud"]["secret_access_key"], "");
+    assert!(!body.contains("shh"));
+    // Timing and the speed limit are fine; the blank secret keeps the saved one.
+    seen["cloud"]["upload"] = "now".into();
+    seen["cloud"]["max_mbps"] = 5.into();
+    let (code, _, body) = lan_call("PUT", "/api/config", Some(seen.to_string())).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let saved = env.control.config().cloud;
+    assert_eq!((saved.max_mbps, saved.secret_access_key.as_str()), (5, "shh"));
+    assert!(!body.contains("shh"));
+    // Pointing uploads somewhere else is not.
+    for (field, value) in [
+        ("endpoint", "https://evil.example"),
+        ("bucket", "their-bucket"),
+        ("public_url", "https://evil.example"),
+        ("secret_access_key", "other"),
+    ] {
+        let mut c = seen.clone();
+        c["cloud"][field] = value.into();
+        let (code, _, _) = lan_call("PUT", "/api/config", Some(c.to_string())).await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "{field}");
+    }
+    assert_eq!(env.control.config().cloud.bucket, "my-clips");
+    let (code, _, _) = lan_call("POST", "/api/cloud/test", Some("{}".into())).await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    let (code, _, _) = lan_call("POST", "/api/cloud/remove", Some(r#"{"id":"x.mp4"}"#.into())).await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+
+    // The lists: nothing uploaded yet (the test queue has cloud storage off).
+    let (code, _, body) = call("GET", "/api/cloud/status").send(&app).await;
+    assert_eq!((code, body.as_str()), (StatusCode::OK, "{}"));
+    let (code, _, body) = call("GET", "/api/cloud/uploads").send(&app).await;
+    assert_eq!((code, body.as_str()), (StatusCode::OK, "[]"));
+    let (code, _, body) = call("POST", "/api/cloud/test")
+        .body(r#"{"endpoint":"https://acc.r2.cloudflarestorage.com"}"#)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
 }
