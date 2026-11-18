@@ -210,11 +210,10 @@ A capture restart (new monitor or video settings) finishes the file and continue
    [Tailscale](https://tailscale.com) (the Network tab says how) with the LAN PIN on top. Built in later: a
    Cloudflare Tunnel option with a proper login (accounts or passkeys, not the 6-digit PIN), HTTPS only, the
    folder/web settings still PC-only
-7. **In-game overlay:** a small always-on-top, click-through layer (like the "Clip saved" toast, but optional and
-   movable) showing buffering/recording state, the mic mute, and the last save: the same state badge and main
-   controls as Home, so it looks and works the same. A Direct3D present hook is out
-   of scope (anti-cheat), so it stays a layered window, which works over borderless games but not exclusive
-   fullscreen
+7. [x] **In-game overlay:** `Alt+F11` opens the Gallery and Settings over the game in a WebView2 window
+   (`crates/clipr/src/ingame.rs`), excluded from capture, so a clip can be watched, trimmed or shared without
+   alt-tabbing. A Direct3D present hook is out of scope (anti-cheat), so it's a topmost window, which works over
+   borderless games but not exclusive fullscreen
 8. **Streaming:** go live from the same capture, so clipr can replace OBS for simple streams. The encoder output
    already exists; the work is an RTMP(S) muxer to Twitch/YouTube (stream key typed in by the user, kept on this PC
    and hidden from other devices, like the cloud keys), a second encoder session when the stream and the buffer want different bitrates, a health

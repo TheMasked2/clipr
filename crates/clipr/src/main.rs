@@ -14,6 +14,7 @@ mod control;
 mod crash;
 mod engine;
 mod icon;
+mod ingame;
 mod overlay;
 mod picker;
 mod preview;
@@ -174,6 +175,9 @@ fn run() -> Result<()> {
     if config.general.open_ui_on_start && !background {
         win::open_url(&ui_url);
     }
+
+    // The in-game overlay's window waits on its own thread (its web view is only made when it first opens).
+    ingame::start(ui_url.clone(), paths.data_dir.clone());
 
     // The tray lives on this thread until the user quits.
     let tray_result = tray::run(

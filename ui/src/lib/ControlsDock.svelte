@@ -36,6 +36,8 @@
     };
     const key = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      // Handled: the in-game overlay doesn't close too.
+      e.preventDefault();
       (menu === 'more' ? moreBtn : outBtn)?.focus();
       menu = '';
     };

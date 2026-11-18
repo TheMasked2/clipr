@@ -373,6 +373,9 @@ pub struct HotkeyConfig {
     pub mark: String,
     /// Mutes or unmutes the microphone in clips (not in your voice chat). Empty (the default) turns it off.
     pub toggle_mic: String,
+    /// Opens or closes the in-game overlay (the Gallery and Settings over the game). Not `Alt+Z`, which is
+    /// NVIDIA's overlay.
+    pub overlay: String,
 }
 
 impl Default for HotkeyConfig {
@@ -384,6 +387,27 @@ impl Default for HotkeyConfig {
             toggle_recording: "Alt+F9".into(),
             mark: String::new(),
             toggle_mic: String::new(),
+            overlay: "Alt+F11".into(),
+        }
+    }
+}
+
+impl HotkeyConfig {
+    /// The overlay hotkey came later, with a default: a config that already uses that key for something else
+    /// leaves the overlay without one, instead of every Save being refused over a key the user never set.
+    pub fn migrate(&mut self) {
+        let norm = |k: &str| k.replace(' ', "").to_ascii_lowercase();
+        let overlay = norm(&self.overlay);
+        let others = [
+            &self.save_clip,
+            &self.save_long_clip,
+            &self.toggle_buffer,
+            &self.toggle_recording,
+            &self.mark,
+            &self.toggle_mic,
+        ];
+        if !overlay.is_empty() && others.iter().any(|k| norm(k) == overlay) {
+            self.overlay.clear();
         }
     }
 }
@@ -849,6 +873,7 @@ impl Config {
                 let mut config: Self =
                     toml::from_str(&text).with_context(|| format!("can't read {}", path.display()))?;
                 config.audio.migrate();
+                config.hotkeys.migrate();
                 Ok(config)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
@@ -1136,5 +1161,18 @@ mod tests {
         assert_eq!(Config::load_or_recover(&path), Config::default());
         assert!(path.with_extension("toml.broken").exists());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn the_overlay_hotkey_gives_way_to_a_key_already_in_use() {
+        let mut h = HotkeyConfig {
+            mark: "alt+f11".into(),
+            ..HotkeyConfig::default()
+        };
+        h.migrate();
+        assert_eq!(h.overlay, "");
+        let mut h = HotkeyConfig::default();
+        h.migrate();
+        assert_eq!(h.overlay, "Alt+F11");
     }
 }

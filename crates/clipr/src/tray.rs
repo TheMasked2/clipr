@@ -32,16 +32,18 @@ enum Action {
     ToggleRecording = 4,
     Mark = 5,
     ToggleMic = 6,
+    Overlay = 7,
 }
 
 impl Action {
-    const ALL: [Action; 6] = [
+    const ALL: [Action; 7] = [
         Action::SaveClip,
         Action::SaveLongClip,
         Action::ToggleBuffer,
         Action::ToggleRecording,
         Action::Mark,
         Action::ToggleMic,
+        Action::Overlay,
     ];
 
     fn from_id(id: i32) -> Option<Self> {
@@ -56,6 +58,7 @@ impl Action {
             Action::ToggleRecording => &keys.toggle_recording,
             Action::Mark => &keys.mark,
             Action::ToggleMic => &keys.toggle_mic,
+            Action::Overlay => &keys.overlay,
         }
     }
 }
@@ -245,6 +248,7 @@ pub fn run(
             Some(Action::Mark) => engine.send(Command::Mark),
             Some(Action::ToggleRecording) => engine.send(Command::ToggleRecording),
             Some(Action::ToggleMic) => engine.send(Command::ToggleMic),
+            Some(Action::Overlay) => crate::ingame::toggle(),
             None => {}
         },
     );

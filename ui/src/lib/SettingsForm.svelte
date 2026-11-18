@@ -29,6 +29,22 @@
   let savedJson = $state(untrack(() => JSON.stringify(initial)));
   let pinShown = $state(false);
   const dirty = $derived(JSON.stringify(draft) !== savedJson);
+  // The settings were saved somewhere else (the in-game overlay, another tab) while this page is open: take
+  // them over when nothing is being edited here, else say so, so Save doesn't quietly put the old ones back.
+  let elsewhere = $state<string | null>(null);
+  $effect(() => {
+    const json = JSON.stringify(initial);
+    untrack(() => {
+      if (json === savedJson) return;
+      if (dirty) {
+        elsewhere = json;
+      } else {
+        savedJson = json;
+        Object.assign(draft, clone(initial));
+        elsewhere = null;
+      }
+    });
+  });
 
   /** A fader saved a volume on its own: take it into the draft and the saved copy, so it isn't a pending
    * change (and Save doesn't put the old value back). */
@@ -124,6 +140,7 @@
       const lanChanged = JSON.parse(savedJson).web?.lan !== c.web.lan;
       savedJson = JSON.stringify(c);
       Object.assign(draft, clone(c));
+      elsewhere = null;
       justSaved = true;
       // The server opens or closes the network port right after saving; show if it couldn't.
       if (lanChanged) setTimeout(() => api.getSystem().then((s) => (sys = s)).catch(() => {}), 500);
@@ -135,6 +152,8 @@
     }
   }
   function revert() {
+    if (elsewhere) savedJson = elsewhere;
+    elsewhere = null;
     Object.assign(draft, clone(JSON.parse(savedJson)));
     applyAccent(draft.ui.accent);
     error = '';
@@ -148,6 +167,7 @@
       toggle_recording: draft.hotkeys.toggle_recording,
       mark: draft.hotkeys.mark,
       toggle_mic: draft.hotkeys.toggle_mic,
+      overlay: draft.hotkeys.overlay,
     }),
   );
   const addProfile = () => draft.games.profiles.push({ game: '', fps: null, height: null, bitrate_kbps: null });
@@ -386,6 +406,7 @@
     <Field title="Start / stop recording" hint="Starts or stops a full recording." error={bad.has('toggle_recording')}><HotkeyInput bind:value={draft.hotkeys.toggle_recording} conflict={bad.has('toggle_recording')} /></Field>
     <Field title="Mark moment" hint="Marks this moment; markers show on the clip's timeline." error={bad.has('mark')}><HotkeyInput bind:value={draft.hotkeys.mark} conflict={bad.has('mark')} /></Field>
     <Field title="Mute / unmute microphone" hint="Mutes your mic in clips (not in your voice chat), with a short blip. Press again to unmute. Empty (the default) turns it off." error={bad.has('toggle_mic')}><HotkeyInput bind:value={draft.hotkeys.toggle_mic} conflict={bad.has('toggle_mic')} /></Field>
+    <Field title="In-game overlay" hint="Opens the Gallery and Settings over your game, so you can watch, trim or share a clip without alt-tabbing. Press again (or Esc) to go back to the game. It's never in your clips. Empty turns it off." error={bad.has('overlay')}><HotkeyInput bind:value={draft.hotkeys.overlay} conflict={bad.has('overlay')} /></Field>
   {:else if tab === 'Games'}
     <Field title="Mode" hint="Game only buffers while a known game runs and does nothing otherwise. Desktop buffers your monitor all the time, game or not.">
       <div class="row">
@@ -480,6 +501,7 @@
   <span class="msg">
     {#if error}<span class="errt">{error}</span>
     {:else if justSaved}<span class="okt">Saved</span>
+    {:else if dirty && elsewhere}<span class="errt">Settings were changed elsewhere since. Save puts yours over them; Revert takes theirs.</span>
     {:else if dirty}You have unsaved changes
     {/if}
   </span>

@@ -34,6 +34,8 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
   - `{"type":"clip_failed","message":"..."}`
   - `{"type":"library"}` when clips changed some other way (deleted, renamed, cleanup); refetch the list
   - `{"type":"discord"}` when the Discord post list changed; refetch `GET /api/discord/posts`
+  - `{"type":"config"}` when the settings were saved (by any page, the overlay or a fader); refetch `GET /api/config`
+    so a page doesn't later save its old copy over the change
   - `{"type":"cloud"}` when uploads or clips' cloud states changed (also twice a second with upload progress);
     refetch `GET /api/cloud/uploads` and `GET /api/cloud/status`
 

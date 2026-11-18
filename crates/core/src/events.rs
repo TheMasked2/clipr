@@ -18,6 +18,9 @@ pub enum Event {
     ClipSaved { path: std::path::PathBuf },
     /// Saving a clip failed; `message` is for the user.
     ClipFailed { message: String },
+    /// The settings were saved (any page, a fader, the overlay): open pages load them again, so one page
+    /// doesn't later save its old copy over another's change.
+    ConfigChanged,
 }
 
 #[derive(Clone)]

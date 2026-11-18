@@ -481,6 +481,11 @@ async fn push_events(mut socket: WebSocket, state: AppState, remote: bool) {
                         return;
                     }
                 }
+                Ok(Event::ConfigChanged) => {
+                    if !send_json(&mut socket, &json!({ "type": "config" })).await {
+                        return;
+                    }
+                }
                 Ok(_) => {}
                 // Missed some events: have the UI refetch the list.
                 Err(broadcast::error::RecvError::Lagged(_)) => {
