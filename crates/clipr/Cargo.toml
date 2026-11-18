@@ -33,6 +33,7 @@ clipr-games.workspace = true
 clipr-library.workspace = true
 clipr-gpu.workspace = true
 clipr-mux.workspace = true
+clipr-stream.workspace = true
 windows.workspace = true
 # The in-game overlay: clipr's own pages in a WebView2 window over the game (0.53 shares `windows` 0.61).
 wry = { version = "0.53", default-features = false }

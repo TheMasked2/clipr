@@ -129,6 +129,12 @@ pub async fn set_recording(State(s): State<AppState>, body: Bytes) -> ApiResult<
     Ok(no_content())
 }
 
+pub async fn set_streaming(State(s): State<AppState>, body: Bytes) -> ApiResult<StatusCode> {
+    let req: OnReq = parse_json(&body)?;
+    s.control.set_streaming(req.on);
+    Ok(no_content())
+}
+
 pub async fn mark(State(s): State<AppState>) -> StatusCode {
     s.control.mark();
     no_content()
@@ -278,6 +284,7 @@ pub async fn get_config(State(s): State<AppState>, ext: Extensions) -> Json<Conf
     if auth::is_remote(&ext) {
         crate::discord::hide_urls(&mut config);
         crate::cloud::hide_secret(&mut config.cloud);
+        config.stream.key.clear();
     }
     Json(config)
 }
@@ -580,6 +587,7 @@ pub fn validate_config(c: &Config) -> Result<()> {
         }
     }
     crate::discord::check(&c.discord)?;
+    check_stream(&c.stream)?;
     clipr_cloud::check(&c.cloud)?;
     let accent = c.ui.accent.as_bytes();
     if !(accent.len() == 7 && accent[0] == b'#' && accent[1..].iter().all(u8::is_ascii_hexdigit)) {
@@ -594,6 +602,7 @@ pub fn validate_config(c: &Config) -> Result<()> {
         ("Mark", &h.mark),
         ("Mute microphone", &h.toggle_mic),
         ("In-game overlay", &h.overlay),
+        ("Start/stop streaming", &h.toggle_stream),
     ];
     let mut used: Vec<(u32, u32, &str)> = Vec::new();
     for (name, text) in keys {
@@ -604,6 +613,48 @@ pub fn validate_config(c: &Config) -> Result<()> {
             }
             used.push((k.mods, k.vk, name));
         }
+    }
+    Ok(())
+}
+
+fn check_stream(s: &clipr_core::config::StreamConfig) -> Result<()> {
+    if !(360..=2160).contains(&s.height) {
+        bail!("The stream height must be between 360 and 2160");
+    }
+    if ![30, 60].contains(&s.fps) {
+        bail!("The stream frame rate must be 30 or 60");
+    }
+    if !(500..=51_000).contains(&s.bitrate_kbps) {
+        bail!("The stream bitrate must be between 500 and 51000 kbps");
+    }
+    let server = s.server.trim();
+    if s.service == clipr_core::config::StreamService::Custom
+        && !server.is_empty()
+        && !(server.starts_with("rtmp://") || server.starts_with("rtmps://"))
+    {
+        bail!("The stream server must start with rtmp:// or rtmps://");
+    }
+    Ok(())
+}
+
+/// From another device, where the stream goes (service, server, key) can't change: it could send the stream,
+/// and with it the key, somewhere else. A blank key keeps the saved one. The quality is fine to change.
+fn keep_stream_target(
+    ext: &Extensions,
+    now: &clipr_core::config::StreamConfig,
+    new: &mut clipr_core::config::StreamConfig,
+) -> ApiResult<()> {
+    if !auth::is_remote(ext) {
+        return Ok(());
+    }
+    if new.key.is_empty() {
+        new.key.clone_from(&now.key);
+    }
+    if new.service != now.service || new.server != now.server || new.key != now.key {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "Where the stream goes (service, server, key) can only be changed on the PC running clipr",
+        ));
     }
     Ok(())
 }
@@ -627,6 +678,9 @@ pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes)
         *text = text.trim().to_string();
     }
     crate::cloud::keep_bucket(&ext, &s.control.config().cloud, &mut config.cloud)?;
+    config.stream.server = config.stream.server.trim().to_string();
+    config.stream.key = config.stream.key.trim().to_string();
+    keep_stream_target(&ext, &s.control.config().stream, &mut config.stream)?;
     validate_config(&config).map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
     if auth::is_remote(&ext) {
         // Where files go and who can reach the API are for the PC's own user to decide.
@@ -667,6 +721,7 @@ pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes)
     if auth::is_remote(&ext) {
         crate::discord::hide_urls(&mut saved);
         crate::cloud::hide_secret(&mut saved.cloud);
+        saved.stream.key.clear();
     }
     Ok(Json(saved))
 }

@@ -17,6 +17,8 @@ function parse(): { route: Route; id: string } {
     }
   }
   if (h === 'gallery' || h === 'settings') return { route: h, id: '' };
+  // A settings section: #/settings/stream.
+  if (h.startsWith('settings/')) return { route: 'settings', id: h.slice(9) };
   return { route: 'home', id: '' };
 }
 

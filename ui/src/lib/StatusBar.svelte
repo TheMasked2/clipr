@@ -29,6 +29,7 @@
   const cpu = $derived(avg((s) => s.cpu));
   /** Under 10 GB free, the cleanup's free-space limit is near and long recordings may stop. */
   const lowDisk = $derived(!!disk && disk.free_bytes < 10 * 1024 ** 3);
+  const stream = $derived(app.status?.stream ?? null);
 
   let dlg: HTMLDialogElement | undefined = $state();
   let graphs = $state(false);
@@ -55,6 +56,16 @@
   {#if disk}
     <span title="Free space on the clips drive · clips use {fmtBytes(disk.clips_bytes)}">
       <span class="k">Disk</span> <span class:warnt={lowDisk}>{fmtBytes(disk.free_bytes)} free</span>
+    </span>
+  {/if}
+  {#if stream?.state === 'live'}
+    <span title="What the stream sends, and video frames dropped because the connection couldn't keep up">
+      <span class="k">Stream</span> {(stream.kbps / 1000).toFixed(1)} Mbit/s{#if stream.dropped}, <span class="warnt">{stream.dropped} dropped</span>{/if}
+    </span>
+  {:else if stream?.error}
+    <span class="stream-err" title={stream.error}>
+      <span class="k">Stream</span> <span class="warnt">{stream.error}</span>
+      {#if stream.state === 'failed'}<a href="#/settings/stream">Settings</a>{/if}
     </span>
   {/if}
   <span class="grow"></span>
@@ -87,6 +98,8 @@
   .doing-cell { padding-right: 1.2rem; border-right: 1px solid var(--border); min-width: 0; }
   .warnt { color: #f5b942; }
   .grow { flex: 1; }
+  .stream-err { display: flex; gap: .4rem; min-width: 0; max-width: 32rem; }
+  .stream-err .warnt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .last { text-decoration: none; display: flex; min-width: 0; max-width: 22rem; gap: .2rem; }
   .last .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .last.fresh .k { color: var(--accent); }

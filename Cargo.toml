@@ -84,6 +84,10 @@ clipr-cloud = { path = "crates/cloud" }
 tower-http = { version = "0.6", features = ["fs"] }
 ureq = { version = "3", features = ["json"] }
 clipr-update = { path = "crates/update" }
+clipr-stream = { path = "crates/stream" }
+# TLS for RTMPS streaming (the same rustls + ring that ureq already uses).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
 semver = "1"
 sha2 = "0.11"
 trash = "5"

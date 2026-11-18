@@ -17,11 +17,16 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
   { "version": "0.1.0", "state": "idle|buffering|recording", "game": "Valorant" | null,
     "encoder": "AMD HW H.264 Encoder MFT" | null, "error": "text" | null,
     "recording_since": 1763213000 | null, "uptime_secs": 42,
-    "paused": false, "mic_muted": false }
+    "paused": false, "mic_muted": false,
+    "stream": { "state": "connecting|live|reconnecting|failed", "since": 1763213000 | null, "kbps": 6000,
+                "dropped": 0, "error": "text" | null } | null }
   ```
   `paused` is true while the user has paused the replay buffer (then `state` is `idle`). `mic_muted` is true
   while the microphone is muted in clips (the mute hotkey or `POST /api/mic`; clipr starts unmuted). `muted`
-  lists every source muted in clips by key (`POST /api/mute`; `mic` too while it is).
+  lists every source muted in clips by key (`POST /api/mute`; `mic` too while it is). `stream` is there while
+  a live stream runs, and for a minute after one failed (`state` `failed`, `error` says why): `since` is when it
+  first went live, `kbps` what it sent over the last few seconds (rounded to 100), `dropped` the video frames
+  skipped because the connection couldn't keep up; `error` while `reconnecting` is why the connection dropped.
 - `GET /api/events` (WebSocket). Server → client messages:
   - `{"type":"status", ...Status}` on connect and on every change
   - `{"type":"levels","levels":[{"source":"system","name":"System","db":-23.5,"after":-26.1}]}` about 10
@@ -44,6 +49,8 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `POST /api/clip` body `{"seconds": 30}` (optional; default `replay.clip_secs`) → `202`
 - `POST /api/buffer` body `{"on": true}` → `204`
 - `POST /api/recording` body `{"on": true}` → `204`
+- `POST /api/stream` body `{"on": true}` → `204`: goes live with `stream.*`, or ends the stream. How it goes
+  shows in the status (`stream`), also when it can't start (no key, a bad server address)
 - `POST /api/mark` → `204`
 - `POST /api/mute` body `{"source": "discord.exe", "muted": true}` → `204`: mutes or unmutes any source in
   clips by key (`system`, `mic`, `game`, an app's exe name), with a short fade; not saved. `400` for an empty
@@ -73,13 +80,17 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 ## Settings
 
 - `GET /api/config` → the whole `Config` (see `crates/core/src/config.rs`; sections `web ui general privacy
-  replay video audio hotkeys clips games recording discord cloud`, serde names as in the Rust structs, enums lowercase).
+  replay video audio hotkeys clips games recording discord cloud stream`, serde names as in the Rust structs, enums lowercase).
   `games.profiles` is a list of `{"game","fps","height","bitrate_kbps"}` (numbers may be null = keep
   `video.*`); `game` matches the detected game's name or exe, case-insensitive
 - `PUT /api/config` body: a whole `Config` → `200 Config` (as saved) or `400 {"error":"message"}`.
   `clips.folder` must be empty (default) or a full path that isn't a drive root, inside Windows or Program
   Files, or the whole user profile. From another machine (LAN) `clips.folder` and everything under `web` are
   read-only: changing them gives `403`
+- `stream`: `service` (`twitch|youtube|custom`), `server` (for `custom`: `rtmp://` or `rtmps://`), `key`,
+  `height` (360–2160), `fps` (30 or 60), `bitrate_kbps` (500–51000); anything else is `400`. Another device
+  gets `key` blank and may change only the quality: a blank `key` keeps the saved one, and a different
+  `service`, `server` or `key` is `403`
 - `GET /api/system` → `{ "gpus": [{"name","vendor","encoders":["H.264","HEVC","AV1"]}], "monitors":
   [{"index":1,"name","width","height","primary"}], "known_games": 2600, "elevated": false }` (free-form; show
   what's there). `elevated`: clipr runs as administrator, which can break game capture.

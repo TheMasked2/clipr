@@ -214,11 +214,13 @@ A capture restart (new monitor or video settings) finishes the file and continue
    (`crates/clipr/src/ingame.rs`), excluded from capture, so a clip can be watched, trimmed or shared without
    alt-tabbing. A Direct3D present hook is out of scope (anti-cheat), so it's a topmost window, which works over
    borderless games but not exclusive fullscreen
-8. **Streaming:** go live from the same capture, so clipr can replace OBS for simple streams. The encoder output
-   already exists; the work is an RTMP(S) muxer to Twitch/YouTube (stream key typed in by the user, kept on this PC
-   and hidden from other devices, like the cloud keys), a second encoder session when the stream and the buffer want different bitrates, a health
-   readout (dropped frames, bitrate) in Home's status bar, a Start streaming button in Home's Controls, and
-   limits (one stream at a time, NVENC session limits on consumer GPUs)
+8. [x] **Streaming:** **Go live** in Home's Controls (or a hotkey) streams what clipr captures, with the audio
+   mix, to Twitch or YouTube (RTMPS) or any RTMP server (`crates/stream`: own RTMP client, FLV tags, rustls). The
+   stream has its own H.264 CBR encoder session in the video thread (keyframe every 2 s), at its own size, frame
+   rate and bitrate, so clips keep theirs and nothing restarts. The key is typed in by the user, kept on this PC
+   and never sent to other devices, which can't change where the stream goes. Health (LIVE time, bitrate, frames
+   dropped when the connection falls behind) in the top bar and Home's status bar; reconnects by itself. Later:
+   a second audio mix for the stream (without the mic monitor), a bandwidth test, chat
 9. **Scenes:** saved sets of sources (like Gaming, Desktop, Gaming + cam), switched from a Scenes dock on Home
    beside Sources, like OBS. Needs composing more than one picture (a webcam over the game) first
 10. Optional real HDR saves (10-bit HEVC)

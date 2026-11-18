@@ -160,6 +160,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/clip", post(api::save_clip))
         .route("/api/buffer", post(api::set_buffer))
         .route("/api/recording", post(api::set_recording))
+        .route("/api/stream", post(api::set_streaming))
         .route("/api/mark", post(api::mark))
         .route("/api/mic", post(api::set_mic))
         .route("/api/mute", post(api::set_mute))

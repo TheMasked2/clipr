@@ -28,7 +28,7 @@ use crate::sound::{self, Cue};
 use clipr_buffer::{Packet, ReplayBuffer, SECOND};
 use clipr_core::config::{AudioConfig, Config, GameCapture, GameMode, VideoCodec};
 use clipr_core::events::{Bus, Event};
-use clipr_core::status::{Activity, Level, RecState, Status};
+use clipr_core::status::{Activity, Level, RecState, Status, StreamState, StreamStatus};
 use clipr_encode::{Codec, EncodeSettings};
 use clipr_games::{Game, GameWatcher};
 use clipr_mux::MediaFormat;
@@ -57,6 +57,9 @@ pub enum Command {
     /// Start or stop a full recording.
     SetRecording(bool),
     ToggleRecording,
+    /// Goes live (`true`) or ends the stream (Settings → Stream says where to).
+    SetStreaming(bool),
+    ToggleStreaming,
     /// Mute (`true`) or unmute the microphone in clips.
     SetMicMuted(bool),
     ToggleMic,
@@ -90,6 +93,19 @@ pub struct Shared {
     pub stats: Stats,
     /// The running full recording, if any: it gets every packet the buffer gets.
     pub record: Option<record::RecordSink>,
+    /// The live stream, if any: the video thread encodes for it, and it gets the audio mix.
+    pub stream: Option<StreamOut>,
+    /// The video thread couldn't encode for the stream (no encoder session left, say).
+    pub stream_error: Option<String>,
+}
+
+/// What the video thread encodes for a live stream, and where it goes.
+#[derive(Clone)]
+pub struct StreamOut {
+    pub sink: clipr_stream::Sink,
+    pub height: u32,
+    pub fps: u32,
+    pub bitrate_kbps: u32,
 }
 
 impl Shared {
@@ -106,6 +122,10 @@ impl Shared {
     fn push_audio(&mut self, track: usize, packet: Packet) {
         if let Some(r) = &self.record {
             r.audio(track, &packet);
+        }
+        // The stream gets the mix (track 0), like a viewer would hear it.
+        if let (0, Some(s)) = (track, &self.stream) {
+            s.sink.audio(packet.pts, packet.data.clone());
         }
         if let Some(b) = self.buffer.as_mut() {
             b.push_audio(track, packet);
@@ -204,6 +224,8 @@ pub fn start(
                 sampler,
                 presence: clipr_discord::Presence::start(),
                 presence_shown: None,
+                stream: None,
+                stream_failed: None,
             };
             sup.run(rx);
         })
@@ -272,7 +294,14 @@ struct Supervisor {
     /// Rich Presence in the user's Discord profile, and what it was last told.
     presence: clipr_discord::Presence,
     presence_shown: Option<Option<clipr_discord::PresenceStatus>>,
+    /// The live stream the user started.
+    stream: Option<clipr_stream::Streamer>,
+    /// Why the last stream couldn't start or ended by itself, shown for a while.
+    stream_failed: Option<(String, Instant)>,
 }
+
+/// How long a failed stream's reason stays in the status.
+const STREAM_FAILED_SHOWN: Duration = Duration::from_secs(60);
 
 impl Supervisor {
     fn run(&mut self, rx: mpsc::Receiver<Command>) {
@@ -316,6 +345,7 @@ impl Supervisor {
                 self.check_stats();
             }
         }
+        self.stop_streaming();
         self.stop_pipeline();
         self.meter = None;
         for save in self.saves.drain(..) {
@@ -408,6 +438,13 @@ impl Supervisor {
                 if config.replay.enabled != self.config.replay.enabled {
                     self.buffering = config.replay.enabled;
                 }
+                // A new quality applies to the running stream (its encoder starts over); a new key or server
+                // to the next one.
+                if let Some(s) = self.shared.lock().unwrap().stream.as_mut() {
+                    s.height = config.stream.height;
+                    s.fps = config.stream.fps;
+                    s.bitrate_kbps = config.stream.bitrate_kbps;
+                }
                 self.config = *config;
                 self.retry_at = None; // new settings deserve a fresh try
             }
@@ -415,6 +452,10 @@ impl Supervisor {
             Command::SetRecording(false) => self.stop_recording(true),
             Command::ToggleRecording if self.recording.is_some() => self.stop_recording(true),
             Command::ToggleRecording => self.start_recording(None),
+            Command::SetStreaming(true) => self.start_streaming(),
+            Command::SetStreaming(false) => self.stop_streaming(),
+            Command::ToggleStreaming if self.stream.is_some() => self.stop_streaming(),
+            Command::ToggleStreaming => self.start_streaming(),
             Command::SetMicMuted(muted) => self.set_mic_muted(muted),
             Command::ToggleMic => self.set_mic_muted(!clipr_audio::mic_muted()),
             Command::SetMuted(key, muted) => self.set_muted(&key, muted),
@@ -494,14 +535,128 @@ impl Supervisor {
             }
         }
         self.drive_recording(now);
+        self.drive_stream(now);
         self.publish();
+    }
+
+    /// Goes live with Settings → Stream. Capture runs while it does (the desktop, when no game runs).
+    fn start_streaming(&mut self) {
+        if self.stream.is_some() {
+            return;
+        }
+        let c = &self.config.stream;
+        let url = c.url();
+        let problem = if c.key.trim().is_empty() {
+            Some("Add your stream key in Settings → Stream first.".to_string())
+        } else {
+            clipr_stream::rtmp::Endpoint::parse(&url)
+                .err()
+                .map(|e| format!("Stream server: {e:#}."))
+        };
+        if let Some(problem) = problem {
+            tracing::warn!("can't start streaming: {problem}");
+            self.stream_failed = Some((problem, Instant::now()));
+            return;
+        }
+        let streamer = clipr_stream::Streamer::start(clipr_stream::Settings {
+            url,
+            key: c.key.trim().to_string(),
+            // The video thread fills in the size once it knows the capture's shape.
+            width: 0,
+            height: c.height,
+            fps: c.fps,
+            video_kbps: c.bitrate_kbps,
+            audio_kbps: self.config.audio.bitrate_kbps,
+        });
+        {
+            let mut s = self.shared.lock().unwrap();
+            s.stream_error = None;
+            s.stream = Some(StreamOut {
+                sink: streamer.sink(),
+                height: c.height,
+                fps: c.fps,
+                bitrate_kbps: c.bitrate_kbps,
+            });
+        }
+        tracing::info!(
+            "streaming started ({:?}, {}p{}, {} kbps)",
+            c.service,
+            c.height,
+            c.fps,
+            c.bitrate_kbps
+        );
+        self.stream = Some(streamer);
+        self.stream_failed = None;
+    }
+
+    fn stop_streaming(&mut self) {
+        self.shared.lock().unwrap().stream = None;
+        if let Some(streamer) = self.stream.take() {
+            tracing::info!("streaming stopped");
+            // Hanging up can wait on a slow server: not on this thread.
+            let _ = std::thread::Builder::new()
+                .name("clipr-stream-stop".into())
+                .spawn(move || streamer.stop());
+        }
+    }
+
+    /// Ends a stream that can't go on (refused key, no encoder for it), keeping the reason on show.
+    fn drive_stream(&mut self, now: Instant) {
+        let encoder_error = self.shared.lock().unwrap().stream_error.take();
+        let failed = match (&self.stream, encoder_error) {
+            (Some(_), Some(e)) => Some(e),
+            (Some(s), None) => match s.health().state {
+                clipr_stream::State::Failed(e) => Some(e),
+                _ => None,
+            },
+            (None, _) => None,
+        };
+        if let Some(e) = failed {
+            tracing::warn!("the stream ended: {e}");
+            self.stop_streaming();
+            self.stream_failed = Some((e, now));
+        }
+        if self
+            .stream_failed
+            .as_ref()
+            .is_some_and(|(_, at)| now.duration_since(*at) > STREAM_FAILED_SHOWN)
+        {
+            self.stream_failed = None;
+        }
+    }
+
+    fn stream_status(&self) -> Option<StreamStatus> {
+        if let Some(s) = &self.stream {
+            let h = s.health();
+            let (state, error) = match h.state {
+                clipr_stream::State::Connecting => (StreamState::Connecting, None),
+                clipr_stream::State::Live => (StreamState::Live, None),
+                clipr_stream::State::Reconnecting(e) => (StreamState::Reconnecting, Some(e)),
+                clipr_stream::State::Failed(e) => (StreamState::Failed, Some(e)),
+            };
+            return Some(StreamStatus {
+                state,
+                since: h.since,
+                // Rounded, so the status (and every page) doesn't change for each few kbps.
+                kbps: (h.kbps + 50) / 100 * 100,
+                dropped: h.dropped,
+                error,
+            });
+        }
+        self.stream_failed.as_ref().map(|(e, _)| StreamStatus {
+            state: StreamState::Failed,
+            since: None,
+            kbps: 0,
+            dropped: 0,
+            error: Some(e.clone()),
+        })
     }
 
     /// What should be captured right now, if anything.
     fn wanted(&self) -> Option<Wanted> {
-        // A recording keeps capture running even with the buffer paused, and records the desktop when no
-        // game runs.
-        let recording = self.recording.is_some();
+        // A recording or a stream keeps capture running even with the buffer paused, and shows the desktop
+        // when no game runs.
+        let recording = self.recording.is_some() || self.stream.is_some();
         if !self.buffering && !recording {
             return None;
         }
@@ -702,6 +857,7 @@ impl Supervisor {
             paused: !self.buffering,
             mic_muted: clipr_audio::mic_muted(),
             muted: clipr_audio::muted(),
+            stream: self.stream_status(),
         });
         // Discord shows the game while clipr buffers or records it: only games, never the desktop, and nothing
         // while clipr is idle. A custom game's name is its window title (a document, a tab), so Discord gets

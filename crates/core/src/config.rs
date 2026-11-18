@@ -29,6 +29,7 @@ pub struct Config {
     pub recording: RecordingConfig,
     pub discord: DiscordConfig,
     pub cloud: CloudConfig,
+    pub stream: StreamConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -373,6 +374,8 @@ pub struct HotkeyConfig {
     pub mark: String,
     /// Mutes or unmutes the microphone in clips (not in your voice chat). Empty (the default) turns it off.
     pub toggle_mic: String,
+    /// Starts or stops the live stream (Settings → Stream). Empty (the default) turns it off.
+    pub toggle_stream: String,
     /// Opens or closes the in-game overlay (the Gallery and Settings over the game). Not `Alt+Z`, which is
     /// NVIDIA's overlay.
     pub overlay: String,
@@ -387,6 +390,7 @@ impl Default for HotkeyConfig {
             toggle_recording: "Alt+F9".into(),
             mark: String::new(),
             toggle_mic: String::new(),
+            toggle_stream: String::new(),
             overlay: "Alt+F11".into(),
         }
     }
@@ -405,6 +409,7 @@ impl HotkeyConfig {
             &self.toggle_recording,
             &self.mark,
             &self.toggle_mic,
+            &self.toggle_stream,
         ];
         if !overlay.is_empty() && others.iter().any(|k| norm(k) == overlay) {
             self.overlay.clear();
@@ -508,6 +513,58 @@ impl VideoConfig {
             v.bitrate_kbps = p.bitrate_kbps.unwrap_or(v.bitrate_kbps);
         }
         v
+    }
+}
+
+/// Where a live stream goes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StreamService {
+    #[default]
+    Twitch,
+    Youtube,
+    /// Any RTMP server: `stream.server`.
+    Custom,
+}
+
+/// Live streaming (`Start streaming` on Home, or its hotkey): clipr's own H.264 + the audio mix over RTMP(S).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StreamConfig {
+    pub service: StreamService,
+    /// For `custom`: an `rtmp://` or `rtmps://` address (Kick, Owncast, your own server).
+    pub server: String,
+    /// The stream key. A secret: kept on this PC, never shown to other devices.
+    pub key: String,
+    /// Picture height (720, 1080…), never above what clipr captures; the width follows its shape.
+    pub height: u32,
+    /// 30 or 60; never above what clipr captures.
+    pub fps: u32,
+    /// Video bitrate (CBR). Twitch allows up to 6000.
+    pub bitrate_kbps: u32,
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            service: StreamService::Twitch,
+            server: String::new(),
+            key: String::new(),
+            height: 1080,
+            fps: 60,
+            bitrate_kbps: 6000,
+        }
+    }
+}
+
+impl StreamConfig {
+    /// The server address for the chosen service (Twitch and YouTube over TLS).
+    pub fn url(&self) -> String {
+        match self.service {
+            StreamService::Twitch => "rtmps://live.twitch.tv:443/app".into(),
+            StreamService::Youtube => "rtmps://a.rtmps.youtube.com:443/live2".into(),
+            StreamService::Custom => self.server.trim().to_string(),
+        }
     }
 }
 

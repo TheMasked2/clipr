@@ -138,6 +138,19 @@ time limit ([Settings → Recording](settings.md#recording), off by default) or 
 ([Settings → Library](settings.md#library)). If clipr or the PC crashes mid-recording, the file is recovered the
 next time clipr starts, up to about the last second.
 
+## Going live
+
+clipr can stream what it captures to Twitch, YouTube or your own RTMP server, with the audio mix, while it keeps
+clipping:
+
+1. In **Settings → Stream**, pick the service and paste your stream key (from your Twitch creator dashboard or
+   YouTube Studio). Pick a quality, and Save.
+2. Click **Go live** in Controls on Home (or set a hotkey for it in Settings → Hotkeys).
+3. The top bar shows **● LIVE** and how long you've been live; the status bar shows the bitrate and any dropped
+   frames. **End stream** stops it.
+
+See [Settings → Stream](settings.md#stream) for the quality and bitrate to pick.
+
 ## From your phone
 
 clipr's page can be opened from other devices at home, protected by a PIN:
