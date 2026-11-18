@@ -211,16 +211,19 @@ A capture restart (new monitor or video settings) finishes the file and continue
    Cloudflare Tunnel option with a proper login (accounts or passkeys, not the 6-digit PIN), HTTPS only, the
    folder/web settings still PC-only
 7. **In-game overlay:** a small always-on-top, click-through layer (like the "Clip saved" toast, but optional and
-   movable) showing buffering/recording state, the mic mute, and the last save. A Direct3D present hook is out
+   movable) showing buffering/recording state, the mic mute, and the last save: the same state badge and main
+   controls as Home, so it looks and works the same. A Direct3D present hook is out
    of scope (anti-cheat), so it stays a layered window, which works over borderless games but not exclusive
    fullscreen
 8. **Streaming:** go live from the same capture, so clipr can replace OBS for simple streams. The encoder output
    already exists; the work is an RTMP(S) muxer to Twitch/YouTube (stream key typed in by the user, kept on this PC
    and hidden from other devices, like the cloud keys), a second encoder session when the stream and the buffer want different bitrates, a health
-   readout (dropped frames, bitrate) in the Performance card, and limits (one stream at a time, NVENC session
-   limits on consumer GPUs). Scenes and sources stay OBS's job
-9. Optional real HDR saves (10-bit HEVC)
-10. **Linux:** PipeWire capture/audio, VA-API encode
+   readout (dropped frames, bitrate) in Home's status bar, a Start streaming button in Home's Controls, and
+   limits (one stream at a time, NVENC session limits on consumer GPUs)
+9. **Scenes:** saved sets of sources (like Gaming, Desktop, Gaming + cam), switched from a Scenes dock on Home
+   beside Sources, like OBS. Needs composing more than one picture (a webcam over the game) first
+10. Optional real HDR saves (10-bit HEVC)
+11. **Linux:** PipeWire capture/audio, VA-API encode
 
 Ideas, not planned yet: shared squad galleries, auto highlights (kill/death detection). For editing beyond trims,
 the settings point to [Kdenlive](https://kdenlive.org) (free); clipr won't grow a timeline editor.

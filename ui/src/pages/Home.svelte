@@ -2,29 +2,31 @@
   import { onMount } from 'svelte';
   import * as api from '../lib/api';
   import { app, onServerEvent, toastError } from '../lib/store.svelte';
-  import { fmtBytes, fmtDateTime, fmtTime } from '../lib/format';
+  import { fmtTime } from '../lib/format';
   import Wizard from '../lib/Wizard.svelte';
   import DiscordPosts from '../lib/DiscordPosts.svelte';
   import CloudUploads from '../lib/CloudUploads.svelte';
   import CrashNotice from '../lib/CrashNotice.svelte';
   import CleanupWarning from '../lib/CleanupWarning.svelte';
   import CapturePreview from '../lib/CapturePreview.svelte';
-  import Mixer from '../lib/Mixer.svelte';
-  import PerfPanel from '../lib/PerfPanel.svelte';
-  import QuickCapture from '../lib/QuickCapture.svelte';
-  import { clipHref } from '../lib/router.svelte';
+  import Dock from '../lib/Dock.svelte';
+  import SourcesDock from '../lib/SourcesDock.svelte';
+  import MixerStrips from '../lib/MixerStrips.svelte';
+  import ControlsDock from '../lib/ControlsDock.svelte';
+  import StatusBar from '../lib/StatusBar.svelte';
 
-  // Home is the overview, like OBS's main window: state and actions, the live picture, capture presets, the
-  // audio mixer and performance numbers, plus the newest clip. The Gallery has the clips.
+  // Home works like OBS's main window, with everything in a fixed place: the live picture with the capture
+  // state on it, then three docks (Sources: what's recorded and its settings; Mixer; Controls), and a status
+  // bar with the numbers that matter. The Gallery has the clips.
   let latest = $state<api.Clip | null>(null);
   let count = $state<number | null>(null);
   let disk = $state<api.Disk | null>(null);
   let fresh = $state('');
   let now = $state(Date.now());
   let elevated = $state(false);
+  let samples = $state<api.PerfSample[]>([]);
 
   const st = $derived(app.status);
-  const hk = $derived(app.config?.hotkeys);
   const paused = $derived(st?.paused ?? false);
   const elapsed = $derived(st?.state === 'recording' && st.recording_since ? now / 1000 - st.recording_since : 0);
 
@@ -48,6 +50,20 @@
     void loadDisk();
     api.getSystem().then((s) => (elevated = !!s.elevated)).catch(() => {});
     const tick = setInterval(() => (now = Date.now()), 500);
+    // Performance samples for the status bar and the buffer fill, once a second while the tab is visible.
+    let stop = false;
+    const poll = async () => {
+      if (stop) return;
+      if (document.visibilityState === 'visible') {
+        try {
+          samples = await api.getPerf();
+        } catch {
+          // Disconnected: keep the last numbers; the badge says so.
+        }
+      }
+      if (!stop) setTimeout(poll, 1000);
+    };
+    void poll();
     const off = onServerEvent((e) => {
       if (e.type === 'clip_saved') {
         seq++; // drops a list request still on its way
@@ -62,155 +78,87 @@
       }
     });
     return () => {
+      stop = true;
       clearInterval(tick);
       off();
     };
   });
 
-  const run = (p: Promise<unknown>) => p.catch(toastError);
-  const label = (k?: string) => (k ? k : '');
+  const last = $derived(samples[samples.length - 1]);
+  /** How full the replay buffer is, in seconds, against its length. */
+  const filled = $derived(Math.min(last?.buffer_secs ?? 0, app.config?.replay.buffer_secs ?? Infinity));
 </script>
 
-<h1>Home</h1>
+{#snippet badge()}
+  <span class="badge" class:rec={st?.state === 'recording'} class:buf={st?.state === 'buffering'} title={st?.encoder ? `Encoder: ${st.encoder}` : undefined} role="status">
+    {#if !app.connected && !st}
+      <span class="dot"></span>Connecting…
+    {:else if st?.state === 'recording'}
+      <span class="dot"></span><b>REC</b><span class="mono">{fmtTime(elapsed)}</span>{#if st.game}<span class="dim">· {st.game}</span>{/if}
+    {:else if st?.state === 'buffering'}
+      <span class="dot"></span><b>Replay buffer</b><span class="mono">{fmtTime(filled)} of {fmtTime(app.config?.replay.buffer_secs ?? 0)}</span>{#if st.game}<span class="dim">· {st.game}</span>{/if}
+    {:else if paused}
+      <span class="dot"></span><b>Buffer paused</b><span class="dim">· resume it to save clips</span>
+    {:else if app.config?.games.mode === 'auto'}
+      <span class="dot"></span><b>Waiting for a game</b>
+    {:else}
+      <span class="dot"></span><b>Not buffering</b>
+    {/if}
+  </span>
+{/snippet}
+
+<h1 class="sr-only">Home</h1>
 
 <div class="home">
-<div class="col main">
-<section class="card status" class:rec={st?.state === 'recording'} class:buf={st?.state === 'buffering'}>
-  <div class="state">
-    {#if !app.connected && !st}
-      <span class="big-state">Connecting…</span>
-    {:else if st?.state === 'recording'}
-      <span class="dot rec"></span><span class="big-state">Recording</span><span class="timer">{fmtTime(elapsed)}</span>
-    {:else if st?.state === 'buffering'}
-      <span class="dot buf"></span><span class="big-state">Buffering</span>
-    {:else if paused}
-      <span class="dot"></span><span class="big-state">Buffer paused</span>
-    {:else}
-      <span class="dot"></span><span class="big-state">Not buffering</span>
-    {/if}
-  </div>
-  <div class="muted">
-    {#if st?.game}Game: <b>{st.game}</b>{:else if paused}The replay buffer is paused; resume it to save clips.{:else if st?.state === 'idle'}Waiting for a game to start.{:else}No game detected.{/if}
-    {#if st?.encoder}<span class="sep">·</span>Encoder: {st.encoder}{/if}
-  </div>
   {#if st?.error}<div class="banner err">{st.error}</div>{/if}
   {#if elevated}<div class="banner warn">clipr is running as administrator. Windows can then block game capture, and your settings may belong to another account. Quit clipr and start it normally.</div>{/if}
   {#if !app.connected && st}<div class="banner warn">Disconnected from clipr, retrying…</div>{/if}
+  <CrashNotice />
+  <CleanupWarning />
+  <DiscordPosts />
+  <CloudUploads />
 
-  <div class="actions">
-    <div class="act">
-      <button class="primary big" onclick={() => run(api.saveClip())}>Save clip</button>
-      {#if hk?.save_clip}<kbd>{hk.save_clip}</kbd>{/if}
-    </div>
-    <div class="act">
-      <button onclick={() => run(api.saveClip(app.config?.replay.buffer_secs))}>Save long clip</button>
-      {#if hk?.save_long_clip}<kbd>{hk.save_long_clip}</kbd>{/if}
-    </div>
-    <div class="act">
-      <button class:danger={st?.state === 'recording'} onclick={() => run(api.setRecording(st?.state !== 'recording'))}>
-        {st?.state === 'recording' ? 'Stop recording' : 'Start recording'}
-      </button>
-      {#if hk?.toggle_recording}<kbd>{hk.toggle_recording}</kbd>{/if}
-    </div>
-    <div class="act">
-      <button onclick={() => run(api.setBuffer(paused))}>{paused ? 'Resume buffer' : 'Pause buffer'}</button>
-      {#if hk?.toggle_buffer}<kbd>{hk.toggle_buffer}</kbd>{/if}
-    </div>
-    <div class="act">
-      <button onclick={() => run(api.markMoment())}>Mark moment</button>
-      {#if hk?.mark}<kbd>{hk.mark}</kbd>{/if}
-    </div>
-    {#if app.config?.audio.mic || st?.mic_muted}
-      <div class="act">
-        <button class:warn={st?.mic_muted} onclick={() => run(api.setMicMuted(!st?.mic_muted))}>{st?.mic_muted ? 'Unmute mic' : 'Mute mic'}</button>
-        {#if hk?.toggle_mic}<kbd>{hk.toggle_mic}</kbd>{/if}
-      </div>
-    {/if}
+  <CapturePreview hideable stage {badge} />
+
+  <div class="docks">
+    <div class="cell sources"><Dock title="Sources" flush><SourcesDock /></Dock></div>
+    <div class="cell mixer"><Dock title="Mixer" flush><MixerStrips /></Dock></div>
+    <div class="cell controls"><Dock title="Controls" menus><ControlsDock /></Dock></div>
   </div>
-</section>
 
-<section class="card pane preview">
-  <CapturePreview hideable />
-</section>
-
-<CrashNotice />
-<CleanupWarning />
-<DiscordPosts />
-<CloudUploads />
-
-<section class="card info">
-  {#if latest}
-    <a class="latest" class:fresh={fresh === latest.id} href={clipHref(latest.id)}>
-      <span class="muted small">{fresh === latest.id ? 'Just saved' : 'Last clip'}</span>
-      <b>{latest.title}</b>
-      <span class="muted small">{latest.game} · {fmtDateTime(latest.created)}{latest.duration_secs ? ` · ${fmtTime(latest.duration_secs)}` : ''}</span>
-    </a>
-  {:else if count === 0}
-    <p class="muted">No clips yet. Press {label(hk?.save_clip) || 'the save-clip button'} while a game runs.</p>
-  {/if}
-  <div class="row facts">
-    {#if count}<a href="#/gallery">{count.toLocaleString()} {count === 1 ? 'clip' : 'clips'} →</a>{/if}
-    {#if disk}<span class="muted small">{fmtBytes(disk.free_bytes)} free of {fmtBytes(disk.total_bytes)} · clips use {fmtBytes(disk.clips_bytes)}</span>{/if}
-  </div>
-</section>
-</div>
-
-<div class="col side">
-  <section class="card pane capture">
-    <h2>Capture</h2>
-    <QuickCapture />
-  </section>
-  <section class="card pane audio">
-    <h2>Audio</h2>
-    <Mixer />
-  </section>
-  <section class="card pane perf">
-    <h2>Performance</h2>
-    <PerfPanel />
-  </section>
-</div>
+  <div class="bar"><StatusBar {samples} {disk} {latest} fresh={!!latest && fresh === latest.id} /></div>
 </div>
 
 {#if app.config && !app.config.ui.setup_done}<Wizard />{/if}
 
 <style>
-  .home { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 1.2rem; align-items: start; }
-  .col { display: flex; flex-direction: column; gap: 1.2rem; min-width: 0; }
-  /* The notices bring their own bottom margin; the column's gap spaces them here. */
-  .col :global(> section), .col :global(> div) { margin-bottom: 0; }
-  .pane { padding: 1.1rem 1.3rem; }
-  @media (max-width: 1060px) {
-    /* One column: the cards in the order they matter while playing. */
-    .home { display: flex; flex-direction: column; align-items: stretch; }
-    .col { display: contents; }
-    .home :global(> .col > *) { order: 5; }
-    .home :global(> .col > .status) { order: 0; }
-    .home :global(> .col > .cleanup) { order: 0; }
-    .home :global(> .col > .capture) { order: 1; }
-    .home :global(> .col > .audio) { order: 2; }
-    .home :global(> .col > .preview) { order: 3; }
-    .home :global(> .col > .perf) { order: 4; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .home { display: flex; flex-direction: column; gap: .7rem; --stage-h: max(14rem, calc(100dvh - 28rem)); }
+  /* The notices bring their own bottom margin; the gap spaces them here. */
+  .home > :global(section), .home > :global(div) { margin-bottom: 0; }
+  .home :global(.screen.stage) { max-height: var(--stage-h); }
+  .docks { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) minmax(0, .9fr); gap: .7rem; height: 17rem; }
+  .cell { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .cell > :global(.dock) { flex: 1; }
+  .bar { position: sticky; bottom: .6rem; z-index: 5; }
+  @media (max-width: 900px) {
+    /* One column: the buttons first, then what's recorded and the levels. */
+    .docks { grid-template-columns: minmax(0, 1fr); height: auto; }
+    .controls { order: 0; }
+    .sources { order: 1; }
+    .mixer { order: 2; height: 14rem; }
+    /* On a phone the bar wraps to a few lines: it stays at the end instead of covering the docks. */
+    .bar { position: static; }
   }
-  .status { display: flex; flex-direction: column; gap: .7rem; padding: 1.6rem; }
-  .status.rec { border-color: var(--danger-border); }
-  .status.buf { border-color: var(--accent-border); }
-  .state { display: flex; align-items: center; gap: .7rem; }
-  .big-state { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; }
-  .timer { font-family: var(--mono); font-size: 1.4rem; color: var(--danger); }
-  .dot { width: .8rem; height: .8rem; border-radius: 50%; background: var(--text-muted); }
-  .dot.buf { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
-  .dot.rec { background: var(--danger); box-shadow: 0 0 10px var(--danger); animation: pulse 1.2s infinite; }
+  .badge {
+    display: inline-flex; align-items: center; gap: .45rem; padding: .25rem .65rem; border-radius: 7px;
+    background: #000b; color: #eee; font-size: .82rem; white-space: nowrap; max-width: 100%; overflow: hidden;
+  }
+  .badge .dot { width: .55rem; height: .55rem; border-radius: 50%; background: #888; flex: none; }
+  .badge.buf .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .badge.rec { background: color-mix(in srgb, var(--danger) 85%, black); color: #fff; }
+  .badge.rec .dot { background: #fff; animation: pulse 1.2s infinite; }
   @keyframes pulse { 50% { opacity: .35; } }
-  .sep { margin: 0 .4rem; }
-  .actions { display: flex; flex-wrap: wrap; gap: 1rem 1.4rem; margin-top: .6rem; }
-  .act { display: flex; align-items: center; gap: .5rem; }
-  .act button.warn { color: #f5b942; border-color: #f5b94266; }
-  .info { display: flex; flex-direction: column; gap: .8rem; padding: 1.2rem 1.6rem; }
-  .info p { margin: 0; }
-  .latest { display: flex; flex-direction: column; gap: .15rem; text-decoration: none; color: inherit; border-radius: .5rem; padding: .4rem .6rem; margin: -.4rem -.6rem; transition: background .2s; }
-  .latest:hover { background: var(--surface-2); }
-  .latest.fresh { background: var(--accent-soft, var(--surface-2)); }
-  .latest b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .facts { gap: .4rem 1.2rem; flex-wrap: wrap; align-items: baseline; }
-  .facts a { text-decoration: none; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .dim { opacity: .75; overflow: hidden; text-overflow: ellipsis; }
 </style>

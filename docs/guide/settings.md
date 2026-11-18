@@ -26,7 +26,7 @@ that file resets everything.
 ## Video
 
 **Preview** at the top shows what clipr captures right now, 5 frames a second by default; pick 2, 15 or 30 in its
-corner (Home shows it too, with a **Hide** link). It only runs while the buffer or a recording does, and only while a page shows it, so it costs
+corner (Home shows it big, with a **Hide** link). It only runs while the buffer or a recording does, and only while a page shows it, so it costs
 nothing otherwise. Other devices (LAN access) don't get it unless you turn on **Live preview on other devices**
 under Network, because it shows your whole screen.
 
@@ -216,8 +216,7 @@ runs, right-click it and choose **Go to details**: the highlighted name is the e
   free.
 - **Clean up now:** runs the age and size limits on the saved settings right away. It also runs every hour.
 
-The Home page shows your newest clip, how many clips you have, how much space is free and how much your
-clips use.
+Home's status bar shows your newest clip and how much space is free (hover it for how much your clips use).
 
 ## Recording
 
