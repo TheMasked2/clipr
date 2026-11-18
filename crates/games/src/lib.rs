@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use clipr_core::config::GamesConfig;
 
-use catalog::GameMap;
+use catalog::{GameMap, IconMap};
 
 /// A game that is running and should be captured.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +25,10 @@ pub struct Game {
     /// Lower-case exe file name, e.g. `cs2.exe`.
     pub exe: String,
     pub pid: u32,
+    /// The game's icon on Discord's CDN, when Discord knows the game.
+    pub icon: Option<String>,
+    /// From the user's custom list, not Discord's: `name` is then the window title, which can be private.
+    pub custom: bool,
     pub hwnd: isize,
     /// HMONITOR of the game's window.
     pub monitor: isize,
@@ -52,6 +56,7 @@ impl Lists {
 
 struct State {
     known: GameMap,
+    icons: IconMap,
     lists: Lists,
     current: Option<Game>,
     /// Fullscreen unknown exes already logged.
@@ -97,15 +102,16 @@ impl GameWatcher {
         // How long until the cached list is due for a refresh (zero: now).
         let due_in = cache
             .as_ref()
-            .filter(|c| catalog::is_fresh(c.fetched_at, now))
+            .filter(|c| catalog::is_fresh(c.fetched_at, now) && !c.icons.is_empty())
             .map_or(0, |c| catalog::MAX_AGE_SECS - (now - c.fetched_at));
-        let known = match cache {
-            Some(c) if !c.games.is_empty() => c.games,
-            _ => catalog::builtin(),
+        let (known, icons) = match cache {
+            Some(c) if !c.games.is_empty() => (c.games, c.icons),
+            _ => (catalog::builtin(), IconMap::new()),
         };
         tracing::info!("{} known game executables loaded", known.len());
         let state = Arc::new(Mutex::new(State {
             known,
+            icons,
             lists: Lists::default(),
             current: None,
             logged: HashSet::new(),
@@ -143,6 +149,7 @@ impl GameWatcher {
         let mut st = lock(&self.state);
         if let Some(fg) = foreground {
             let verdict = classify(&fg.exe, &st.known, &st.lists);
+            let custom = verdict == Verdict::Custom;
             let name = match verdict {
                 Verdict::Known(name) => Some(name),
                 Verdict::Custom => Some(if fg.title.trim().is_empty() {
@@ -155,6 +162,8 @@ impl GameWatcher {
             if let Some(name) = name {
                 let game = Game {
                     name,
+                    icon: st.icons.get(&fg.exe).cloned(),
+                    custom,
                     auto_record: st.lists.auto_record.contains(&fg.exe),
                     monitor: monitor_of(fg.hwnd),
                     exe: fg.exe,
@@ -213,16 +222,19 @@ fn refresh_forever(state: &Mutex<State>, cache_file: &std::path::Path, mut due_i
 /// Downloads the list once. True when a new list was loaded.
 fn refresh(state: &Mutex<State>, cache_file: &std::path::Path) -> bool {
     match catalog::download() {
-        Ok(games) if !games.is_empty() => {
+        Ok((games, icons)) if !games.is_empty() => {
             tracing::info!("downloaded {} known game executables", games.len());
             let cache = catalog::Cache {
                 fetched_at: catalog::now_secs(),
                 games,
+                icons,
             };
             if let Err(e) = catalog::save_cache(cache_file, &cache) {
                 tracing::warn!("could not save the game list: {e:#}");
             }
-            lock(state).known = cache.games;
+            let mut st = lock(state);
+            st.known = cache.games;
+            st.icons = cache.icons;
             true
         }
         Ok(_) => {
@@ -276,18 +288,29 @@ mod tests {
     use super::*;
 
     const FIXTURE: &str = r#"[
-      {"name":"Foo Game","executables":[
+      {"name":"Foo Game","id":"123","icon_hash":"abc","executables":[
         {"os":"win32","name":"steamapps/common/Foo/Foo.exe","is_launcher":false},
         {"os":"win32","name":"FooLauncher.exe","is_launcher":true},
         {"os":"linux","name":"foo","is_launcher":false},
         {"os":"darwin","name":"Foo.app","is_launcher":false}]},
-      {"name":"Bar","executables":[{"os":"win32","name":">bar-win64.exe","is_launcher":false}]},
+      {"name":"Bar","id":"9","icon_hash":"../x","executables":[{"os":"win32","name":">bar-win64.exe","is_launcher":false}]},
       {"name":"No Exes"},
       {"name":"Browser","executables":[{"os":"win32","name":"chrome.exe","is_launcher":false}]}
     ]"#;
 
     fn known() -> GameMap {
-        catalog::parse_detectable(FIXTURE.as_bytes()).unwrap()
+        catalog::parse_detectable(FIXTURE.as_bytes()).unwrap().0
+    }
+
+    #[test]
+    fn icons_come_with_the_list() {
+        let (_, icons) = catalog::parse_detectable(FIXTURE.as_bytes()).unwrap();
+        assert_eq!(
+            icons.get("foo.exe").map(String::as_str),
+            Some("https://cdn.discordapp.com/app-icons/123/abc.png?size=256")
+        );
+        // A hash that isn't one is left out.
+        assert!(!icons.contains_key("bar-win64.exe"));
     }
 
     fn lists(custom: &[&str], blocked: &[&str], auto: &[&str]) -> Lists {
@@ -331,6 +354,10 @@ mod tests {
             &catalog::Cache {
                 fetched_at: 42,
                 games: known(),
+                icons: IconMap::from([(
+                    "valorant.exe".into(),
+                    "https://cdn.discordapp.com/app-icons/1/a.png".into(),
+                )]),
             },
         )
         .unwrap();
@@ -379,6 +406,7 @@ mod tests {
         GameWatcher {
             state: Arc::new(Mutex::new(State {
                 known: known(),
+                icons: catalog::parse_detectable(FIXTURE.as_bytes()).unwrap().1,
                 lists,
                 current: None,
                 logged: HashSet::new(),

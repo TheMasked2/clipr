@@ -14,9 +14,16 @@ pub const MAX_AGE_SECS: u64 = 24 * 60 * 60;
 /// Lower-case exe file name -> game name.
 pub type GameMap = HashMap<String, String>;
 
+/// Lower-case exe file name -> the game's icon on Discord's CDN (for Rich Presence).
+pub type IconMap = HashMap<String, String>;
+
 #[derive(Deserialize)]
 struct App {
     name: String,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    icon_hash: Option<String>,
     #[serde(default)]
     executables: Vec<Exe>,
 }
@@ -37,6 +44,9 @@ pub struct Cache {
     /// Unix seconds of the download.
     pub fetched_at: u64,
     pub games: GameMap,
+    /// Missing in caches from before icons were kept: those are refreshed right away.
+    #[serde(default)]
+    pub icons: IconMap,
 }
 
 /// Last path component of a Discord executable name, lower-cased (`steamapps/x/Foo.exe` -> `foo.exe`).
@@ -50,14 +60,26 @@ fn exe_file_name(name: &str) -> String {
 
 /// Parses Discord's JSON, keeping win32 non-launcher executables.
 #[cfg(test)]
-pub fn parse_detectable(json: &[u8]) -> Result<GameMap> {
+pub fn parse_detectable(json: &[u8]) -> Result<(GameMap, IconMap)> {
     let apps: Vec<App> = serde_json::from_slice(json).context("the game list has an unexpected format")?;
     Ok(collect(apps))
 }
 
-fn collect(apps: Vec<App>) -> GameMap {
+/// The icon of a Discord application, if both parts look right.
+fn icon_url(id: &str, hash: Option<&str>) -> Option<String> {
+    let hash = hash?;
+    let ok = !id.is_empty()
+        && id.bytes().all(|b| b.is_ascii_digit())
+        && !hash.is_empty()
+        && hash.bytes().all(|b| b.is_ascii_hexdigit() || b == b'_');
+    ok.then(|| format!("https://cdn.discordapp.com/app-icons/{id}/{hash}.png?size=256"))
+}
+
+fn collect(apps: Vec<App>) -> (GameMap, IconMap) {
     let mut map = GameMap::new();
+    let mut icons = IconMap::new();
     for app in apps {
+        let icon = icon_url(&app.id, app.icon_hash.as_deref());
         for exe in app.executables {
             if exe.os != "win32" || exe.is_launcher {
                 continue;
@@ -67,10 +89,13 @@ fn collect(apps: Vec<App>) -> GameMap {
             if file.is_empty() {
                 continue;
             }
+            if let Some(icon) = &icon {
+                icons.entry(file.clone()).or_insert_with(|| icon.clone());
+            }
             map.entry(file).or_insert_with(|| app.name.clone());
         }
     }
-    map
+    (map, icons)
 }
 
 pub fn now_secs() -> u64 {
@@ -106,7 +131,7 @@ pub fn save_cache(path: &Path, cache: &Cache) -> Result<()> {
 }
 
 /// Downloads the list. Sends only a User-Agent of `clipr/<version>`.
-pub fn download() -> Result<GameMap> {
+pub fn download() -> Result<(GameMap, IconMap)> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(15)))
         .user_agent(format!("clipr/{}", clipr_core::VERSION))

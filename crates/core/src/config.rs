@@ -528,6 +528,9 @@ pub struct DiscordConfig {
     /// Your Discord upload limit in MB: 10 (free), 50 (Nitro Basic) or 500 (Nitro). A bigger clip is sent
     /// as a smaller copy that fits (the clip itself is never changed).
     pub upload_limit_mb: u32,
+    /// Rich Presence: show the game clipr clips (and its icon) in your Discord profile. Needs the Discord app
+    /// running on this PC; nothing goes online.
+    pub presence: bool,
 }
 
 impl Default for DiscordConfig {
@@ -536,6 +539,7 @@ impl Default for DiscordConfig {
             webhooks: Vec::new(),
             post_during_game: false,
             upload_limit_mb: 10,
+            presence: true,
         }
     }
 }

@@ -166,6 +166,8 @@ pub fn start(
                 last_stats: Stats::default(),
                 toast: crate::overlay::start(),
                 levels: shared_levels,
+                presence: clipr_discord::Presence::start(),
+                presence_shown: None,
             };
             sup.run(rx);
         })
@@ -213,6 +215,9 @@ struct Supervisor {
     last_stats: Stats,
     toast: crate::overlay::Toast,
     levels: Levels,
+    /// Rich Presence in the user's Discord profile, and what it was last told.
+    presence: clipr_discord::Presence,
+    presence_shown: Option<Option<clipr_discord::PresenceStatus>>,
 }
 
 impl Supervisor {
@@ -564,6 +569,26 @@ impl Supervisor {
             paused: !self.buffering,
             mic_muted: clipr_audio::mic_muted(),
         });
+        // Discord shows the game while clipr buffers or records it: only games, never the desktop, and nothing
+        // while clipr is idle. A custom game's name is its window title (a document, a tab), so Discord gets
+        // its program name instead.
+        let presence = self
+            .game
+            .as_ref()
+            .filter(|_| self.config.discord.presence && running)
+            .map(|g| clipr_discord::PresenceStatus {
+                game: Some(if g.custom {
+                    g.exe.strip_suffix(".exe").unwrap_or(&g.exe).to_string()
+                } else {
+                    g.name.clone()
+                }),
+                icon: g.icon.clone(),
+                recording_since,
+            });
+        if self.presence_shown.as_ref() != Some(&presence) {
+            self.presence.set(presence.clone());
+            self.presence_shown = Some(presence);
+        }
     }
 
     /// The mute hotkey (or the tray, or the web UI): mutes or unmutes the microphone in clips, with a blip and

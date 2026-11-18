@@ -53,6 +53,10 @@
   }
 </script>
 
+<Field title="Show in my Discord status" hint="While clipr clips or records, your Discord profile shows the game with its icon (&quot;Playing clipr · VALORANT · Clipping with clipr&quot;). Only games, never the desktop. Needs the Discord app on this PC; nothing goes online.">
+  <Toggle bind:checked={discord.presence} label="Show in my Discord status" />
+</Field>
+
 <p class="muted small note">
   Post clips to a Discord channel through a webhook: in Discord, open the channel's settings → Integrations → Webhooks →
   New Webhook → Copy Webhook URL, and paste it here. Anyone with the URL can post to that channel, so keep it to yourself.
