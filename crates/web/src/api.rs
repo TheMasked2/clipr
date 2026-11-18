@@ -145,6 +145,11 @@ pub async fn set_mic(State(s): State<AppState>, body: Bytes) -> ApiResult<Status
     Ok(no_content())
 }
 
+/// Performance samples for Home's graphs.
+pub async fn perf(State(s): State<AppState>) -> Json<serde_json::Value> {
+    Json(s.control.perf())
+}
+
 /// A page shows the level meters (see `docs/api.md`).
 pub async fn watch_levels(State(s): State<AppState>) -> StatusCode {
     s.control.watch_levels();

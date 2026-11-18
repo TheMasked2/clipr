@@ -8,9 +8,13 @@
   import CloudUploads from '../lib/CloudUploads.svelte';
   import CrashNotice from '../lib/CrashNotice.svelte';
   import CapturePreview from '../lib/CapturePreview.svelte';
+  import Mixer from '../lib/Mixer.svelte';
+  import PerfPanel from '../lib/PerfPanel.svelte';
+  import QuickCapture from '../lib/QuickCapture.svelte';
   import { clipHref } from '../lib/router.svelte';
 
-  // Home is quick info: the newest clip and the library size. The Gallery has the clips.
+  // Home is the overview, like OBS's main window: state and actions, the live picture, capture presets, the
+  // audio mixer and performance numbers, plus the newest clip. The Gallery has the clips.
   let latest = $state<api.Clip | null>(null);
   let count = $state<number | null>(null);
   let disk = $state<api.Disk | null>(null);
@@ -68,6 +72,8 @@
 
 <h1>Home</h1>
 
+<div class="home">
+<div class="col main">
 <section class="card status" class:rec={st?.state === 'recording'} class:buf={st?.state === 'buffering'}>
   <div class="state">
     {#if !app.connected && !st}
@@ -120,6 +126,9 @@
       </div>
     {/if}
   </div>
+</section>
+
+<section class="card pane preview">
   <CapturePreview hideable />
 </section>
 
@@ -142,11 +151,44 @@
     {#if disk}<span class="muted small">{fmtBytes(disk.free_bytes)} free of {fmtBytes(disk.total_bytes)} · clips use {fmtBytes(disk.clips_bytes)}</span>{/if}
   </div>
 </section>
+</div>
+
+<div class="col side">
+  <section class="card pane capture">
+    <h2>Capture</h2>
+    <QuickCapture />
+  </section>
+  <section class="card pane audio">
+    <h2>Audio</h2>
+    <Mixer />
+  </section>
+  <section class="card pane perf">
+    <h2>Performance</h2>
+    <PerfPanel />
+  </section>
+</div>
+</div>
 
 {#if app.config && !app.config.ui.setup_done}<Wizard />{/if}
 
 <style>
-  .status { display: flex; flex-direction: column; gap: .7rem; padding: 1.6rem; margin-bottom: 2rem; }
+  .home { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 1.2rem; align-items: start; }
+  .col { display: flex; flex-direction: column; gap: 1.2rem; min-width: 0; }
+  /* The notices bring their own bottom margin; the column's gap spaces them here. */
+  .col :global(> section), .col :global(> div) { margin-bottom: 0; }
+  .pane { padding: 1.1rem 1.3rem; }
+  @media (max-width: 1060px) {
+    /* One column: the cards in the order they matter while playing. */
+    .home { display: flex; flex-direction: column; }
+    .col { display: contents; }
+    .home :global(> .col > *) { order: 5; }
+    .home :global(> .col > .status) { order: 0; }
+    .home :global(> .col > .capture) { order: 1; }
+    .home :global(> .col > .audio) { order: 2; }
+    .home :global(> .col > .preview) { order: 3; }
+    .home :global(> .col > .perf) { order: 4; }
+  }
+  .status { display: flex; flex-direction: column; gap: .7rem; padding: 1.6rem; }
   .status.rec { border-color: var(--danger-border); }
   .status.buf { border-color: var(--accent-border); }
   .state { display: flex; align-items: center; gap: .7rem; }

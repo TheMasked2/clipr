@@ -8,6 +8,7 @@
 //! The replay buffer outlives pipelines: when a game closes, its last moments can still be saved, until the
 //! next pipeline starts with a fresh buffer.
 
+mod perf;
 pub mod preset;
 mod record;
 mod save;
@@ -62,13 +63,17 @@ pub enum Command {
     Stop,
 }
 
-/// Frame counters, for the logs and the "your game starves clipr" hint.
+/// Frame counters, for the logs, Home's performance numbers and the "your game starves clipr" hint.
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Stats {
     pub fresh: u64,
     pub repeated: u64,
     pub late: u64,
     pub dropped: u64,
+    /// Time spent scaling and encoding frames, in 100 ns units.
+    pub work_100ns: u64,
+    /// Encoded video written.
+    pub video_bytes: u64,
 }
 
 /// What the pipelines share with the supervisor.
@@ -87,6 +92,7 @@ pub struct Shared {
 
 impl Shared {
     fn push_video(&mut self, packet: Packet) {
+        self.stats.video_bytes += packet.data.len() as u64;
         if let Some(r) = &self.record {
             r.video(&packet);
         }
@@ -118,6 +124,7 @@ pub struct Engine {
     tx: mpsc::Sender<Command>,
     levels: Levels,
     levels_watched: LevelsWatched,
+    perf: perf::History,
 }
 
 /// Until when a page shows the level meters (see [`Engine::watch_levels`]).
@@ -141,6 +148,11 @@ impl Engine {
 
     /// A page shows the level meters: keep levels coming for the next few seconds even while nothing is
     /// captured (audio then runs for the meters only, recording nothing). Pages call it every couple of seconds.
+    /// One performance sample a second over the last two minutes, oldest first.
+    pub fn perf(&self) -> Vec<perf::Sample> {
+        self.perf.lock().unwrap().iter().cloned().collect()
+    }
+
     pub fn watch_levels(&self) {
         *self.levels_watched.lock().unwrap() = Some(Instant::now() + LEVELS_WATCH);
     }
@@ -159,6 +171,8 @@ pub fn start(
     let shared_levels = levels.clone();
     let levels_watched = LevelsWatched::default();
     let shared_watched = levels_watched.clone();
+    let perf = perf::History::default();
+    let sampler = perf::Sampler::new(perf.clone());
     let thread = std::thread::Builder::new()
         .name("clipr-engine".into())
         .spawn(move || {
@@ -185,6 +199,7 @@ pub fn start(
                 levels_watched: shared_watched,
                 meter: None,
                 meter_retry: None,
+                sampler,
                 presence: clipr_discord::Presence::start(),
                 presence_shown: None,
             };
@@ -196,6 +211,7 @@ pub fn start(
             tx,
             levels,
             levels_watched,
+            perf,
         },
         thread,
     )
@@ -250,6 +266,7 @@ struct Supervisor {
     meter: Option<(AudioCapture, AudioConfig)>,
     /// When to try the meter again after it failed to start.
     meter_retry: Option<Instant>,
+    sampler: perf::Sampler,
     /// Rich Presence in the user's Discord profile, and what it was last told.
     presence: clipr_discord::Presence,
     presence_shown: Option<Option<clipr_discord::PresenceStatus>>,
@@ -267,6 +284,7 @@ impl Supervisor {
         };
         record::recover(&self.config.clips.dir());
         let mut stats_at = Instant::now() + Duration::from_secs(10);
+        let mut perf_at = Instant::now() + Duration::from_secs(1);
         let mut tick_at = Instant::now();
         loop {
             match rx.recv_timeout(METER_EVERY) {
@@ -283,6 +301,10 @@ impl Supervisor {
             if Instant::now() >= tick_at {
                 tick_at = Instant::now() + TICK;
                 self.tick();
+            }
+            if Instant::now() >= perf_at {
+                perf_at = Instant::now() + Duration::from_secs(1);
+                self.sample_perf();
             }
             if Instant::now() > stats_at {
                 stats_at = Instant::now() + Duration::from_secs(10);
@@ -718,6 +740,18 @@ impl Supervisor {
         r.sound_on_save.then_some(r.sound_volume)
     }
 
+    fn sample_perf(&mut self) {
+        let (stats, buffer) = {
+            let s = self.shared.lock().unwrap();
+            let buffer = s
+                .buffer
+                .as_ref()
+                .map_or((0.0, 0), |b| (b.video_secs(), b.bytes()));
+            (s.stats, buffer)
+        };
+        self.sampler.sample(stats, self.pipeline.is_some(), buffer);
+    }
+
     /// Logs frame statistics and warns when the game starves the capture.
     fn check_stats(&mut self) {
         let now = self.shared.lock().unwrap().stats;
@@ -726,6 +760,7 @@ impl Supervisor {
             repeated: now.repeated - self.last_stats.repeated,
             late: now.late - self.last_stats.late,
             dropped: now.dropped - self.last_stats.dropped,
+            ..Stats::default()
         };
         self.last_stats = now;
         if self.pipeline.is_none() {

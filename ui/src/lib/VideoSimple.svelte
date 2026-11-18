@@ -1,28 +1,12 @@
 <script lang="ts">
   import type { Config } from './api';
   import Field from './Field.svelte';
+  import { QUALITY as presets, HEIGHTS as heights, nearestQuality } from './video';
 
   let { video = $bindable() }: { video: Config['video'] } = $props();
 
-  const presets = [
-    { name: 'Low', kbps: 8000 },
-    { name: 'Medium', kbps: 15000 },
-    { name: 'High', kbps: 25000 },
-    { name: 'Ultra', kbps: 40000 },
-  ];
-  const heights = [
-    { v: 720, t: '720p' },
-    { v: 1080, t: '1080p' },
-    { v: 1440, t: '1440p' },
-    { v: 0, t: 'Native (monitor resolution)' },
-  ];
-
   const exact = $derived(presets.findIndex((p) => p.kbps === video.bitrate_kbps));
-  const nearest = $derived(
-    exact >= 0
-      ? exact
-      : presets.reduce((b, p, i) => (Math.abs(p.kbps - video.bitrate_kbps) < Math.abs(presets[b].kbps - video.bitrate_kbps) ? i : b), 0),
-  );
+  const nearest = $derived(nearestQuality(video.bitrate_kbps));
   const heightKnown = $derived(heights.some((h) => h.v === video.height));
 </script>
 

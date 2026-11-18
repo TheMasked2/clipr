@@ -62,7 +62,7 @@
 </div>
 
 <style>
-  .mixer { display: flex; flex-direction: column; gap: 0.55rem; width: 100%; }
+  .mixer { display: flex; flex-direction: column; gap: 0.55rem; width: 100%; container-type: inline-size; }
   .row { display: grid; grid-template-columns: 6.5rem minmax(4rem, 1fr) 3.4rem minmax(8rem, 12rem) 4.2rem; align-items: center; gap: 0.7rem; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
   .bar { height: 0.6rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
@@ -75,9 +75,9 @@
   .mute { padding: 0.2rem 0.5rem; }
   .mute.on { border-color: var(--danger); color: var(--danger); }
   p { margin: 0; }
-  @media (max-width: 640px) {
-    .row { grid-template-columns: 5rem 1fr 3.2rem; }
-    .row > :global(.fader) { grid-column: 1 / -1; }
-    .row > .mute, .row > span:last-child { display: none; }
+  /* Narrow (Home's side column, a phone): the fader gets a line of its own under the meter. */
+  @container (max-width: 34rem) {
+    .row { grid-template-columns: 5.5rem minmax(3rem, 1fr) 3.2rem 4.2rem; row-gap: 0.25rem; }
+    .row > :global(.fader) { grid-column: 1 / -1; grid-row: 2; width: 100%; }
   }
 </style>
