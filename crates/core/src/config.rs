@@ -474,6 +474,23 @@ impl VideoConfig {
 pub struct RecordingConfig {
     /// Stop a recording after this many minutes. 0 = no limit.
     pub max_minutes: u32,
+    /// Where full recordings go, in game folders like clips. Empty = the clips folder.
+    pub folder: String,
+}
+
+impl RecordingConfig {
+    /// The folder recordings go to: their own, or the clips folder.
+    pub fn dir(&self, clips: &ClipsConfig) -> std::path::PathBuf {
+        match self.folder.trim() {
+            "" => clips.dir(),
+            f => f.into(),
+        }
+    }
+
+    /// The separate recordings folder, if one is set (and it isn't the clips folder).
+    pub fn own_dir(&self, clips: &ClipsConfig) -> Option<std::path::PathBuf> {
+        Some(self.dir(clips)).filter(|d| *d != clips.dir())
+    }
 }
 
 impl Default for ClipsConfig {

@@ -135,6 +135,15 @@ copy can "update" to the current release (still sha256-verified).
   or the same file when `replace` is true). Lossless: the start snaps back to a keyframe.
 - `POST /api/clips/reveal` body `{"id"}` (or `{}` for the clips folder) → `204`, opens Explorer
 - `POST /api/cleanup` → `{"removed": 3, "freed_bytes": ...}` runs the age/size cleanup now (also runs hourly)
+- `POST /api/cleanup/preview` body `{"clips"?: {"max_age_days", "max_total_gb"}, "hours"?: 24}` →
+  `{"count", "bytes", "clips": [Clip, ...]}`: what the cleanup would delete within `hours`, with the given limits
+  (the settings page's unsaved ones) or the saved ones. Deletes nothing; `clips` holds the first five, oldest first.
+- `POST /api/pick-folder` body `{"title"?, "start"?}` → `{"path": "D:\\Clips"}` or `{"path": null}` when
+  cancelled. Opens the Windows folder picker on the PC and waits for it. `403` from other devices, `409` while
+  one is already open.
+
+Files in a separate recordings folder (`recording.folder`) have ids starting with `:recordings/`, like
+`:recordings/Valorant/x_recording.mp4`; a colon can't be part of a folder name, so these never clash with clips.
 - `GET /api/disk` → `{"free_bytes", "total_bytes", "clips_bytes"}`
 
 ## Discord

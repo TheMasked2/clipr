@@ -100,6 +100,8 @@ impl Control for AppControl {
         if old.clips.dir() != config.clips.dir() {
             self.library.set_clips_dir(config.clips.dir());
         }
+        self.library
+            .set_recordings_dir(config.recording.own_dir(&config.clips));
         self.engine.send(Command::Apply(Box::new(config)));
         Ok(())
     }
@@ -118,6 +120,14 @@ impl Control for AppControl {
 
     fn watch_levels(&self) {
         self.engine.watch_levels();
+    }
+
+    fn pick_folder(&self, title: &str, start: &str) -> std::result::Result<Option<String>, String> {
+        let start = match start {
+            "" => self.config().clips.dir(),
+            s => s.into(),
+        };
+        Ok(crate::picker::pick_folder(title, &start)?.map(|p| p.to_string_lossy().into_owned()))
     }
 
     fn perf(&self) -> serde_json::Value {

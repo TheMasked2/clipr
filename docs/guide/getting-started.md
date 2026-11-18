@@ -94,7 +94,8 @@ A full recording runs next to the replay buffer and keeps everything until you s
 `Alt+F9`, the tray menu or the Home page. clipr can also start one by itself when a particular game starts
 ([Settings → Games → Auto-record](settings.md#games)).
 
-Recordings are saved next to your clips as `<Game>_<date>_<time>_recording.mp4`. They stop by themselves at the
+Recordings are saved next to your clips as `<Game>_<date>_<time>_recording.mp4`, or in a folder of their own
+(see [Settings → Library](settings.md#library)). They stop by themselves at the
 time limit ([Settings → Recording](settings.md#recording), off by default) or when the disk gets nearly full
 ([Settings → Library](settings.md#library)). If clipr or the PC crashes mid-recording, the file is recovered the
 next time clipr starts, up to about the last second.

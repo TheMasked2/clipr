@@ -55,6 +55,10 @@ impl fmt::Display for LibraryError {
 
 impl std::error::Error for LibraryError {}
 
+/// How the ids of files in the separate recordings folder start (see [`Library::set_recordings_dir`]). A
+/// colon can't be part of a Windows folder name, so it never clashes with a game folder in the clips folder.
+pub const RECORDINGS_PREFIX: &str = ":recordings/";
+
 fn invalid(message: impl Into<String>) -> anyhow::Error {
     LibraryError::Invalid(message.into()).into()
 }
@@ -197,6 +201,8 @@ struct Job {
 
 struct Inner {
     clips_dir: RwLock<PathBuf>,
+    /// Full recordings, when they have a folder of their own.
+    recordings_dir: RwLock<Option<PathBuf>>,
     thumbs_dir: PathBuf,
     db: Mutex<Connection>,
     last_scan: Mutex<Option<Instant>>,
@@ -253,6 +259,7 @@ impl Library {
         let (jobs, rx) = mpsc::channel();
         let inner = Arc::new(Inner {
             clips_dir: RwLock::new(clips_dir),
+            recordings_dir: RwLock::new(None),
             thumbs_dir,
             db: Mutex::new(conn),
             last_scan: Mutex::new(None),
@@ -305,6 +312,53 @@ impl Library {
         *lock(&self.inner.last_scan) = None;
     }
 
+    /// The separate recordings folder, if there is one.
+    pub fn recordings_dir(&self) -> Option<PathBuf> {
+        self.inner
+            .recordings_dir
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Call when the recordings-folder setting changes (`None`: recordings go to the clips folder). Files there
+    /// get ids starting with [`RECORDINGS_PREFIX`]; the next [`scan`](Self::scan) indexes them.
+    pub fn set_recordings_dir(&self, dir: Option<PathBuf>) {
+        let dir = dir.filter(|d| *d != self.clips_dir());
+        let mut current = self
+            .inner
+            .recordings_dir
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        if *current == dir {
+            return;
+        }
+        *current = dir;
+        drop(current);
+        let _ = lock(&self.inner.db).execute(
+            "DELETE FROM clips WHERE substr(id, 1, ?1) = ?2",
+            params![RECORDINGS_PREFIX.len() as i64, RECORDINGS_PREFIX],
+        );
+        *lock(&self.inner.last_scan) = None;
+    }
+
+    /// The folders indexed, with the id prefix of each: the clips folder, and the recordings folder if set.
+    fn roots(&self) -> Vec<(&'static str, PathBuf)> {
+        let mut roots = vec![("", self.clips_dir())];
+        if let Some(rec) = self.recordings_dir() {
+            roots.push((RECORDINGS_PREFIX, rec));
+        }
+        roots
+    }
+
+    /// The folder an id lives in and the id's path inside it.
+    fn split_id<'a>(&self, id: &'a str) -> Option<(PathBuf, &'a str)> {
+        match id.strip_prefix(RECORDINGS_PREFIX) {
+            Some(rest) => self.recordings_dir().map(|d| (d, rest)),
+            None => Some((self.clips_dir(), id)),
+        }
+    }
+
     /// Fires when the library changed behind the caller's back (a thumbnail finished, or
     /// [`notify_changed`](Self::notify_changed) was called).
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
@@ -317,11 +371,20 @@ impl Library {
 
     /// Checks that `id` stays inside the clips folder and names a video file; returns its path.
     pub fn resolve(&self, id: &str) -> Result<PathBuf> {
-        resolve_in(&self.clips_dir(), id)
+        let (dir, rest) = self
+            .split_id(id)
+            .ok_or_else(|| invalid(format!("\"{id}\" isn't a clip in the clips folder")))?;
+        resolve_in(&dir, rest)
     }
 
     fn path_of(&self, id: &str) -> PathBuf {
-        id.split('/').fold(self.clips_dir(), |p, part| p.join(part))
+        let (dir, rest) = self.split_id(id).unwrap_or_else(|| (self.clips_dir(), id));
+        rest.split('/').fold(dir, |p, part| p.join(part))
+    }
+
+    /// Whether the folder an id lives in is there (an unplugged drive isn't).
+    fn root_present(&self, id: &str) -> bool {
+        self.split_id(id).is_some_and(|(dir, _)| dir.is_dir())
     }
 
     // ---- scanning --------------------------------------------------------------------------------------
@@ -339,16 +402,34 @@ impl Library {
     }
 
     fn scan_inner(&self) -> Result<ScanReport> {
-        let dir = self.clips_dir();
         let mut report = ScanReport::default();
-        if !dir.is_dir() {
-            // An unplugged drive must not wipe the favorites.
-            return Ok(report);
-        }
         // Rows first: one added while walking must not look like a vanished file.
         let existing: HashMap<String, Row> =
             self.all_rows()?.into_iter().map(|r| (r.id.clone(), r)).collect();
-        let entries = walk(&dir)?;
+        let mut entries = Vec::new();
+        // Folders that were read; rows of the others stay (an unplugged drive must not wipe the favorites).
+        let mut walked: Vec<&'static str> = Vec::new();
+        for (prefix, dir) in self.roots() {
+            if !dir.is_dir() {
+                continue;
+            }
+            for mut e in walk(&dir)? {
+                e.id = format!("{prefix}{}", e.id);
+                entries.push(e);
+            }
+            walked.push(prefix);
+        }
+        if walked.is_empty() {
+            return Ok(report);
+        }
+        let in_walked = |id: &str| {
+            let prefix = if id.starts_with(RECORDINGS_PREFIX) {
+                RECORDINGS_PREFIX
+            } else {
+                ""
+            };
+            walked.contains(&prefix)
+        };
         let mut writes = Vec::new();
         let mut seen = HashSet::new();
         for entry in &entries {
@@ -366,7 +447,7 @@ impl Library {
         }
         let gone: Vec<&Row> = existing
             .values()
-            .filter(|r| !seen.contains(r.id.as_str()))
+            .filter(|r| !seen.contains(r.id.as_str()) && in_walked(&r.id))
             .collect();
         report.removed = gone.len();
         {
@@ -407,23 +488,28 @@ impl Library {
 
     /// Adds or refreshes one finished file (for `ClipSaved`), and queues its thumbnails.
     pub fn add_file(&self, path: &Path) -> Result<Clip> {
-        let dir = self.clips_dir();
-        let rel = path
-            .strip_prefix(&dir)
-            .ok()
-            .map(Path::to_path_buf)
-            .or_else(|| {
+        let under = |dir: &Path| {
+            path.strip_prefix(dir).ok().map(Path::to_path_buf).or_else(|| {
                 let (p, d) = (path.canonicalize().ok()?, dir.canonicalize().ok()?);
                 p.strip_prefix(d).ok().map(Path::to_path_buf)
             })
+        };
+        // The recordings folder first, in case it sits inside the clips folder.
+        let (prefix, dir, rel) = self
+            .roots()
+            .into_iter()
+            .rev()
+            .find_map(|(prefix, dir)| under(&dir).map(|rel| (prefix, dir, rel)))
             .with_context(|| format!("{} is outside the clips folder", path.display()))?;
-        let id = rel
+        let rel = rel
             .components()
             .map(|c| c.as_os_str().to_string_lossy().into_owned())
             .collect::<Vec<_>>()
             .join("/");
-        let full = resolve_in(&dir, &id)?;
-        let entry = entry_for(&full, &id)?;
+        let full = resolve_in(&dir, &rel)?;
+        let mut entry = entry_for(&full, &rel)?;
+        let id = format!("{prefix}{rel}");
+        entry.id = id.clone();
         let old = self.row(&id)?;
         let row = build_row(&entry, old.as_ref(), true);
         if old.as_ref() != Some(&row) {
@@ -686,8 +772,56 @@ impl Library {
         let _guard = lock(&self.inner.scan_lock);
         self.scan_locked()?;
         let rows = self.all_rows()?; // newest first
-        let now_ms = now_millis();
-        let eligible = |r: &Row| !r.favorite && now_ms - r.mtime > RECENT.as_millis() as i64;
+        let doomed = self.doomed(&rows, cfg, now_millis());
+        let (mut removed, mut freed) = (0usize, 0u64);
+        for r in doomed {
+            // Re-check the favorite flag at the moment of deleting.
+            let dropped =
+                lock(&self.inner.db).execute("DELETE FROM clips WHERE id = ?1 AND favorite = 0", [&r.id])?;
+            if dropped == 0 {
+                continue;
+            }
+            let path = self.path_of(&r.id);
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    tracing::warn!("cleanup: can't delete {}: {e}", path.display());
+                    continue;
+                }
+            }
+            let _ = fs::remove_file(markers_path(&path));
+            remove_thumbs(&self.inner.thumbs_dir, &r.id);
+            tracing::info!("cleanup: deleted {} ({} bytes)", r.id, r.size);
+            removed += 1;
+            freed += r.size.max(0) as u64;
+        }
+        Ok((removed, freed))
+    }
+
+    /// What [`cleanup`](Self::cleanup) would delete with the limits in `cfg` if it ran `ahead` from now (the
+    /// size limit counts today's total), oldest first. Deletes nothing: it's for warning before it happens.
+    pub fn cleanup_preview(&self, cfg: &ClipsConfig, ahead: std::time::Duration) -> Result<Vec<Clip>> {
+        if (cfg.max_age_days == 0 && cfg.max_total_gb == 0) || !self.clips_dir().is_dir() {
+            return Ok(Vec::new());
+        }
+        let rows = {
+            let _guard = lock(&self.inner.scan_lock);
+            self.scan_locked()?;
+            self.all_rows()?
+        };
+        let at = now_millis() + ahead.as_millis() as i64;
+        let mut doomed = self.doomed(&rows, cfg, at);
+        doomed.sort_by_key(|r| r.created);
+        Ok(doomed.into_iter().map(|r| self.to_clip(r)).collect())
+    }
+
+    /// The rows the limits in `cfg` pick at the time `now_ms`: too old first, then the oldest until the rest
+    /// fits the size limit. Never favorites, clips saved in the last few minutes, or files on a missing drive.
+    fn doomed<'a>(&self, rows: &'a [Row], cfg: &ClipsConfig, now_ms: i64) -> Vec<&'a Row> {
+        // Never a file whose folder is gone (an unplugged drive): its row would vanish with its favorite.
+        let eligible =
+            |r: &Row| !r.favorite && now_ms - r.mtime > RECENT.as_millis() as i64 && self.root_present(&r.id);
         let mut doomed: Vec<&Row> = Vec::new();
         let mut chosen: HashSet<&str> = HashSet::new();
         if cfg.max_age_days > 0 {
@@ -713,30 +847,7 @@ impl Library {
                 doomed.push(r);
             }
         }
-        let (mut removed, mut freed) = (0usize, 0u64);
-        for r in doomed {
-            // Re-check the favorite flag at the moment of deleting.
-            let dropped =
-                lock(&self.inner.db).execute("DELETE FROM clips WHERE id = ?1 AND favorite = 0", [&r.id])?;
-            if dropped == 0 {
-                continue;
-            }
-            let path = self.path_of(&r.id);
-            match fs::remove_file(&path) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => {
-                    tracing::warn!("cleanup: can't delete {}: {e}", path.display());
-                    continue;
-                }
-            }
-            let _ = fs::remove_file(markers_path(&path));
-            remove_thumbs(&self.inner.thumbs_dir, &r.id);
-            tracing::info!("cleanup: deleted {} ({} bytes)", r.id, r.size);
-            removed += 1;
-            freed += r.size.max(0) as u64;
-        }
-        Ok((removed, freed))
+        doomed
     }
 
     /// `(free bytes, total bytes, bytes the clips use)`. Free and total are for the clips folder's drive.
@@ -1352,6 +1463,45 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_preview_lists_what_would_go_without_deleting() {
+        let f = fixture();
+        for name in ["soon", "later", "fav"] {
+            put(&f, &format!("G/{name}.mp4"), 1000);
+        }
+        f.lib.scan().unwrap();
+        let now = now_millis() / 1000;
+        let day = 86_400;
+        set_created(&f, "G/soon.mp4", now - 30 * day + 3600); // 30 days old in an hour
+        set_created(&f, "G/later.mp4", now - 20 * day);
+        set_created(&f, "G/fav.mp4", now - 90 * day);
+        f.lib.update("G/fav.mp4", None, Some(true), None).unwrap();
+        let cfg = ClipsConfig {
+            max_age_days: 30,
+            ..ClipsConfig::default()
+        };
+        let ids = |ahead_h: u64| -> Vec<String> {
+            f.lib
+                .cleanup_preview(&cfg, std::time::Duration::from_secs(ahead_h * 3600))
+                .unwrap()
+                .into_iter()
+                .map(|c| c.id)
+                .collect()
+        };
+        assert!(ids(0).is_empty());
+        assert_eq!(ids(24), ["G/soon.mp4"]);
+        assert_eq!(ids(24 * 11), ["G/soon.mp4", "G/later.mp4"]);
+        assert!(f.root.join("G/soon.mp4").exists());
+        let none = f
+            .lib
+            .cleanup_preview(
+                &ClipsConfig::default(),
+                std::time::Duration::from_secs(86_400 * 999),
+            )
+            .unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[test]
     fn cleanup_does_nothing_when_the_folder_is_missing() {
         let f = fixture();
         put(&f, "G/a.mp4", 10);
@@ -1364,6 +1514,52 @@ mod tests {
         assert_eq!(f.lib.cleanup(&cfg).unwrap(), (0, 0));
         // The index keeps its rows, so favorites survive an unplugged drive.
         assert_eq!(f.lib.list(&ClipFilter::default()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_separate_recordings_folder_is_indexed_with_its_own_ids() {
+        let f = fixture();
+        put(&f, "G/a.mp4", 10);
+        let rec = f.root.parent().unwrap().join("recs");
+        fs::create_dir_all(rec.join("G")).unwrap();
+        let file = rec.join("G").join("b_recording.mp4");
+        fs::write(&file, vec![7u8; 20]).unwrap();
+        backdate(&file);
+        f.lib.set_recordings_dir(Some(rec.clone()));
+        f.lib.scan().unwrap();
+        let mut ids: Vec<String> = f
+            .lib
+            .list(&ClipFilter::default())
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        ids.sort();
+        assert_eq!(
+            ids,
+            [":recordings/G/b_recording.mp4".to_string(), "G/a.mp4".to_string()]
+        );
+        assert_eq!(f.lib.resolve(":recordings/G/b_recording.mp4").unwrap(), file);
+        assert!(f.lib.resolve(":recordings/../x.mp4").is_err());
+        // Saved right now: lands under the recordings prefix too.
+        let again = f.lib.add_file(&file).unwrap();
+        assert_eq!(again.id, ":recordings/G/b_recording.mp4");
+        // An unplugged recordings drive keeps its rows; the clips folder still syncs.
+        // (The thumbnail worker may still have the file open for a moment.)
+        let away = rec.with_extension("away");
+        let moved = (0..50).any(|_| {
+            fs::rename(&rec, &away).is_ok() || {
+                std::thread::sleep(Duration::from_millis(100));
+                false
+            }
+        });
+        assert!(moved);
+        f.lib.scan().unwrap();
+        assert_eq!(f.lib.list(&ClipFilter::default()).unwrap().len(), 2);
+        // Back to one folder: the recordings' rows go.
+        f.lib.set_recordings_dir(None);
+        assert_eq!(f.lib.list(&ClipFilter::default()).unwrap().len(), 1);
+        assert!(f.lib.resolve(":recordings/G/b_recording.mp4").is_err());
     }
 
     #[test]

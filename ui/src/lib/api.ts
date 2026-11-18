@@ -121,7 +121,7 @@ export interface Config {
     auto_record: string[];
     profiles: GameProfile[];
   };
-  recording: { max_minutes: number };
+  recording: { max_minutes: number; folder: string };
   discord: DiscordConfig;
   cloud: CloudConfig;
 }
@@ -396,6 +396,20 @@ export const reveal = (id?: string) =>
   request<void>('POST', '/api/clips/reveal', id ? { id } : {});
 export const cleanup = () =>
   request<{ removed: number; freed_bytes: number }>('POST', '/api/cleanup');
+
+/** What the cleanup would delete in the next `hours`: with these limits, or the saved ones. Deletes nothing. */
+export interface CleanupPreview {
+  count: number;
+  bytes: number;
+  /** The first few, oldest first. */
+  clips: Clip[];
+}
+export const cleanupPreview = (limits?: { max_age_days: number; max_total_gb: number }, hours = 24) =>
+  request<CleanupPreview>('POST', '/api/cleanup/preview', limits ? { clips: limits, hours } : { hours });
+
+/** Opens the Windows folder picker on the PC and waits; `path` is null when cancelled. Not from other devices. */
+export const pickFolder = (title: string, start: string) =>
+  request<{ path: string | null }>('POST', '/api/pick-folder', { title, start });
 
 export const saveClip = (seconds?: number) =>
   request<void>('POST', '/api/clip', seconds ? { seconds } : undefined);

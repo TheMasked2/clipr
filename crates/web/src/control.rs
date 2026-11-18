@@ -57,6 +57,12 @@ pub trait Control: Send + Sync + 'static {
     /// A page shows the level meters: keep levels coming for a few seconds, even while nothing is captured.
     fn watch_levels(&self) {}
 
+    /// Shows the Windows folder picker on the PC, starting at `start`, and waits for it: the folder picked, or
+    /// `None` when cancelled. The error is shown to the user. Blocking: call it from `spawn_blocking`.
+    fn pick_folder(&self, _title: &str, _start: &str) -> std::result::Result<Option<String>, String> {
+        Err("There's no folder picker here; type the path instead.".into())
+    }
+
     /// Performance samples, one a second over the last two minutes (see `GET /api/perf` in `docs/api.md`).
     fn perf(&self) -> serde_json::Value {
         serde_json::json!([])

@@ -186,6 +186,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/games", get(api::games))
         .route("/api/shelves", get(api::shelves))
         .route("/api/cleanup", post(api::cleanup))
+        .route("/api/cleanup/preview", post(api::cleanup_preview))
+        .route("/api/pick-folder", post(api::pick_folder))
         .route("/api/disk", get(api::disk))
         .route("/api/discord/posts", get(discord::posts))
         .route("/api/cloud/uploads", get(cloud::uploads))

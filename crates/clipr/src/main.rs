@@ -15,6 +15,7 @@ mod crash;
 mod engine;
 mod icon;
 mod overlay;
+mod picker;
 mod preview;
 mod sound;
 mod tray;
@@ -104,6 +105,7 @@ fn run() -> Result<()> {
         clipr_library::Library::open(config.clips.dir(), paths.data_dir.join("library.db"))
             .context("can't open the clip library")?,
     );
+    library.set_recordings_dir(config.recording.own_dir(&config.clips));
     let shared_config = Arc::new(Mutex::new(config.clone()));
     let (hotkeys_tx, hotkeys_rx) = std::sync::mpsc::channel();
     let updater = updater::Updater::start(
