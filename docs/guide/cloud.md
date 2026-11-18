@@ -61,6 +61,9 @@ On a clip's page, under **Cloud**:
 Renaming a clip keeps its cloud copy and link. Trimming a clip in place uploads the new version under the same
 name. Deleting a clip on this PC leaves its cloud copy.
 
+Switching to another bucket (or endpoint) starts fresh: clips in the old bucket show no cloud icon and can go up
+again. Switch back and they show as uploaded again.
+
 ## Discord
 
 With cloud storage on and a public address set, a Discord post is a link to the clip in your bucket: Discord

@@ -72,6 +72,10 @@ pub struct Uploaded {
     pub size: u64,
     /// Unix seconds.
     pub at: u64,
+    /// Which bucket it's in ([`bucket_id`]). Pointing clipr at another bucket hides clips uploaded to the
+    /// old one (they aren't in the new one); pointing it back shows them again.
+    #[serde(default)]
+    pub bucket: String,
 }
 
 /// What the gallery shows for a clip.
@@ -115,6 +119,22 @@ fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+/// Names the bucket `config` points at: the endpoint and the bucket name.
+pub fn bucket_id(config: &CloudConfig) -> String {
+    format!(
+        "{}/{}",
+        config.endpoint.trim().trim_end_matches('/').to_ascii_lowercase(),
+        config.bucket.trim()
+    )
+}
+
+impl Saved {
+    /// Where `clip_id` is in the bucket `here` (a [`bucket_id`]), if it's there.
+    fn up(&self, clip_id: &str, here: &str) -> Option<&Uploaded> {
+        self.uploaded.get(clip_id).filter(|u| u.bucket == here)
+    }
 }
 
 /// Where `clip` goes in the bucket: the prefix, then its path in the clips folder.
@@ -194,10 +214,12 @@ impl Uploader {
     /// The cloud state of every clip that has one.
     pub fn statuses(&self) -> BTreeMap<String, CloudStatus> {
         let config = (self.inner.config)();
+        let here = bucket_id(&config);
         let s = self.lock();
         let mut out: BTreeMap<String, CloudStatus> = s
             .uploaded
             .iter()
+            .filter(|(_, u)| u.bucket == here)
             .map(|(id, u)| {
                 (
                     id.clone(),
@@ -226,7 +248,7 @@ impl Uploader {
                         (job.done_bytes as f64 / job.clip.size_bytes as f64).min(1.0)
                     }),
                 ),
-                JobState::Failed if !s.uploaded.contains_key(id) => ("failed", None),
+                JobState::Failed if s.up(id, &here).is_none() => ("failed", None),
                 _ => continue,
             };
             out.insert(
@@ -252,7 +274,7 @@ impl Uploader {
             return;
         }
         let mut s = self.lock();
-        if s.uploaded.contains_key(&clip.id) {
+        if s.up(&clip.id, &bucket_id(&config)).is_some() {
             return;
         }
         let key = key_for(&config, &clip.id);
@@ -267,14 +289,15 @@ impl Uploader {
             bail!("Set up cloud storage first, in Settings → Cloud");
         }
         let mut s = self.lock();
-        if s.uploaded.contains_key(&clip.id) {
+        if s.up(&clip.id, &bucket_id(&config)).is_some() {
             bail!("This clip is already in the cloud");
         }
-        if let Some(job) = s
-            .jobs
-            .iter_mut()
-            .find(|j| j.clip.id == clip.id && matches!(j.state, JobState::Queued | JobState::Uploading))
-        {
+        // An upload being cancelled doesn't count: this one goes after it.
+        let cancelling = self.inner.cancel.load(Ordering::SeqCst);
+        if let Some(job) = s.jobs.iter_mut().find(|j| {
+            j.clip.id == clip.id
+                && (j.state == JobState::Queued || (j.state == JobState::Uploading && j.id != cancelling))
+        }) {
             job.now = true;
             let id = job.id;
             self.save_and_wake(s);
@@ -307,7 +330,7 @@ impl Uploader {
     /// Removes `clip_id` from the bucket (the file on this PC stays). Blocks on the network.
     pub fn remove(&self, clip_id: &str) -> Result<()> {
         let config = (self.inner.config)();
-        let Some(uploaded) = self.lock().uploaded.get(clip_id).cloned() else {
+        let Some(uploaded) = self.lock().up(clip_id, &bucket_id(&config)).cloned() else {
             bail!("This clip isn't in the cloud");
         };
         if !config.ready() {
@@ -332,7 +355,7 @@ impl Uploader {
         for job in s
             .jobs
             .iter_mut()
-            .filter(|j| j.clip.id == old_id && j.state == JobState::Queued)
+            .filter(|j| j.clip.id == old_id && matches!(j.state, JobState::Queued | JobState::Uploading))
         {
             job.clip = clip.clone();
             changed = true;
@@ -347,6 +370,9 @@ impl Uploader {
     pub fn clip_replaced(&self, clip: &ClipInfo) {
         let config = (self.inner.config)();
         let mut s = self.lock();
+        if s.up(&clip.id, &bucket_id(&config)).is_none() {
+            return;
+        }
         let Some(old) = s.uploaded.remove(&clip.id) else {
             return;
         };
@@ -363,18 +389,22 @@ impl Uploader {
         if !config.ready() || config.public_url.trim().is_empty() {
             return Ok(None);
         }
-        let job_id = {
-            let s = self.lock();
-            if let Some(u) = s.uploaded.get(&clip.id) {
-                return Ok(public_url(&config, &u.key));
-            }
-            drop(s);
-            self.upload(clip.clone())?
+        let here = bucket_id(&config);
+        if let Some(u) = self.lock().up(&clip.id, &here) {
+            return Ok(public_url(&config, &u.key));
+        }
+        let job_id = match self.upload(clip.clone()) {
+            Ok(id) => id,
+            // It finished in the meantime.
+            Err(e) => match self.lock().up(&clip.id, &here) {
+                Some(u) => return Ok(public_url(&config, &u.key)),
+                None => return Err(e),
+            },
         };
         let until = Instant::now() + wait;
         let mut s = self.lock();
         loop {
-            if let Some(u) = s.uploaded.get(&clip.id) {
+            if let Some(u) = s.up(&clip.id, &here) {
                 return Ok(public_url(&config, &u.key));
             }
             match s.jobs.iter().find(|j| j.id == job_id) {
@@ -508,6 +538,7 @@ impl Uploader {
                             key: job.key.clone(),
                             size,
                             at: now_secs(),
+                            bucket: bucket_id(&config),
                         },
                     );
                 }
@@ -690,6 +721,7 @@ mod tests {
                     key: "clipr/Game/a.mp4".into(),
                     size: 5,
                     at: 1,
+                    bucket: bucket_id(&ready()),
                 },
             );
             up.save_and_wake(s);
@@ -720,6 +752,49 @@ mod tests {
                 .unwrap(),
             None
         );
+
+        // Another bucket doesn't have it: it shows no cloud copy there and may go up again.
+        let other = || CloudConfig {
+            bucket: "other".into(),
+            ..ready()
+        };
+        let elsewhere = uploader(dir.path(), other());
+        assert!(elsewhere.statuses().is_empty());
+        assert!(elsewhere.remove("Game/b c.mp4").is_err());
+        // Back to the first bucket: there it is again.
+        let back = uploader(dir.path(), ready());
+        assert_eq!(back.statuses()["Game/b c.mp4"].state, "uploaded");
+        assert!(elsewhere.upload(clip("Game/b c.mp4", "clip")).is_ok());
+    }
+
+    #[test]
+    fn a_rename_while_uploading_moves_the_running_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let up = uploader(dir.path(), ready());
+        up.upload(clip("Game/a.mp4", "clip")).unwrap();
+        {
+            let mut s = up.lock();
+            s.jobs[0].state = JobState::Uploading;
+            up.save_and_wake(s);
+        }
+        up.clip_renamed("Game/a.mp4", &clip("Game/b.mp4", "clip"));
+        assert_eq!(up.jobs()[0].clip.id, "Game/b.mp4");
+        assert_eq!(up.jobs()[0].key, "clipr/Game/a.mp4", "the object keeps its name");
+    }
+
+    #[test]
+    fn a_retry_while_cancelling_queues_a_new_upload() {
+        let dir = tempfile::tempdir().unwrap();
+        let up = uploader(dir.path(), ready());
+        let first = up.upload(clip("Game/a.mp4", "clip")).unwrap();
+        {
+            let mut s = up.lock();
+            s.jobs[0].state = JobState::Uploading;
+            up.save_and_wake(s);
+        }
+        up.cancel(first).unwrap();
+        let retry = up.upload(clip("Game/a.mp4", "clip")).unwrap();
+        assert_ne!(retry, first);
     }
 
     #[test]

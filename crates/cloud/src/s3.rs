@@ -207,22 +207,26 @@ impl Bucket {
         )?;
         check(status, &text)?;
         let upload_id = xml_value(&text, "UploadId").context("the bucket didn't start the upload")?;
-        let result = self.send_parts(key, path, size, &upload_id, throttle, progress, cancelled);
-        let etags = match result {
-            Ok(etags) => etags,
-            Err(e) => {
-                // Leaves no half upload taking up space in the bucket.
-                let _ = self.call(
-                    "DELETE",
-                    key,
-                    &[("uploadId", &upload_id)],
-                    None,
-                    None,
-                    Duration::from_secs(30),
-                );
-                return Err(e);
-            }
-        };
+        let result = self
+            .send_parts(key, path, size, &upload_id, throttle, progress, cancelled)
+            .and_then(|etags| self.complete(key, &upload_id, &etags));
+        if result.is_err() {
+            // Leaves no half upload taking up space in the bucket. (If the finish did go through and only
+            // its answer was lost, this does nothing.)
+            let _ = self.call(
+                "DELETE",
+                key,
+                &[("uploadId", &upload_id)],
+                None,
+                None,
+                Duration::from_secs(30),
+            );
+        }
+        result
+    }
+
+    /// Puts the uploaded parts together into the object.
+    fn complete(&self, key: &str, upload_id: &str, etags: &[String]) -> Result<()> {
         let mut xml = String::from("<CompleteMultipartUpload>");
         for (i, etag) in etags.iter().enumerate() {
             xml.push_str(&format!(
@@ -237,7 +241,7 @@ impl Bucket {
         let (status, text, _) = self.call(
             "POST",
             key,
-            &[("uploadId", &upload_id)],
+            &[("uploadId", upload_id)],
             Some((&mut body, len)),
             Some("application/xml"),
             Duration::from_secs(300),
