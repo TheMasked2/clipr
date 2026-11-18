@@ -141,6 +141,14 @@ function applyConfig(c: Config): void {
   saveAccent(c.ui.accent);
 }
 
+/** Another page (or a fader) saved the settings: load them again, once a burst of saves (a fader drag) settles,
+ * so this page doesn't later save its old copy over that change. A settings draft being edited stays as it is. */
+let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+function reloadConfigSoon(): void {
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => void oneAtATime(loadConfig), 300);
+}
+
 export async function loadConfig(): Promise<void> {
   try {
     applyConfig(await getConfig());
@@ -262,6 +270,7 @@ export function startConnection(): void {
     onEvent: (e) => {
       if (e.type === 'levels') return setLevels(e.levels);
       if (e.type === 'discord') return void loadPosts();
+      if (e.type === 'config') return reloadConfigSoon();
       if (e.type === 'cloud') return void loadCloud();
       if (e.type === 'clip_saved') {
         const c = e.clip;
