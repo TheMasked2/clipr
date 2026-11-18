@@ -117,7 +117,7 @@ per frame, 0 dropped frames, keyframe every 1.0 s, no B-frames. What we learned:
 - [ ] HDR detection + tonemap shader to SDR
 - [x] Sound cue (optional); overlay toast: later
 - [x] Uncapped-FPS protection instead of a game-priority mode: clipr's GPU work gets high scheduling priority
-      and its capture thread joins MMCSS (`video.high_priority`, on by default); the frame loop repeats or
+      and its capture thread joins MMCSS (always; the GPU side is the opt-in `video.gpu_priority`, off by default since beta.4); the frame loop repeats or
       skips frames to stay on time, and the log warns when a game starves it
 
 Saving a 10 s 1080p60 clip takes ~30 ms. The whole app uses ~6 % of one core while buffering the desktop.

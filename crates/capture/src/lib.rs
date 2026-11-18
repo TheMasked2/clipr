@@ -112,6 +112,21 @@ pub fn is_supported() -> bool {
     GraphicsCaptureSession::IsSupported().unwrap_or(false)
 }
 
+/// Like [`is_supported`], but only a clear "no" from Windows stops capture. When the question itself
+/// fails (seen when clipr runs as administrator) capture is tried anyway, so the real error shows up.
+fn check_supported() -> Result<()> {
+    match GraphicsCaptureSession::IsSupported() {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(anyhow!(
+            "Windows says screen capture isn't available here (it needs Windows 10 1903 or newer, and doesn't work in some remote or administrator sessions)"
+        )),
+        Err(e) => {
+            tracing::warn!("can't ask Windows whether screen capture works ({e}); trying anyway");
+            Ok(())
+        }
+    }
+}
+
 /// Capture settings.
 #[derive(Clone, Debug)]
 pub struct CaptureOptions {
@@ -192,9 +207,7 @@ impl CaptureSession {
         // SAFETY: plain COM/WinRT initialisation.
         let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
 
-        if !is_supported() {
-            return Err(anyhow!("this version of Windows doesn't support screen capture"));
-        }
+        check_supported()?;
 
         let item = create_item(target)?;
         let item_size = item.Size().context("can't read the size of the capture target")?;

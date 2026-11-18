@@ -54,6 +54,11 @@ fn run() -> Result<()> {
 
     let _log_guard = clipr_core::logging::init(&paths.log_dir())?;
     tracing::info!("clipr {} starting", clipr_core::VERSION);
+    if win::is_elevated() {
+        tracing::warn!(
+            "clipr runs as administrator: game capture can fail and the settings may belong to another account; start it normally"
+        );
+    }
     // Release builds have no console: put panics in the log file.
     std::panic::set_hook(Box::new(|info| {
         tracing::error!(

@@ -25,7 +25,7 @@ use clipr_audio::AudioCapture;
 
 use crate::sound::{self, Cue};
 use clipr_buffer::{Packet, ReplayBuffer, SECOND};
-use clipr_core::config::{AudioConfig, Config, GameMode, VideoCodec};
+use clipr_core::config::{AudioConfig, Config, GameCapture, GameMode, VideoCodec};
 use clipr_core::events::{Bus, Event};
 use clipr_core::status::{Activity, Level, RecState, Status};
 use clipr_encode::{Codec, EncodeSettings};
@@ -384,6 +384,11 @@ impl Supervisor {
         if !self.buffering && !recording {
             return None;
         }
+        // "Game only" captures just the game's window (unless set to its monitor); "Desktop" the monitor.
+        let window = match (&self.game, self.config.games.mode, self.config.games.capture) {
+            (Some(game), GameMode::Auto, GameCapture::Window) if game.hwnd != 0 => Some(game.hwnd),
+            _ => None,
+        };
         let monitor = match (&self.game, self.config.games.mode) {
             (Some(game), _) => game.monitor,
             (None, GameMode::Always) => self.configured_monitor(),
@@ -401,6 +406,7 @@ impl Supervisor {
         };
         let video = VideoSettings {
             monitor,
+            window,
             encode: EncodeSettings {
                 codec: match v.codec {
                     VideoCodec::H264 => Codec::H264,
@@ -413,7 +419,7 @@ impl Supervisor {
                 ..Default::default()
             },
             height: v.height,
-            high_priority: v.high_priority,
+            gpu_priority: v.gpu_priority,
         };
         Some(Wanted {
             video,

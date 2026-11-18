@@ -48,8 +48,8 @@ under Network, because it shows your whole screen.
 - **Frames per second** (60): capture delivers up to 60 for now.
 - **Output height (px)** (1080): the width follows the monitor's shape. 0 = the monitor's own resolution.
 - **Monitor** (primary): which monitor to capture: the primary one, or a specific one in Windows' order.
-- **High priority** (on): let clipr's capture go first on the GPU and CPU, so a game running at uncapped FPS
-  can't make your clips stutter. The game doesn't notice: clipr's GPU work is about 0.1 ms a frame.
+- **GPU priority** (off): let clipr's capture go a little ahead of the game on the GPU. Try it if clips
+  stutter while a game runs at uncapped FPS; turn it off again if the game loses frames.
 
 **Per-game profiles** (none): use other video settings while a particular game runs, for example a higher
 bitrate for a fast shooter. Match by the game's name or exe (`cs2.exe`), in any case. Leave a box empty to keep
@@ -182,6 +182,9 @@ runs, right-click it and choose **Go to details**: the highlighted name is the e
 
 - **Mode** (Game only): **Game only** buffers only while a known game runs and does nothing otherwise.
   **Desktop** buffers your monitor all the time, game or not.
+- **Capture** (Game window, Game only mode): **Game window** records only the game, so alt-tabbing,
+  notifications and your other screens stay out of clips. **Whole monitor** records the monitor the game is on;
+  pick it if a game's clips come out black. The tab also shows which game clipr detects right now.
 - **Extra games** (none): games to detect by exe name (`mygame.exe`), on top of the known list.
 - **Blocked programs** (none): exe names never treated as games, even if the known list has them. Use this
   when clipr starts buffering for a program that isn't a game.
@@ -206,7 +209,7 @@ clips use.
 ## Discord
 
 **Show in my Discord status** (on): while clipr clips or records, your Discord profile shows the game and its
-icon, like *Playing clipr · VALORANT · Clipping with clipr*, with the time since clipr started clipping the game
+icon, like *VALORANT · Clipping with clipr* (the member list says *Playing VALORANT*), with the time since clipr started clipping the game
 (or since the recording started, while one runs). A custom game shows its program name (like `emulator`), never
 its window title. Recording the desktop shows nothing. It talks to the Discord app on this PC, so nothing goes online and there's nothing to sign in
 to; with Discord closed it does nothing.

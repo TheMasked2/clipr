@@ -182,31 +182,23 @@ fn desc(adapter: &IDXGIAdapter1) -> Result<DXGI_ADAPTER_DESC1> {
     Ok(unsafe { adapter.GetDesc1() }?)
 }
 
-/// Gives clipr's GPU work priority over the game's, so a game running at uncapped FPS can't starve the
-/// capture (stutter and dropped frames in clips). clipr's own GPU work is tiny (one colour conversion per
-/// frame), so the game barely notices. Best effort: what Windows refuses is logged and skipped.
-pub fn raise_gpu_priority(gpu: &Gpu) {
-    // SAFETY: valid DXGI device; the range is -7..=7.
-    if let Ok(dxgi) = gpu.device.cast::<IDXGIDevice>()
-        && let Err(e) = unsafe { dxgi.SetGPUThreadPriority(7) }
-    {
-        tracing::debug!("GPU thread priority not raised: {e}");
+/// Gives clipr's GPU work a little priority over the game's, so a game running at uncapped FPS can't starve
+/// the capture (stutter and dropped frames in clips). Opt-in: beta.3 used the HIGH class and the top GPU
+/// thread priority, which cost a game frames on an RTX 4070 Ti, so this stays at ABOVE_NORMAL. Best effort.
+pub fn raise_gpu_priority(_gpu: &Gpu) {
+    const ABOVE_NORMAL: i32 = 3;
+    // SAFETY: the current-process pseudo handle; a valid D3DKMT_SCHEDULINGPRIORITYCLASS.
+    let status = unsafe {
+        D3DKMTSetProcessSchedulingPriorityClass(
+            windows::Win32::System::Threading::GetCurrentProcess(),
+            ABOVE_NORMAL,
+        )
+    };
+    if status >= 0 {
+        tracing::info!("GPU scheduling priority: above normal");
+    } else {
+        tracing::info!("GPU scheduling priority left at normal (Windows refused)");
     }
-    // HIGH needs admin rights on most systems; ABOVE_NORMAL usually works without.
-    for (class, name) in [(4, "high"), (3, "above normal")] {
-        // SAFETY: the current-process pseudo handle; `class` is a valid D3DKMT_SCHEDULINGPRIORITYCLASS.
-        let status = unsafe {
-            D3DKMTSetProcessSchedulingPriorityClass(
-                windows::Win32::System::Threading::GetCurrentProcess(),
-                class,
-            )
-        };
-        if status >= 0 {
-            tracing::info!("GPU scheduling priority: {name}");
-            return;
-        }
-    }
-    tracing::info!("GPU scheduling priority left at normal (Windows refused a higher one)");
 }
 
 /// Registers the calling thread with the Windows multimedia scheduler (MMCSS, task "Capture"), so it keeps

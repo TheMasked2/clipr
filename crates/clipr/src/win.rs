@@ -187,3 +187,31 @@ pub fn free_bytes(path: &std::path::Path) -> Option<u64> {
     };
     (ok != 0).then_some(free)
 }
+
+/// clipr runs as administrator ("Run as administrator", or started from an elevated program). Windows
+/// then keeps it apart from normal programs: screen capture of the game can fail, and the settings may
+/// belong to another Windows account.
+pub fn is_elevated() -> bool {
+    use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    let mut token: HANDLE = std::ptr::null_mut();
+    // SAFETY: the current-process pseudo handle and a valid out pointer.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return false;
+    }
+    let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+    let mut len = 0u32;
+    // SAFETY: `token` is open; the buffer is a TOKEN_ELEVATION of the size passed.
+    let ok = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            (&raw mut elevation).cast(),
+            size_of::<TOKEN_ELEVATION>() as u32,
+            &mut len,
+        )
+    };
+    // SAFETY: opened above.
+    unsafe { CloseHandle(token) };
+    ok != 0 && elevation.TokenIsElevated != 0
+}

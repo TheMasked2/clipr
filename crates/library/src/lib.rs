@@ -485,9 +485,12 @@ impl Library {
             favorite: row.favorite,
             shelves: row.shelves.clone(),
             markers: row.markers.clone(),
-            url: format!("/media/{encoded}"),
-            thumb: has_thumb.then(|| format!("/thumbs/{encoded}.jpg")),
-            sprite: (row.thumb_state == THUMB_BOTH).then(|| format!("/thumbs/{encoded}.sprite.jpg")),
+            // `?v=` changes when the file does (a trim that replaced it), so browsers never show a cached copy
+            // of the old video or picture under the same address.
+            url: format!("/media/{encoded}?v={}", row.mtime),
+            thumb: has_thumb.then(|| format!("/thumbs/{encoded}.jpg?v={}", row.mtime)),
+            sprite: (row.thumb_state == THUMB_BOTH)
+                .then(|| format!("/thumbs/{encoded}.sprite.jpg?v={}", row.mtime)),
             sprite_frames: SPRITE_FRAMES,
         }
     }
@@ -1173,7 +1176,7 @@ mod tests {
         assert_eq!(rec.kind, "recording");
         assert_eq!(rec.game, "Valorant");
         assert_eq!(all.iter().find(|c| c.id == "loose.mp4").unwrap().game, "Other");
-        assert_eq!(rec.url, "/media/Valorant/two_recording.mp4");
+        assert!(rec.url.starts_with("/media/Valorant/two_recording.mp4?v="));
         assert_eq!(rec.thumb, None);
 
         let by = |f2: ClipFilter| f.lib.list(&f2).unwrap().len();
