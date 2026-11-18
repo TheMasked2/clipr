@@ -137,6 +137,8 @@ pub(crate) fn keep_urls(ext: &Extensions, now: &DiscordConfig, new: &mut Discord
     if !auth::is_remote(ext) {
         return Ok(());
     }
+    // Who's connected is only changed by Connect Discord on the PC itself.
+    new.account = now.account.clone();
     for w in &mut new.webhooks {
         let saved = now
             .webhooks
@@ -187,6 +189,17 @@ pub(crate) fn check(d: &DiscordConfig) -> Result<()> {
             bail!("{name}: too many games, or a game name that's too long");
         }
     }
+    if let Some(a) = &d.account {
+        let id_ok = !a.id.is_empty() && a.id.len() <= 25 && a.id.bytes().all(|b| b.is_ascii_digit());
+        let avatar_ok = a
+            .avatar
+            .as_deref()
+            .is_none_or(|u| u.starts_with(&format!("https://cdn.discordapp.com/avatars/{}/", a.id)));
+        let text_ok = |s: &str| s.chars().count() <= 100;
+        if !id_ok || !avatar_ok || !text_ok(&a.username) || !a.name.as_deref().is_none_or(text_ok) {
+            bail!("The connected Discord account doesn't look right; connect it again");
+        }
+    }
     Ok(())
 }
 
@@ -197,7 +210,9 @@ struct Login {
     verifier: String,
     purpose: account::Purpose,
     started: Instant,
-    /// Set by the redirect.
+    /// The redirect came and is trading the code (a second one is turned away).
+    used: bool,
+    /// Set by the redirect. Kept until the sign-in expires, so a page that comes back later still gets it.
     result: Option<Result<serde_json::Value, String>>,
 }
 
@@ -277,13 +292,15 @@ pub async fn connect(
             verifier,
             purpose,
             started: Instant::now(),
+            used: false,
             result: None,
         },
     );
     Ok(Json(json!({ "url": url, "state": state })))
 }
 
-/// 202 while the user is still on Discord's page; then the account (and webhook) once, or the error.
+/// 202 while the user is still on Discord's page; then the account (and webhook), or the error, until the
+/// sign-in expires.
 pub async fn connect_result(
     ext: Extensions,
     Path(state): Path<String>,
@@ -291,25 +308,18 @@ pub async fn connect_result(
     only_here(&ext)?;
     let mut all = logins();
     let map = all.get_or_insert_with(HashMap::new);
+    let expired = || ApiError::new(StatusCode::NOT_FOUND, "This sign-in expired. Start again.");
     let Some(login) = map.get(&state) else {
-        return Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            "This sign-in expired. Start again.",
-        ));
+        return Err(expired());
     };
-    if login.result.is_none() {
-        if login.started.elapsed() >= LOGIN_TTL {
-            map.remove(&state);
-            return Err(ApiError::new(
-                StatusCode::NOT_FOUND,
-                "This sign-in expired. Start again.",
-            ));
-        }
-        return Ok((StatusCode::ACCEPTED, Json(json!({ "pending": true }))).into_response());
+    if login.started.elapsed() >= LOGIN_TTL {
+        map.remove(&state);
+        return Err(expired());
     }
-    match map.remove(&state).and_then(|l| l.result).expect("checked above") {
-        Ok(v) => Ok(Json(v).into_response()),
-        Err(e) => Err(ApiError::new(StatusCode::BAD_GATEWAY, e)),
+    match &login.result {
+        None => Ok((StatusCode::ACCEPTED, Json(json!({ "pending": true }))).into_response()),
+        Some(Ok(v)) => Ok(Json(v.clone()).into_response()),
+        Some(Err(e)) => Err(ApiError::new(StatusCode::BAD_GATEWAY, e.clone())),
     }
 }
 
@@ -338,8 +348,9 @@ pub async fn callback(ext: Extensions, Query(q): Query<CallbackQuery>) -> axum::
     let (verifier, purpose) = {
         let mut all = logins();
         let map = all.get_or_insert_with(HashMap::new);
-        match map.get(&state) {
-            Some(l) if l.result.is_none() && l.started.elapsed() < LOGIN_TTL => {
+        match map.get_mut(&state) {
+            Some(l) if !l.used && l.started.elapsed() < LOGIN_TTL => {
+                l.used = true;
                 (l.verifier.clone(), l.purpose)
             }
             _ => {

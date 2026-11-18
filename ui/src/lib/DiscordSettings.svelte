@@ -1,6 +1,7 @@
 <script lang="ts">
-  import type { DiscordConfig, PostMode } from './api';
-  import { discordConnect, discordConnectResult, testWebhook } from './api';
+  import { onMount } from 'svelte';
+  import type { DiscordConfig, DiscordConnected, PostMode } from './api';
+  import { ApiError, discordConnect, discordConnectResult, testWebhook } from './api';
   import { app } from './store.svelte';
   import Field from './Field.svelte';
   import Toggle from './Toggle.svelte';
@@ -39,51 +40,119 @@
   }
 
   // Connect Discord: Discord's own page opens in a new tab; this page waits for the answer. Nothing is saved
-  // until Save, like any other change here.
+  // until Save, like any other change here. The sign-in is remembered in this browser, so leaving the page
+  // and coming back still picks up the answer (and the webhook Discord made for a picked channel).
+  const PENDING_KEY = 'clipr.discord.connect';
+  const TTL_MS = 15 * 60 * 1000;
+  type Pending = { state: string; channel: boolean; started: number };
+
   let connecting = $state<'account' | 'channel' | null>(null);
   let connectNote = $state<{ ok: boolean; text: string } | null>(null);
   let cancelWait: (() => void) | null = null;
 
+  function remember(p: Pending | null) {
+    try {
+      if (p) localStorage.setItem(PENDING_KEY, JSON.stringify(p));
+      else localStorage.removeItem(PENDING_KEY);
+    } catch {
+      /* storage off: the wait just doesn't survive leaving the page */
+    }
+  }
+  function remembered(): Pending | null {
+    try {
+      const p = JSON.parse(localStorage.getItem(PENDING_KEY) ?? 'null');
+      if (p && typeof p.state === 'string' && typeof p.started === 'number' && Date.now() - p.started < TTL_MS) {
+        return { state: p.state, channel: !!p.channel, started: p.started };
+      }
+    } catch {
+      /* nothing usable */
+    }
+    remember(null);
+    return null;
+  }
+
   async function connect(channel: boolean) {
     connectNote = null;
     connecting = channel ? 'channel' : 'account';
-    let alive = true;
-    cancelWait = () => (alive = false);
+    let started: { url: string; state: string };
     try {
-      const { url, state } = await discordConnect(channel);
-      window.open(url, '_blank');
-      const until = Date.now() + 15 * 60 * 1000;
-      while (alive && Date.now() < until) {
-        await new Promise((r) => setTimeout(r, 1500));
-        if (!alive) return;
-        const r = await discordConnectResult(state);
-        if ('pending' in r) continue;
-        discord.account = r.account;
-        if (r.webhook) {
-          discord.webhooks.push({ name: freeName(), url: r.webhook.url, mode: 'ask', games: [] });
-          connectNote = { ok: true, text: 'Channel added below. Rename it if you like, then Save.' };
-        } else {
-          connectNote = { ok: true, text: 'Connected. Save to keep it.' };
-        }
-        return;
-      }
-      if (alive) connectNote = { ok: false, text: 'The sign-in took too long. Try again.' };
+      started = await discordConnect(channel);
     } catch (e) {
-      if (alive) connectNote = { ok: false, text: e instanceof Error ? e.message : String(e) };
-    } finally {
-      if (alive) connecting = null;
+      connectNote = { ok: false, text: e instanceof Error ? e.message : String(e) };
+      connecting = null;
+      return;
     }
+    window.open(started.url, '_blank');
+    const p = { state: started.state, channel, started: Date.now() };
+    remember(p);
+    void wait(p);
   }
+
+  async function wait(p: Pending) {
+    cancelWait?.();
+    connecting = p.channel ? 'channel' : 'account';
+    let alive = true;
+    const stop = () => (alive = false);
+    cancelWait = stop;
+    const done = (note: { ok: boolean; text: string }) => {
+      remember(null);
+      connectNote = note;
+      connecting = null;
+      if (cancelWait === stop) cancelWait = null;
+    };
+    let failures = 0;
+    while (Date.now() - p.started < TTL_MS) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (!alive) return;
+      let r: DiscordConnected | { pending: true };
+      try {
+        r = await discordConnectResult(p.state);
+      } catch (e) {
+        if (!alive) return;
+        const status = e instanceof ApiError ? e.status : 0;
+        // Cancelled, refused or expired is the answer; anything else (clipr restarting, a hiccup) is retried.
+        if ([403, 404, 502].includes(status) || ++failures >= 10) {
+          return done({ ok: false, text: e instanceof Error ? e.message : String(e) });
+        }
+        continue;
+      }
+      if (!alive) return;
+      failures = 0;
+      if ('pending' in r) continue;
+      return done(apply(r));
+    }
+    if (alive) done({ ok: false, text: 'The sign-in took too long. Try again.' });
+  }
+
+  function apply(r: DiscordConnected): { ok: boolean; text: string } {
+    discord.account = r.account;
+    if (!r.webhook) return { ok: true, text: 'Connected. Save to keep it.' };
+    if (discord.webhooks.some((w) => w.url === r.webhook!.url)) {
+      return { ok: true, text: 'That channel is already in the list. Save to keep the account.' };
+    }
+    if (discord.webhooks.length >= 10) {
+      return { ok: false, text: 'You already have 10 channels. Remove one, then pick the channel again.' };
+    }
+    discord.webhooks.push({ name: freeName(), url: r.webhook.url, mode: 'ask', games: [] });
+    return { ok: true, text: 'Channel added below. Rename it if you like, then Save.' };
+  }
+
   function stopWaiting() {
     cancelWait?.();
     cancelWait = null;
+    remember(null);
     connecting = null;
   }
   function disconnect() {
     discord.account = null;
     connectNote = { ok: true, text: 'Disconnected. Save to keep it. Channels you added keep posting until you remove them.' };
   }
-  $effect(() => () => cancelWait?.());
+  onMount(() => {
+    const p = remote ? null : remembered();
+    if (p) void wait(p);
+    // Leaving the page stops polling but keeps the sign-in remembered for when it's back.
+    return () => cancelWait?.();
+  });
   function remove(i: number) {
     discord.webhooks.splice(i, 1);
     results = {};
