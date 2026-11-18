@@ -48,18 +48,33 @@ part of it:
 | Pause or resume the buffer | off |
 | Mark a moment | off |
 
-Set or change them under [Settings → Hotkeys](settings.md#hotkeys). The **Home** page has the same actions as
-buttons, plus an overview like OBS's main window:
+Set or change them under [Settings → Hotkeys](settings.md#hotkeys).
 
-- a status card that shows whether clipr is buffering or recording, and the live preview;
-- **Capture**: what to record (games only, or always) and the quality, resolution and frame rate, one click
-  each. These save at once and restart capture, so the replay buffer starts over;
-- **Audio**: the mixer, with each source's live level and a volume fader (see
-  [Settings → Audio](settings.md#audio));
-- **Performance**: the frame rate against your target, how many frames had a new picture, the time clipr spends
-  per frame, the video bitrate, clipr's CPU and memory, each with the last two minutes as a small graph (hover it
-  for the numbers, or click **Show numbers** for a table). Late or skipped frames in the last minute are named
-  below, with what to try.
+### The Home page
+
+Home works like OBS's main window, with everything in a fixed place:
+
+- **Preview** across the top: what clipr captures right now. The badge in its corner says what clipr is doing:
+  **Replay buffer** with how much of it is filled (like 1:42 of 2:00), **REC** with the recording's time, **Buffer
+  paused**, or **Waiting for a game**. **Hide** turns the preview off; the badge stays.
+- **Sources**: what clipr records. The first row is the picture (a game's window or monitor, or the desktop
+  too); then system audio, the microphone, the game's own sound and each app on its own track. The switch turns a
+  sound on or off; ⚙ opens everything about that source: its volume, filters, push-to-talk for the mic, which
+  monitor the desktop is, and so on. **+ App** records another program (like `discord.exe`) on a track of its
+  own; open its ⚙ to remove it again. Turning sources on or off and saving their settings restarts capture, so
+  the replay buffer starts over (volume faders don't).
+- **Mixer**: an upright strip per sound, with its live level (what gets recorded, after its filters) and a
+  volume fader that applies while you drag. **Mute** on the mic strip mutes it in clips. See
+  [Settings → Audio](settings.md#audio) for what the levels mean.
+- **Controls**: **Save clip**, **Save long clip** and **Start recording**, with their hotkeys. **More** has
+  Pause buffer, Mark moment and Mute mic. **Output** at the bottom shows the quality, resolution and frame rate;
+  click it to change them in one click each.
+- **The status bar** along the bottom: the frame rate against your target, late and skipped frames in the last
+  minute, clipr's CPU, free disk space and your newest clip. **Graphs** opens the performance graphs: the last two
+  minutes of each number, plus how many frames had a new picture, the time clipr spends per frame, the bitrate
+  and memory (**Show numbers** shows them as a table).
+
+The same settings are under [Settings](settings.md) too.
 
 When a clip is saved you hear a short sound and see a small "Clip saved" note in the top-right corner. The note
 never shows up in your clips. The sound plays through your speakers like any other sound, so with system audio

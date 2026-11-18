@@ -184,6 +184,20 @@ export function quickEdit(edit: (c: Config) => void): Promise<Config | null> {
   });
 }
 
+/** Saves a settings draft (a source's ⚙ panel) after any quick save still on its way, keeping the volumes as
+ * they are now: a fader may have changed one since the draft was copied. */
+export function saveDraft(c: Config): Promise<Config> {
+  return oneAtATime(() => {
+    const now = app.config?.audio;
+    if (now) {
+      c.audio.system_volume = now.system_volume;
+      c.audio.mic_volume = now.mic_volume;
+      c.audio.volumes = { ...now.volumes };
+    }
+    return saveConfig(c);
+  });
+}
+
 // Level meters: while any component showing them is mounted, ask the server to keep levels coming (it then
 // runs audio for the meters even while nothing is captured). Counted, so two meters on a page ask once.
 let levelWatchers = 0;

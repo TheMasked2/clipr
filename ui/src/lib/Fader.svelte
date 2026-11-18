@@ -9,7 +9,8 @@
     source,
     label,
     onsaved,
-  }: { source: string; label: string; onsaved?: (c: Config) => void } = $props();
+    vertical = false,
+  }: { source: string; label: string; onsaved?: (c: Config) => void; vertical?: boolean } = $props();
 
   const saved = $derived(app.config ? volumeOf(app.config.audio, source) : 100);
   /** The value while dragging; the saved one otherwise. */
@@ -57,7 +58,7 @@
   }
 </script>
 
-<div class="fader">
+<div class="fader" class:vertical>
   <input
     type="range"
     min="0"
@@ -76,5 +77,9 @@
 <style>
   .fader { display: flex; align-items: center; gap: 0.6rem; min-width: 0; width: min(16rem, 100%); }
   input { flex: 1; min-width: 4rem; }
+  /* Upright, like an OBS mixer strip: 0 % at the bottom, the value under it. */
+  .fader.vertical { flex-direction: column; width: auto; height: 100%; gap: .3rem; }
+  .vertical input { writing-mode: vertical-lr; direction: rtl; flex: 1; min-width: 0; min-height: 3rem; width: 1.2rem; margin: 0; }
+  .vertical .v { width: auto; text-align: center; font-size: .72rem; }
   .v { width: 3rem; text-align: right; font-size: 0.8rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 </style>
