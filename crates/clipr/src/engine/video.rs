@@ -9,19 +9,20 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clipr_capture::{CaptureOptions, CaptureSession, CapturedFrame, Target};
 use clipr_core::clock::now_100ns;
 use clipr_encode::EncodeSettings;
 use clipr_encode::mf::HwEncoder;
-use clipr_gpu::{Gpu, Nv12Converter, ScaleMode};
+use clipr_gpu::{Gpu, Nv12Converter, ScaleMode, Snapshotter};
 use clipr_mux::MediaFormat;
-use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
+use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
 use windows::Win32::Graphics::Gdi::HMONITOR;
 
 use super::Shared;
+use crate::preview;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoSettings {
@@ -41,7 +42,10 @@ pub fn spawn(
 ) -> JoinHandle<Result<()>> {
     std::thread::Builder::new()
         .name("clipr-video".into())
-        .spawn(move || run(settings, &shared, &stop))
+        .spawn(move || {
+            let _clear = preview::ClearOnDrop;
+            run(settings, &shared, &stop)
+        })
         .expect("can't start a thread")
 }
 
@@ -116,6 +120,7 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
     let period = 10_000_000 / fps;
     let mut converter: Option<Nv12Converter> = None;
     let mut last: Option<ID3D11Texture2D> = None;
+    let mut live = Preview::default();
     let mut tick: i64 = 0;
     let t0 = now_100ns();
     let mut on_packet = |encoder: &HwEncoder, sample: clipr_encode::mf::Packet| -> Result<()> {
@@ -166,13 +171,71 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
             tick += 1;
             continue;
         }
-        encoder.encode(last.as_ref().expect("checked above"), deadline, &mut on_packet)?;
+        let frame = last.as_ref().expect("checked above");
+        live.tick(&gpu, frame);
+        encoder.encode(frame, deadline, &mut on_packet)?;
         tick += 1;
     }
 
     session.stop();
     encoder.drain(&mut on_packet)?;
     Ok(())
+}
+
+/// The live preview's snapshots (see [`crate::preview`]): one every [`preview::INTERVAL`] while a page
+/// watches, made from the frame the encoder gets and read back a tick later. If the GPU can't make them, the
+/// page is told, capture goes on, and the preview tries again after [`RETRY`].
+#[derive(Default)]
+struct Preview {
+    snapshotter: Option<Snapshotter>,
+    next: Option<Instant>,
+}
+
+/// How long the preview waits after a GPU failure before it tries again.
+const RETRY: Duration = Duration::from_secs(10);
+
+impl Preview {
+    fn tick(&mut self, gpu: &Gpu, frame: &ID3D11Texture2D) {
+        if let Err(e) = self.try_tick(gpu, frame) {
+            let e = format!("{e:#}");
+            tracing::warn!(
+                "the live preview failed (trying again in {} s): {e}",
+                RETRY.as_secs()
+            );
+            preview::fail(e);
+            self.snapshotter = None;
+            self.next = Some(Instant::now() + RETRY);
+        }
+    }
+
+    fn try_tick(&mut self, gpu: &Gpu, frame: &ID3D11Texture2D) -> Result<()> {
+        if let Some(s) = self.snapshotter.as_mut()
+            && let Some(snapshot) = s.take()?
+        {
+            preview::publish(snapshot);
+        }
+        let now = Instant::now();
+        if self.next.is_some_and(|t| now < t)
+            || self.snapshotter.as_ref().is_some_and(Snapshotter::pending)
+            || !preview::wanted()
+        {
+            return Ok(());
+        }
+        let size = texture_size(frame);
+        if self.snapshotter.as_ref().map(Snapshotter::input_size) != Some(size) {
+            self.snapshotter = Some(Snapshotter::new(gpu, size, preview::MAX_SIZE)?);
+        }
+        self.snapshotter.as_mut().expect("just set").start(frame)?;
+        self.next = Some(now + preview::INTERVAL);
+        Ok(())
+    }
+}
+
+fn texture_size(texture: &ID3D11Texture2D) -> (u32, u32) {
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    // SAFETY: fills a plain descriptor from a valid texture.
+    unsafe { texture.GetDesc(&mut desc) };
+    (desc.Width, desc.Height)
 }
 
 #[cfg(test)]

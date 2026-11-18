@@ -449,6 +449,8 @@ pub struct WebConfig {
     pub lan: bool,
     /// The 6-digit PIN other devices on the LAN must enter. Generated when LAN access is first turned on.
     pub lan_pin: String,
+    /// Other devices may see the live capture preview (the whole screen, not just games). Off by default.
+    pub lan_preview: bool,
 }
 
 impl Default for WebConfig {
@@ -457,6 +459,7 @@ impl Default for WebConfig {
             port: DEFAULT_PORT,
             lan: false,
             lan_pin: String::new(),
+            lan_preview: false,
         }
     }
 }

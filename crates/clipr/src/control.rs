@@ -66,6 +66,10 @@ impl Control for AppControl {
         crate::sound::play(crate::sound::Cue::Saved, volume);
     }
 
+    fn preview(&self) -> Result<Option<std::sync::Arc<Vec<u8>>>, String> {
+        crate::preview::jpeg()
+    }
+
     fn mark(&self) {
         self.engine.send(Command::Mark);
     }

@@ -12,6 +12,7 @@
   import ListEditor from './ListEditor.svelte';
   import HotkeyInput from './HotkeyInput.svelte';
   import VideoSimple from './VideoSimple.svelte';
+  import CapturePreview from './CapturePreview.svelte';
   import LevelMeters from './LevelMeters.svelte';
   import AudioFilters from './AudioFilters.svelte';
   import DiscordSettings from './DiscordSettings.svelte';
@@ -176,6 +177,7 @@
     <UpdatePanel remote={sys?.remote ?? false} />
     <Field title="Crash reports" hint="If clipr crashes, keep a report (and a minidump) on this PC and show it on Home next time, so you can send it as a GitHub issue. Your user name, PC name and profile folder are taken out, and nothing is ever sent by itself. Opt-in, off by default."><Toggle bind:checked={draft.privacy.crash_reports} label="Crash reports" /></Field>
   {:else if tab === 'Video'}
+    <Field title="Preview" hint="What clipr captures right now, a few frames a second. Changes here show once you save them." stacked><CapturePreview /></Field>
     <div class="seg">
       <button class="chip" class:on={!advanced} onclick={() => (advanced = false)}>Simple</button>
       <button class="chip" class:on={advanced} onclick={() => (advanced = true)}>Advanced</button>
@@ -349,6 +351,7 @@
     <Field title="Allow access from my local network" hint="Open this page to other devices at home (your phone). They must enter a PIN. Off by default."><Toggle bind:checked={draft.web.lan} label="LAN access" /></Field>
     {#if draft.web.lan}
       <div class="banner warn">Anyone on your network with the PIN can see and delete your clips. Only turn this on on a network you trust. The connection is not encrypted.</div>
+      <Field title="Live preview on other devices" hint="Let devices with the PIN see the live capture preview. It shows your whole screen (other windows, notifications, messages), not just games. Off by default."><Toggle bind:checked={draft.web.lan_preview} label="Live preview on other devices" /></Field>
     {/if}
     {#if app.config?.web.lan && app.config.web.lan_pin}
       <div class="pin">

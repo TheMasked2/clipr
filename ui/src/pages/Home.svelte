@@ -6,6 +6,7 @@
   import Wizard from '../lib/Wizard.svelte';
   import DiscordPosts from '../lib/DiscordPosts.svelte';
   import CrashNotice from '../lib/CrashNotice.svelte';
+  import CapturePreview from '../lib/CapturePreview.svelte';
   import { clipHref } from '../lib/router.svelte';
 
   // Home is quick info: the newest clip and the library size. The Gallery has the clips.
@@ -115,6 +116,7 @@
       </div>
     {/if}
   </div>
+  <CapturePreview hideable />
 </section>
 
 <CrashNotice />

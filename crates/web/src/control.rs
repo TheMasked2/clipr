@@ -26,6 +26,13 @@ pub trait Control: Send + Sync + 'static {
     /// Plays the save sound once at `volume` %, so the user can hear the setting before saving it.
     fn test_sound(&self, _volume: u32) {}
 
+    /// The newest live preview of what is captured, as a JPEG (`None` while nothing is captured; `Err` with
+    /// the reason when the GPU can't make one). Asking keeps the preview coming for a few seconds. It may take a
+    /// few milliseconds (it encodes the image).
+    fn preview(&self) -> Result<Option<std::sync::Arc<Vec<u8>>>, String> {
+        Ok(None)
+    }
+
     /// The current settings.
     fn config(&self) -> Config;
 

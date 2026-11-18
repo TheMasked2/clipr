@@ -10,8 +10,10 @@
 #![cfg(windows)]
 
 mod convert;
+mod snapshot;
 
 pub use convert::{Nv12Converter, ScaleMode, nv12_texture};
+pub use snapshot::{Snapshot, Snapshotter};
 
 use anyhow::{Context, Result};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;

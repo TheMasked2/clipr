@@ -481,6 +481,22 @@ async fn lan_peers_need_the_pin() {
         .send(&app)
         .await;
     assert_eq!(code, StatusCode::OK);
+
+    // The live preview shows the whole screen: logged-in devices only get it when the PC allows that.
+    let (code, _, _) = call("GET", "/api/preview").send(&app).await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+    let preview = || call("GET", "/api/preview").peer(lan).header("cookie", &token);
+    let (code, _, body) = preview().send(&app).await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    assert!(
+        json(&body)["error"]
+            .as_str()
+            .unwrap()
+            .contains("Settings → Network")
+    );
+    env.control.config.lock().unwrap().web.lan_preview = true;
+    let (code, _, _) = preview().send(&app).await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
