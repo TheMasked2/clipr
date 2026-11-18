@@ -214,7 +214,7 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
     Ok(())
 }
 
-/// The live preview's snapshots (see [`crate::preview`]): one every [`preview::INTERVAL`] while a page
+/// The live preview's snapshots (see [`crate::preview`]): at [`preview::interval`] while a page
 /// watches, made from the frame the encoder gets and read back a tick later. If the GPU can't make them, the
 /// page is told, capture goes on, and the preview tries again after [`RETRY`].
 #[derive(Default)]
@@ -261,7 +261,7 @@ impl Preview {
             self.snapshotter = Some(Snapshotter::new(gpu, size, preview::MAX_SIZE)?);
         }
         self.snapshotter.as_mut().expect("just set").start(frame)?;
-        self.next = Some(now + preview::INTERVAL);
+        self.next = Some(now + preview::interval());
         Ok(())
     }
 }

@@ -163,7 +163,17 @@ pub async fn test_sound(State(s): State<AppState>, body: Bytes) -> ApiResult<Sta
 /// The live preview of what is captured: a small JPEG, or 204 while nothing is captured yet. The page asks
 /// a few times a second while it shows the preview; asking is what keeps snapshots coming. It shows the whole
 /// screen, so other devices only get it when the PC's user allowed that (`web.lan_preview`).
-pub async fn preview(State(s): State<AppState>, ext: Extensions) -> ApiResult<Response> {
+#[derive(Deserialize, Default)]
+pub struct PreviewQuery {
+    /// Pictures a second the page wants (1–30; default 5).
+    fps: Option<u32>,
+}
+
+pub async fn preview(
+    State(s): State<AppState>,
+    ext: Extensions,
+    Query(q): Query<PreviewQuery>,
+) -> ApiResult<Response> {
     if auth::is_remote(&ext) && !s.control.config().web.lan_preview {
         return Err(ApiError::new(
             StatusCode::FORBIDDEN,
@@ -172,7 +182,8 @@ pub async fn preview(State(s): State<AppState>, ext: Extensions) -> ApiResult<Re
         ));
     }
     let control = s.control.clone();
-    let jpeg = tokio::task::spawn_blocking(move || control.preview())
+    let fps = q.fps.unwrap_or(5).clamp(1, 30);
+    let jpeg = tokio::task::spawn_blocking(move || control.preview(fps))
         .await
         .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the preview failed"))?
         .map_err(|e| {

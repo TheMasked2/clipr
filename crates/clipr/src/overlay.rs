@@ -23,9 +23,19 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
-const WIDTH: i32 = 280;
-const HEIGHT: i32 = 56;
-const MARGIN: i32 = 24;
+// Small on purpose: a glance in the corner, not a banner over the game (beta.3 feedback).
+/// Widest note; most fit in about 170 px.
+const MAX_WIDTH: i32 = 340;
+/// The width of the note showing now (it follows the text).
+static WIDTH: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(168);
+
+fn width() -> i32 {
+    WIDTH.load(std::sync::atomic::Ordering::Relaxed)
+}
+const HEIGHT: i32 = 32;
+const MARGIN: i32 = 16;
+const BAR: i32 = 4;
+const FONT_PX: i32 = 15;
 const SHOW_FOR: Duration = Duration::from_millis(2500);
 const HIDE_TIMER: usize = 1;
 
@@ -77,7 +87,7 @@ fn run(rx: mpsc::Receiver<(String, bool)>) {
             WS_POPUP,
             0,
             0,
-            WIDTH,
+            MAX_WIDTH,
             HEIGHT,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
@@ -93,11 +103,13 @@ fn run(rx: mpsc::Receiver<(String, bool)>) {
     unsafe {
         SetLayeredWindowAttributes(hwnd, 0, 235, LWA_ALPHA);
         SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
-        SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, WIDTH + 1, HEIGHT + 1, 16, 16), 1);
     }
     loop {
         match rx.recv_timeout(Duration::from_millis(50)) {
             Ok((text, ok)) => {
+                // About 7 px a character at this size, plus the bar and padding.
+                let w = (text.chars().count() as i32 * 7 + BAR + 24).clamp(120, MAX_WIDTH);
+                WIDTH.store(w, std::sync::atomic::Ordering::Relaxed);
                 CURRENT.with(|c| *c.borrow_mut() = (wide(&text), ok));
                 show(hwnd);
             }
@@ -116,8 +128,10 @@ fn run(rx: mpsc::Receiver<(String, bool)>) {
 }
 
 fn show(hwnd: HWND) {
-    // SAFETY: valid window; plain geometry calls.
+    let w = width();
+    // SAFETY: valid window; plain geometry calls. The window owns the region once set.
     unsafe {
+        SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, w + 1, HEIGHT + 1, 10, 10), 1);
         let mut cursor = POINT { x: 0, y: 0 };
         GetCursorPos(&mut cursor);
         let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
@@ -128,9 +142,9 @@ fn show(hwnd: HWND) {
         SetWindowPos(
             hwnd,
             -1isize as HWND, // HWND_TOPMOST
-            work.right - WIDTH - MARGIN,
+            work.right - w - MARGIN,
             work.top + MARGIN,
-            WIDTH,
+            w,
             HEIGHT,
             SWP_NOACTIVATE,
         );
@@ -150,7 +164,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 let rect = RECT {
                     left: 0,
                     top: 0,
-                    right: WIDTH,
+                    right: width(),
                     bottom: HEIGHT,
                 };
                 let bg = CreateSolidBrush(rgb(0x16, 0x16, 0x1d));
@@ -167,7 +181,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     &RECT {
                         left: 0,
                         top: 0,
-                        right: 6,
+                        right: BAR,
                         bottom: HEIGHT,
                     },
                     bar,
@@ -175,7 +189,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 DeleteObject(bar);
                 let face = wide("Segoe UI");
                 let font = CreateFontW(
-                    20,
+                    FONT_PX,
                     0,
                     0,
                     0,
@@ -193,7 +207,10 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 let old = SelectObject(dc, font);
                 SetBkMode(dc, TRANSPARENT as i32);
                 SetTextColor(dc, rgb(0xE5, 0xE5, 0xEA));
-                let mut text_rect = RECT { left: 10, ..rect };
+                let mut text_rect = RECT {
+                    left: BAR + 4,
+                    ..rect
+                };
                 // Windows may paint before any text was set: draw nothing then. The length excludes the NUL.
                 let mut text = text;
                 let len = text.iter().position(|&c| c == 0).unwrap_or(text.len());

@@ -29,11 +29,39 @@
 
   const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Discord', 'Cloud', 'Network', 'Appearance'] as const;
   let tab = $state<(typeof tabs)[number]>('General');
-  let advanced = $state(false);
+  // Simple or Advanced is remembered on this device.
+  const readAdvanced = () => {
+    try {
+      return localStorage.getItem('clipr.videoAdvanced') === '1';
+    } catch {
+      return false;
+    }
+  };
+  let advanced = $state(readAdvanced());
+  function setAdvanced(on: boolean) {
+    advanced = on;
+    try {
+      localStorage.setItem('clipr.videoAdvanced', on ? '1' : '0');
+    } catch {
+      // Private window or blocked storage: it just isn't remembered.
+    }
+  }
   let saving = $state(false);
   let error = $state('');
   let justSaved = $state(false);
   let sys = $state<api.SystemInfo | null>(null);
+  // The monitor being captured, to say when the output height scales the picture.
+  const capturedMonitor = $derived(
+    (sys?.monitors ?? []).find((m) => (draft.video.monitor ? m.index === draft.video.monitor : m.primary)),
+  );
+  const scaleNote = $derived.by(() => {
+    const m = capturedMonitor;
+    const h = draft.video.height;
+    if (!m || !h || h === m.height) return '';
+    if (h > m.height)
+      return `Your monitor is ${m.height}p, so clips are ${m.height}p: clipr never scales up (it would make files bigger without adding detail).`;
+    return `Scaled down from your monitor's ${m.height}p to ${h}p: lighter on the GPU and smaller files, but small text looks softer. Pick Native to keep every pixel.`;
+  });
   let cleanMsg = $state('');
   let cleaning = $state(false);
 
@@ -181,8 +209,8 @@
   {:else if tab === 'Video'}
     <Field title="Preview" hint="What clipr captures right now, a few frames a second. Changes here show once you save them." stacked><CapturePreview /></Field>
     <div class="seg">
-      <button class="chip" class:on={!advanced} onclick={() => (advanced = false)}>Simple</button>
-      <button class="chip" class:on={advanced} onclick={() => (advanced = true)}>Advanced</button>
+      <button class="chip" class:on={!advanced} onclick={() => setAdvanced(false)}>Simple</button>
+      <button class="chip" class:on={advanced} onclick={() => setAdvanced(true)}>Advanced</button>
     </div>
     {#if !advanced}
       <VideoSimple bind:video={draft.video} />
@@ -214,6 +242,7 @@
       </Field>
       <Field title="GPU priority" hint="Let clipr's capture go a little ahead of the game on the GPU. It helps on some PCs and makes clips skip frames on others: if your clips stutter, try it both ways. Off by default."><Toggle bind:checked={draft.video.gpu_priority} label="GPU priority" /></Field>
     {/if}
+    {#if scaleNote}<p class="small note scale">{scaleNote}</p>{/if}
     <Field title="Per-game profiles" hint="Use other video settings while a particular game runs. Match by the game's name or exe (cs2.exe), any case. Leave a box empty to keep the normal value above. Capture restarts when the game changes." stacked>
       <div class="profiles">
         {#each draft.games.profiles as p, i (i)}
@@ -242,8 +271,9 @@
     </Field>
     <Field title="Note on save" hint="Show a small &quot;Clip saved&quot; note in the top-right corner. It never shows up in your clips. Games in exclusive fullscreen hide it (the sound still plays)."><Toggle bind:checked={draft.replay.toast_on_save} label="Note on save" /></Field>
   {:else if tab === 'Audio'}
-    <h3 class="sub first">Tracks</h3>
-    <p class="muted small note">What each clip records. Players and Discord play track 1; video editors show every track, so you can mute voice chat or your mic afterwards.</p>
+    <div class="group">
+    <h3 class="sub">Tracks</h3>
+    <p class="muted small note">What each clip records. Players and Discord play track 1; video editors show every track, so you can mute voice chat or your mic afterwards. <a href="https://kdenlive.org" target="_blank" rel="noreferrer">Kdenlive</a> (free) opens all tracks as separate audio.</p>
     {#if tracks.length}
       <ol class="tracks">
         {#each tracks as t, i (i)}
@@ -256,7 +286,8 @@
     {/if}
     <Field title="Separate tracks" hint="Also give system audio and the microphone a track of their own. Apps below always get one."><Toggle bind:checked={draft.audio.separate_tracks} label="Separate tracks" /></Field>
     <Field title="Live levels" hint="What each source records right now, after its filters, from -60 to 0 dB. CLIP means the source is already distorting before clipr gets it: lower its level in Windows. Shows while the buffer runs; save to apply changes." stacked><LevelMeters /></Field>
-
+    </div>
+    <div class="group">
     <h3 class="sub">System audio</h3>
     <Field title="Record system audio" hint="Everything you hear (game, voice chat, music): the default output device."><Toggle bind:checked={draft.audio.system} label="System audio" /></Field>
     {#if draft.audio.system}
@@ -268,7 +299,8 @@
       </Field>
       <Field title="Filters" stacked><AudioFilters audio={draft.audio} source="system" label="System audio" /></Field>
     {/if}
-
+    </div>
+    <div class="group">
     <h3 class="sub">Microphone</h3>
     <Field title="Record the microphone" hint="Your default microphone (Windows Sound settings)."><Toggle bind:checked={draft.audio.mic} label="Microphone" /></Field>
     {#if draft.audio.mic}
@@ -292,13 +324,15 @@
       </Field>
       <Field title="Filters" hint="Like OBS: none by default. A good start for a mic: noise suppression, noise gate, compressor, limiter." stacked><AudioFilters audio={draft.audio} source="mic" label="Microphone" /></Field>
     {/if}
-
+    </div>
+    <div class="group">
     <h3 class="sub">Game audio</h3>
     <Field title="Game on its own track" hint="Also record only the game's sound (no voice chat, no music) on a track of its own, so you can turn it up or down later in an editor. Follows whichever game clipr detects (if the game is also under App tracks, that track has it instead). Needs Windows 10 2004 or newer."><Toggle bind:checked={draft.audio.game} label="Game audio" /></Field>
     {#if draft.audio.game}
       <Field title="Filters" stacked><AudioFilters audio={draft.audio} source="game" label="Game" /></Field>
     {/if}
-
+    </div>
+    <div class="group">
     <h3 class="sub">App tracks</h3>
     <Field title="Apps on their own track" hint="Record programs separately (up to 4), like discord.exe, so you can mute voice chat later in an editor. Needs Windows 10 2004 or newer." stacked><ListEditor bind:items={draft.audio.apps} placeholder="discord.exe" /></Field>
     {#each appList as app (app.key)}
@@ -311,11 +345,13 @@
       <Field title="Microphone offset (ms)"><input type="number" min="-5000" max="5000" step="5" bind:value={draft.audio.mic_offset_ms} /></Field>
       <Field title="System audio offset (ms)"><input type="number" min="-5000" max="5000" step="5" bind:value={draft.audio.system_offset_ms} /></Field>
     </details>
-
+    </div>
+    <div class="group">
     <h3 class="sub">Quality</h3>
     <Field title="Audio quality (AAC)" hint="AAC bitrate in kbit/s per track. 160 is plenty for game audio.">
       <select bind:value={draft.audio.bitrate_kbps}>{#each [96, 128, 160, 192] as b (b)}<option value={b}>{b} kbps</option>{/each}</select>
     </Field>
+    </div>
   {:else if tab === 'Hotkeys'}
     <p class="muted small note">Click a box, then press the keys, like <kbd>Alt+F10</kbd>. Esc cancels, × clears. While clipr runs, a hotkey is taken from games, so they will not see it.</p>
     {#if bad.size}<div class="banner err">Two actions share the same hotkey. Change one of the rows marked in red.</div>{/if}
@@ -380,6 +416,12 @@
     {:else if draft.web.lan}
       <p class="muted small note">Save to generate the PIN.</p>
     {/if}
+    <p class="muted small note">
+      <strong>Away from home?</strong> clipr doesn't open itself to the internet. Don't forward its port on your router: the
+      connection isn't encrypted. To reach it from outside, put your phone and PC on a private network such as
+      <a href="https://tailscale.com" target="_blank" rel="noreferrer">Tailscale</a>, turn on local network access and
+      use the PC's address in that network. To share single clips, use Cloud.
+    </p>
     <Field title="First port" hint="First port to try for the web UI. If it is taken, clipr uses the next free one. Applies after a restart."><input type="number" min="1024" max="65535" bind:value={draft.web.port} /></Field>
   {:else if tab === 'Appearance'}
     <Field title="Accent colour" hint="The one colour used for buttons, highlights and the timeline.">
@@ -417,7 +459,6 @@
   .tn { font-size: 0.75rem; color: var(--text-muted); font-variant-numeric: tabular-nums; min-width: 3.6rem; }
   .sync { margin-top: 1.4rem; border: 1px solid var(--border); border-radius: 0.6rem; padding: 0.5rem 0.8rem; }
   .sync summary { cursor: pointer; color: var(--text-muted); }
-  .sub.first { margin-top: 0; }
   .tab.active { color: var(--text); background: var(--accent-soft); border-color: var(--accent-border); }
   .tabsel { display: none; width: 100%; margin-bottom: 1rem; }
   @media (max-width: 640px) {
@@ -428,6 +469,9 @@
   section { padding-top: 0.5rem; padding-bottom: 0.5rem; }
   .seg { display: flex; gap: 0.4rem; padding: 0.8rem 0 0.2rem; }
   .note { margin: 0.8rem 0 0; }
+  .scale { padding: 0.5rem 0.7rem; border-left: 3px solid #f5b942; background: color-mix(in srgb, #f5b942 8%, transparent); border-radius: 4px; }
+  .group { margin-top: 1rem; padding: 0.2rem 1rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius); background: color-mix(in srgb, var(--text) 2%, transparent); }
+  .group > .sub:first-child { margin-top: 0.8rem; }
   .sub { margin: 1.4rem 0 0.2rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
   .profiles { display: flex; flex-direction: column; gap: 0.5rem; width: 100%; }
   .profile { display: flex; flex-wrap: wrap; gap: 0.4rem; }
