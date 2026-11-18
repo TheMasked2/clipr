@@ -145,6 +145,46 @@ pub async fn set_mic(State(s): State<AppState>, body: Bytes) -> ApiResult<Status
     Ok(no_content())
 }
 
+/// A page shows the level meters (see `docs/api.md`).
+pub async fn watch_levels(State(s): State<AppState>) -> StatusCode {
+    s.control.watch_levels();
+    no_content()
+}
+
+#[derive(Deserialize)]
+struct SourceVolumeReq {
+    source: String,
+    volume: u32,
+}
+
+/// Sets one audio source's volume, saved and applied right away without restarting audio (the mixer's
+/// faders). Returns the saved settings.
+pub async fn set_volume(State(s): State<AppState>, body: Bytes) -> ApiResult<Json<Config>> {
+    let req: SourceVolumeReq = parse_json(&body)?;
+    if req.volume > 200 {
+        return Err(ApiError::bad_request("The volume must be between 0 and 200"));
+    }
+    let source = req.source.trim().to_ascii_lowercase();
+    if source.is_empty() || source.contains(['/', '\\', ':']) {
+        return Err(ApiError::bad_request("Unknown audio source"));
+    }
+    // Read, change and save under one lock, so two faders moved at once don't undo each other.
+    static VOLUMES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let st = s.clone();
+    let saved = blocking(move || {
+        let _one_at_a_time = VOLUMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut config = st.control.config();
+        config.audio.set_volume(&source, req.volume);
+        validate_config(&config).map_err(|e| LibraryError::Invalid(format!("{e:#}")))?;
+        st.control
+            .set_config(config)
+            .map_err(|e| LibraryError::Invalid(format!("{e:#}")))?;
+        Ok(st.control.config())
+    })
+    .await?;
+    Ok(Json(saved))
+}
+
 #[derive(Deserialize)]
 struct VolumeReq {
     volume: u32,
@@ -313,6 +353,12 @@ fn check_audio(a: &AudioConfig) -> Result<()> {
         }
     };
     int("System audio volume", a.system_volume.into(), 0, 200)?;
+    if a.volumes.len() > 16 {
+        bail!("Too many source volumes");
+    }
+    for (source, &v) in &a.volumes {
+        int(&format!("The volume of {source}"), v.into(), 0, 200)?;
+    }
     int("Microphone offset", a.mic_offset_ms.into(), -5000, 5000)?;
     int("System audio offset", a.system_offset_ms.into(), -5000, 5000)?;
     int("Push-to-talk release", a.ptt_release_ms.into(), 0, 5000)?;

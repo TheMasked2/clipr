@@ -54,6 +54,9 @@ pub trait Control: Send + Sync + 'static {
     /// its filters. Empty when audio isn't running.
     fn levels(&self) -> Vec<clipr_core::status::Level>;
 
+    /// A page shows the level meters: keep levels coming for a few seconds, even while nothing is captured.
+    fn watch_levels(&self) {}
+
     /// Crash reports from earlier runs, newest first, for `GET /api/crashes` (see `docs/api.md`). Empty
     /// unless `privacy.crash_reports` is on.
     fn crashes(&self) -> serde_json::Value {

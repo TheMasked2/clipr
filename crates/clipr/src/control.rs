@@ -116,6 +116,10 @@ impl Control for AppControl {
         self.engine.levels()
     }
 
+    fn watch_levels(&self) {
+        self.engine.watch_levels();
+    }
+
     fn crashes(&self) -> serde_json::Value {
         if !self.config().privacy.crash_reports {
             return json!([]);

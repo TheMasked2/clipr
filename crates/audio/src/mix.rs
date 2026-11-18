@@ -119,6 +119,8 @@ impl Resampler {
 /// One source's samples waiting to be mixed.
 struct Lane {
     gain: f32,
+    /// The gain to ramp to over the next mixed block (a volume change while running), so it doesn't click.
+    next_gain: f32,
     /// Interleaved stereo for timeline frames `emitted..`.
     buf: Vec<f32>,
     /// Where the next pushed sample belongs if the source stays continuous.
@@ -147,6 +149,7 @@ impl Timeline {
                 .iter()
                 .map(|&gain| Lane {
                     gain,
+                    next_gain: gain,
                     buf: Vec::new(),
                     expected: None,
                 })
@@ -159,6 +162,13 @@ impl Timeline {
     #[cfg(test)]
     fn single(start_100ns: i64, gains: &[f32]) -> Self {
         Self::new(start_100ns, gains, vec![(0..gains.len()).collect()])
+    }
+
+    /// Changes a lane's volume from the next mixed block on (ramped across that block).
+    pub fn set_gain(&mut self, lane: usize, gain: f32) {
+        if let Some(lane) = self.lanes.get_mut(lane) {
+            lane.next_gain = gain;
+        }
     }
 
     /// Frames handed out so far.
@@ -207,8 +217,22 @@ impl Timeline {
             for &lane in track {
                 let lane = &self.lanes[lane];
                 let take = (lane.buf.len() / 2).min(frames);
-                for (m, s) in mix.iter_mut().zip(&lane.buf[..take * 2]) {
-                    *m += s * lane.gain;
+                if lane.next_gain == lane.gain {
+                    for (m, s) in mix.iter_mut().zip(&lane.buf[..take * 2]) {
+                        *m += s * lane.gain;
+                    }
+                } else {
+                    // Ramp over the samples there are, so the lane ends this block at its new gain.
+                    let step = (lane.next_gain - lane.gain) / take.max(1) as f32;
+                    for (i, (m, s)) in mix
+                        .chunks_exact_mut(2)
+                        .zip(lane.buf[..take * 2].chunks_exact(2))
+                        .enumerate()
+                    {
+                        let g = lane.gain + step * (i + 1) as f32;
+                        m[0] += s[0] * g;
+                        m[1] += s[1] * g;
+                    }
                 }
             }
             out.extend(mix.iter().map(|&m| (m.clamp(-1.0, 1.0) * 32767.0).round() as i16));
@@ -216,6 +240,7 @@ impl Timeline {
         for lane in &mut self.lanes {
             let take = (lane.buf.len() / 2).min(frames);
             lane.buf.drain(..take * 2);
+            lane.gain = lane.next_gain;
         }
         self.emitted += frames as i64;
         frames
@@ -356,6 +381,22 @@ mod tests {
         t.push(1, 10 * MS, &stereo(0.9, 480), false);
         pop(&mut t, 20 * MS, &mut out);
         assert_eq!(out[480 * 2], 32767);
+    }
+
+    #[test]
+    fn a_volume_change_ramps_over_one_block() {
+        let mut t = Timeline::single(0, &[1.0]);
+        t.set_gain(0, 0.0);
+        t.push(0, 0, &stereo(0.5, 480), false);
+        t.push(0, 10 * MS, &stereo(0.5, 480), false);
+        let mut out = Vec::new();
+        pop(&mut t, 10 * MS, &mut out);
+        // From full volume down to silence across the block, without a jump.
+        assert!(out[0] > 16000);
+        assert_eq!(*out.last().unwrap(), 0);
+        assert!(out.windows(4).step_by(2).all(|w| (w[0] - w[2]).abs() < 100));
+        pop(&mut t, 20 * MS, &mut out);
+        assert!(out[480 * 2..].iter().all(|&s| s == 0));
     }
 
     #[test]

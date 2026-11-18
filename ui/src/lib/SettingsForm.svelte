@@ -13,7 +13,8 @@
   import HotkeyInput from './HotkeyInput.svelte';
   import VideoSimple from './VideoSimple.svelte';
   import CapturePreview from './CapturePreview.svelte';
-  import LevelMeters from './LevelMeters.svelte';
+  import Fader from './Fader.svelte';
+  import Mixer from './Mixer.svelte';
   import AudioFilters from './AudioFilters.svelte';
   import DiscordSettings from './DiscordSettings.svelte';
   import CloudSettings from './CloudSettings.svelte';
@@ -26,6 +27,18 @@
   let savedJson = $state(untrack(() => JSON.stringify(initial)));
   let pinShown = $state(false);
   const dirty = $derived(JSON.stringify(draft) !== savedJson);
+
+  /** A fader saved a volume on its own: take it into the draft and the saved copy, so it isn't a pending
+   * change (and Save doesn't put the old value back). */
+  function followVolumes(c: Config): void {
+    const saved = JSON.parse(savedJson) as Config;
+    for (const a of [draft.audio, saved.audio]) {
+      a.system_volume = c.audio.system_volume;
+      a.mic_volume = c.audio.mic_volume;
+      a.volumes = { ...c.audio.volumes };
+    }
+    savedJson = JSON.stringify(saved);
+  }
 
   const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Discord', 'Cloud', 'Network', 'Appearance'] as const;
   let tab = $state<(typeof tabs)[number]>('General');
@@ -285,18 +298,13 @@
       <p class="warnt small">No audio: turn on a source below.</p>
     {/if}
     <Field title="Separate tracks" hint="Also give system audio and the microphone a track of their own. Apps below always get one."><Toggle bind:checked={draft.audio.separate_tracks} label="Separate tracks" /></Field>
-    <Field title="Live levels" hint="What each source records right now, after its filters, from -60 to 0 dB. CLIP means the source is already distorting before clipr gets it: lower its level in Windows. Shows while the buffer runs; save to apply changes." stacked><LevelMeters /></Field>
+    <Field title="Mixer" hint="What each source records right now, after its filters, from -60 to 0 dB, with its volume. Faders apply and save right away, even while recording; other changes show once saved. Shown here even when nothing records, so you can set levels first (the mic is opened for it, if it's on). CLIP means the source is already distorting before clipr gets it: lower its level in Windows." stacked><Mixer onsaved={followVolumes} /></Field>
     </div>
     <div class="group">
     <h3 class="sub">System audio</h3>
     <Field title="Record system audio" hint="Everything you hear (game, voice chat, music): the default output device."><Toggle bind:checked={draft.audio.system} label="System audio" /></Field>
     {#if draft.audio.system}
-      <Field title="Volume" hint="0–200 %, applied after the filters. 100 % leaves it unchanged.">
-        <div class="vol">
-          <input type="range" min="0" max="200" step="5" bind:value={draft.audio.system_volume} aria-label="System audio volume" />
-          <span class="pctv">{draft.audio.system_volume}%</span>
-        </div>
-      </Field>
+      <Field title="Volume" hint="0–200 %, applied after the filters. 100 % leaves it unchanged. Applies and saves right away, even while recording."><Fader source="system" label="System audio" onsaved={followVolumes} /></Field>
       <Field title="Filters" stacked><AudioFilters audio={draft.audio} source="system" label="System audio" /></Field>
     {/if}
     </div>
@@ -304,12 +312,7 @@
     <h3 class="sub">Microphone</h3>
     <Field title="Record the microphone" hint="Your default microphone (Windows Sound settings)."><Toggle bind:checked={draft.audio.mic} label="Microphone" /></Field>
     {#if draft.audio.mic}
-      <Field title="Volume" hint="0–200 %, applied after the filters. 100 % leaves it unchanged.">
-        <div class="vol">
-          <input type="range" min="0" max="200" step="5" bind:value={draft.audio.mic_volume} aria-label="Microphone volume" />
-          <span class="pctv">{draft.audio.mic_volume}%</span>
-        </div>
-      </Field>
+      <Field title="Volume" hint="0–200 %, applied after the filters. 100 % leaves it unchanged. Applies and saves right away, even while recording."><Fader source="mic" label="Microphone" onsaved={followVolumes} /></Field>
       <Field title="Push-to-talk key" hint="Record the mic only while this key is held: your voice chat's push-to-talk key, like V or Mouse4. Empty = always on.">
         <input type="text" bind:value={draft.audio.push_to_talk} placeholder="V, Mouse4, Mouse5…" aria-label="Push-to-talk key" />
       </Field>

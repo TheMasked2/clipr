@@ -122,6 +122,9 @@ pub struct AudioConfig {
     pub game: bool,
     /// Apps recorded on their own tracks (exe names, e.g. `discord.exe`). Needs Windows 10 2004 or newer.
     pub apps: Vec<String>,
+    /// Volume of the game and each app, 0–200 %, by source key (`game`, or an app's exe name in lower case).
+    /// A source not listed plays at 100 %. System audio and the mic have their own fields.
+    pub volumes: BTreeMap<String, u32>,
     /// Also give system audio and the mic a track of their own (apps always have one; track 1 is always the
     /// full mix; up to 6 tracks), so you can turn them down later in an editor.
     pub separate_tracks: bool,
@@ -260,6 +263,47 @@ impl FilterKind {
 }
 
 impl AudioConfig {
+    /// A source's volume in %, by its key (`system`, `mic`, `game` or an app's exe name, in any case).
+    pub fn volume(&self, source: &str) -> u32 {
+        if source.eq_ignore_ascii_case(SYSTEM_SOURCE) {
+            self.system_volume
+        } else if source.eq_ignore_ascii_case(MIC_SOURCE) {
+            self.mic_volume
+        } else {
+            self.volumes
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(source))
+                .map_or(100, |(_, &v)| v)
+        }
+    }
+
+    /// Sets a source's volume in %, by its key.
+    pub fn set_volume(&mut self, source: &str, percent: u32) {
+        let source = source.to_ascii_lowercase();
+        match source.as_str() {
+            SYSTEM_SOURCE => self.system_volume = percent,
+            MIC_SOURCE => self.mic_volume = percent,
+            _ => {
+                // A hand-edited file may spell the key in another case: replace every spelling.
+                self.volumes.retain(|k, _| !k.eq_ignore_ascii_case(&source));
+                if percent != 100 {
+                    self.volumes.insert(source, percent);
+                }
+            }
+        }
+    }
+
+    /// These settings without the volumes, to tell a volume change (applied live) from one that needs the
+    /// audio capture restarted.
+    pub fn without_volumes(&self) -> Self {
+        Self {
+            system_volume: 100,
+            mic_volume: 100,
+            volumes: BTreeMap::new(),
+            ..self.clone()
+        }
+    }
+
     /// Turns beta 1's fixed mic gate and compressor, if they were switched on, into mic filters.
     pub fn migrate(&mut self) {
         let gate = self.legacy_noise_gate.take() == Some(true);
@@ -298,6 +342,7 @@ impl Default for AudioConfig {
             mic_volume: 100,
             game: false,
             apps: Vec::new(),
+            volumes: BTreeMap::new(),
             separate_tracks: false,
             filters: BTreeMap::new(),
             push_to_talk: String::new(),
@@ -794,6 +839,23 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn volumes_by_source_and_compared_without_them() {
+        let mut a = AudioConfig::default();
+        a.set_volume("MIC", 50);
+        a.set_volume("Discord.exe", 120);
+        assert_eq!(
+            (a.mic_volume, a.volume("discord.EXE"), a.volume("game")),
+            (50, 120, 100)
+        );
+        assert_eq!(a.without_volumes(), AudioConfig::default());
+        a.set_volume("discord.exe", 100);
+        assert!(a.volumes.is_empty());
+        a.volumes.insert("Game".into(), 50);
+        a.set_volume("game", 70);
+        assert_eq!((a.volumes.len(), a.volume("GAME")), (1, 70));
+    }
 
     #[test]
     fn missing_file_gives_defaults() {

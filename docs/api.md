@@ -24,7 +24,7 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `GET /api/events` (WebSocket). Server → client messages:
   - `{"type":"status", ...Status}` on connect and on every change
   - `{"type":"levels","levels":[{"source":"system","name":"System","db":-23.5,"after":-26.1}]}` about 10
-    times a second while audio is running (nothing is sent without audio). Per source, peak dBFS over the
+    times a second while audio is running (nothing is sent without audio; see `POST /api/levels/watch`). Per source, peak dBFS over the
     last ~100 ms (-60 and below is silence): `db` as the device delivered it, `after` as it goes into the
     recording (after the source's filters, push-to-talk and volume). `source` is the source's key in
     `audio.filters` (`system`, `mic`, or an app's exe name in lower case)
@@ -43,6 +43,12 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `POST /api/mark` → `204`
 - `POST /api/mic` body `{"muted": true}` → `204`: mutes or unmutes the microphone in clips (with a blip)
 - `POST /api/sound/test` body `{"volume": 60}` (0–100) → `204`: plays the save sound once at that volume
+- `POST /api/levels/watch` → `204`: a page shows level meters. For the next 5 seconds clipr keeps sending
+  levels, and while nothing is captured it runs audio for the meters alone (recording nothing; it opens the
+  microphone if that source is on). Pages call it every 2 seconds while a meter is on screen.
+- `POST /api/audio/volume` body `{"source": "mic", "volume": 80}` (0–200 %) → `200` with the saved config: sets
+  one source's volume (`system`, `mic`, `game` or an app's exe name), saved and applied at once without
+  restarting audio. The game's and apps' volumes are in `audio.volumes`, by source key (missing = 100).
 - `GET /api/preview?fps=5` → `200` `image/jpeg` (at most 640×360, `Cache-Control: no-store`), or `204` while nothing is
   captured (or before the first snapshot). The live preview: asking keeps clipr taking `fps` snapshots a second (query, 1–30, default 5) for
   the next 3 seconds, so a page polls it a few times a second while it shows the preview, and clipr stops when it
