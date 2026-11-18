@@ -86,12 +86,28 @@
 
   const last = $derived(samples[samples.length - 1]);
   /** How full the replay buffer is, in seconds, against its length. */
+  /** What clipr is doing, in a word or two (no timer), for screen readers. */
+  const doingLabel = $derived(
+    !app.connected && !st
+      ? 'Connecting'
+      : st?.state === 'recording'
+        ? `Recording${st.game ? ` ${st.game}` : ''}`
+        : st?.state === 'buffering'
+          ? `Clipping${st.game ? ` ${st.game}` : ''}`
+          : paused
+            ? 'Paused'
+            : app.config?.games.mode === 'auto'
+              ? 'Waiting for a game'
+              : 'Not clipping',
+  );
   const filled = $derived(Math.min(last?.buffer_secs ?? 0, app.config?.replay.buffer_secs ?? Infinity));
 </script>
 
 <!-- What clipr is doing, at the start of the status bar: "Recording (game) 0:12:07", "Clipping (game) · …". -->
 {#snippet doing()}
-  <span class="doing" class:rec={st?.state === 'recording'} class:buf={st?.state === 'buffering'} title={st?.encoder ? `Encoder: ${st.encoder}` : undefined} role="status">
+  <!-- Screen readers hear the state when it changes, not the timer every second. -->
+  <span class="sr-only" role="status">{doingLabel}</span>
+  <span class="doing" class:rec={st?.state === 'recording'} class:buf={st?.state === 'buffering'} title={st?.encoder ? `Encoder: ${st.encoder}` : undefined}>
     {#if !app.connected && !st}
       <span class="dot"></span>Connecting…
     {:else if st?.state === 'recording'}

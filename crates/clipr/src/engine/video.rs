@@ -222,8 +222,9 @@ fn run(settings: VideoSettings, shared: &Mutex<Shared>, stop: &AtomicBool) -> Re
 #[derive(Default)]
 struct Preview {
     snapshotter: Option<Snapshotter>,
-    /// The size the snapshotter was made for: a page that wants a bigger (or smaller) picture gets a new one.
-    max: (u32, u32),
+    /// The picture size the snapshotter makes: a page that wants a bigger (or smaller) one gets a new
+    /// snapshotter, but only when the picture really changes (asking 1920 of a 1280-wide capture doesn't).
+    out: (u32, u32),
     next: Option<Instant>,
 }
 
@@ -262,9 +263,10 @@ impl Preview {
         }
         let size = texture_size(frame);
         let max = preview::max_size();
-        if self.snapshotter.as_ref().map(Snapshotter::input_size) != Some(size) || self.max != max {
+        let out = clipr_gpu::fit_size(size, max);
+        if self.snapshotter.as_ref().map(Snapshotter::input_size) != Some(size) || self.out != out {
             self.snapshotter = Some(Snapshotter::new(gpu, size, max)?);
-            self.max = max;
+            self.out = out;
         }
         self.snapshotter.as_mut().expect("just set").start(frame)?;
         self.next = Some(now + preview::interval());

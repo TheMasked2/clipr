@@ -15,6 +15,8 @@ const DEFAULT_INTERVAL: Duration = Duration::from_millis(200);
 const DEFAULT_WIDTH: u32 = 640;
 const MIN_WIDTH: u32 = 320;
 const MAX_WIDTH: u32 = 1920;
+/// The widest picture above 15 pictures a second.
+const FAST_MAX_WIDTH: u32 = 1280;
 
 /// How long one request keeps snapshots coming. The page asks far more often, so closing it stops them soon.
 const WATCH: Duration = Duration::from_secs(3);
@@ -116,7 +118,9 @@ pub fn jpeg(fps: u32, width: u32) -> Result<Option<Arc<Vec<u8>>>, String> {
             s.interval = interval;
             s.interval_until = Some(now + WATCH);
         }
-        let width = width.clamp(MIN_WIDTH, MAX_WIDTH) & !1;
+        // Big and fast together costs the PC the most (a full-HD JPEG 30 times a second): fast stays at 1280.
+        let cap = if fps > 15 { FAST_MAX_WIDTH } else { MAX_WIDTH };
+        let width = width.clamp(MIN_WIDTH, cap) & !1;
         if width >= s.width || s.width_until.is_none_or(|t| now >= t) {
             s.width = width;
             s.width_until = Some(now + WATCH);
@@ -181,6 +185,11 @@ mod tests {
         assert_eq!(max_size(), (1280, 720));
         jpeg(5, 9000).unwrap();
         assert_eq!(max_size(), (1920, 1080));
+        // Fast asks are held to 1280 (the slow full-HD ask above still counts for its 3 s).
+        clear();
+        STATE.lock().unwrap().width_until = None;
+        jpeg(30, 1920).unwrap();
+        assert_eq!(max_size(), (1280, 720));
         drop(ClearOnDrop);
         assert_eq!(jpeg(5, 640), Ok(None));
     }

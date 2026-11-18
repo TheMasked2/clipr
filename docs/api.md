@@ -63,7 +63,7 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 - `GET /api/preview?fps=5&width=1280` → `200` `image/jpeg` (`Cache-Control: no-store`; fitted in `width`×`width·9/16`, never bigger
   than what's captured), or `204` while nothing is
   captured (or before the first snapshot). The live preview: asking keeps clipr taking `fps` snapshots a second (query, 1–30, default 5), as wide as `width`
-  (screen pixels, 320–1920, default 640; the widest page asking wins) for
+  (screen pixels, 320–1920, at most 1280 above 15 fps, default 640; the widest page asking wins) for
   the next 3 seconds, so a page polls it a few times a second while it shows the preview, and clipr stops when it
   stops asking. It shows what goes to the encoder. `503` `{"error"}` when the GPU can't make snapshots (clipr tries
   again every 10 s). Other devices get `403` unless `web.lan_preview` is on, since it shows the whole screen.
