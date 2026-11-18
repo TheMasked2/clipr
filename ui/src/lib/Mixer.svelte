@@ -43,8 +43,9 @@
   {#each app.levels as l (l.source)}
     <div class="row">
       <span class="name" title={l.name}>{l.name}</span>
-      <div class="bar" role="meter" aria-label="{l.name} level" aria-valuemin={FLOOR} aria-valuemax={0} aria-valuenow={Math.round(l.after)} title="Before filters: {fmtDb(l.db)}, recorded: {fmtDb(l.after)}">
-        {#each channels(l.after_lr, l.after) as v, i (i)}
+      <div class="bar" role="meter" aria-label="{l.name} level" aria-valuemin={FLOOR} aria-valuemax={0} aria-valuenow={Math.round(muted(l.source) ? l.db : l.after)} aria-valuetext={muted(l.source) ? `Muted in clips, coming in at ${fmtDb(l.db)}` : fmtDb(l.after)} title="{muted(l.source) ? 'Muted in clips. Coming in' : 'Before filters'}: {fmtDb(l.db)}, recorded: {fmtDb(l.after)}">
+        <!-- Muted, it shows what comes in, greyed out, like the Home mixer. -->
+        {#each muted(l.source) ? channels(l.db_lr, l.db) : channels(l.after_lr, l.after) as v, i (i)}
           <div class="fill" class:hot={v > -12} class:clip={v > -3} class:muted={muted(l.source)} style="width: {pct(v)}%"></div>
         {/each}
       </div>
@@ -54,7 +55,7 @@
         <span class="db">{fmtDb(l.after)}</span>
       {/if}
       <Fader source={l.source} label={l.name} {onsaved} />
-      <button class="mute small" class:on={muted(l.source)} aria-pressed={muted(l.source)} onclick={() => toggle(l.source)} title={l.source === 'mic' ? 'Mute the microphone in clips (the mute hotkey does the same)' : `Mute ${l.name} in clips (you still hear it)`}>{muted(l.source) ? 'Muted' : 'Mute'}</button>
+      <button class="mute small" class:on={muted(l.source)} aria-pressed={muted(l.source)} aria-label="Mute {l.name}" onclick={() => toggle(l.source)} title={l.source === 'mic' ? 'Mute the microphone in clips (the mute hotkey does the same)' : `Mute ${l.name} in clips (you still hear it)`}>{muted(l.source) ? 'Muted' : 'Mute'}</button>
     </div>
   {:else}
     <p class="muted small">
@@ -72,7 +73,7 @@
   .fill { flex: 1; background: var(--accent); transition: width 90ms linear; }
   .fill.hot { background: #f5b942; }
   .fill.clip { background: var(--danger); }
-  .fill.muted { opacity: 0.35; }
+  .fill.muted { filter: grayscale(1); opacity: 0.45; }
   .db { text-align: right; font-size: 0.8rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .badge { justify-self: end; padding: 0.05rem 0.4rem; border-radius: 0.3rem; background: var(--danger); color: #fff; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; }
   .mute { padding: 0.2rem 0.5rem; }

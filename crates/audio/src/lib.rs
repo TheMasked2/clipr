@@ -50,11 +50,17 @@ static MUTED_GEN: AtomicU64 = AtomicU64::new(0);
 static GAME_PID: AtomicU32 = AtomicU32::new(0);
 
 /// Mutes (`true`) or unmutes a source in clips, by its key (any case). It fades like push-to-talk.
+const MAX_MUTED: usize = 32;
+
 pub fn set_muted(key: &str, muted: bool) {
     let key = key.to_ascii_lowercase();
     let mut list = MUTED.lock().unwrap_or_else(|e| e.into_inner());
     let had = list.contains(&key);
     if muted && !had {
+        // Far more than there are sources; keeps a bad client from growing the status without end.
+        if list.len() >= MAX_MUTED {
+            return;
+        }
         list.push(key);
         list.sort();
     } else if !muted && had {

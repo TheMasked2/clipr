@@ -45,14 +45,14 @@
       {/if}
       <div class="ctl">
         <!-- Left and right, like OBS. Muted, it greys out and shows what comes in, so you still see it's live. -->
-        <div class="meters" class:off={muted(l.source)} role="meter" aria-label="{l.name} level" aria-valuemin={FLOOR} aria-valuemax={0} aria-valuenow={Math.round(l.after)} title="{muted(l.source) ? 'Muted in clips. Coming in' : 'Before filters'}: {fmtDb(l.db)}, recorded: {fmtDb(l.after)}" style="--y: {YELLOW_AT}%; --r: {RED_AT}%">
+        <div class="meters" class:off={muted(l.source)} role="meter" aria-label="{l.name} level" aria-valuemin={FLOOR} aria-valuemax={0} aria-valuenow={Math.round(muted(l.source) ? l.db : l.after)} aria-valuetext={muted(l.source) ? `Muted in clips, coming in at ${fmtDb(l.db)}` : fmtDb(l.after)} title="{muted(l.source) ? 'Muted in clips. Coming in' : 'Before filters'}: {fmtDb(l.db)}, recorded: {fmtDb(l.after)}" style="--y: {YELLOW_AT}%; --r: {RED_AT}%">
           {#each muted(l.source) ? channels(l.db_lr, l.db) : channels(l.after_lr, l.after) as v, i (i)}
             <div class="bar"><div class="cover" style="height: {100 - pct(v)}%"></div></div>
           {/each}
         </div>
         <Fader source={l.source} label={l.name} vertical />
       </div>
-      <button class="mute" class:on={muted(l.source)} aria-pressed={muted(l.source)} onclick={() => toggle(l.source)} title={l.source === 'mic' ? 'Mute the microphone in clips, not in your voice chat (the mute hotkey does the same)' : `Mute ${l.name} in clips (you still hear it)`}>{muted(l.source) ? 'Muted' : 'Mute'}</button>
+      <button class="mute" class:on={muted(l.source)} aria-pressed={muted(l.source)} aria-label="Mute {l.name}" onclick={() => toggle(l.source)} title={l.source === 'mic' ? 'Mute the microphone in clips, not in your voice chat (the mute hotkey does the same)' : `Mute ${l.name} in clips (you still hear it)`}>{muted(l.source) ? 'Muted' : 'Mute'}</button>
     </div>
   {:else}
     <p class="muted small empty">

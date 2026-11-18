@@ -95,7 +95,9 @@ track, and video editors show them all, so you can mute voice chat or your mic a
 [Kdenlive](https://kdenlive.org) puts each track on its own audio lane when you drop a clip in.
 
 **Mixer** shows what each source records right now, after its filters, push-to-talk and volume, from -60 to 0 dB
-(hover a meter to see the level before the filters), with a volume fader for each, like OBS. Faders apply and
+(hover a meter to see the level before the filters), left channel above right, with a volume fader and a
+**Mute** button for each, like OBS. Mute silences that source in clips right away, while buffering or
+recording (you still hear it); clipr always starts with nothing muted. Faders apply and
 save right away, even while recording (double-click one for 100 %); other changes show once saved. The mixer
 works even when nothing is recording, so you can set levels first: while it's on screen, clipr listens to your
 sources for the meters only (it records nothing, but Windows shows the mic as in use if the mic is on).

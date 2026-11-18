@@ -180,12 +180,18 @@ impl Source {
     pub fn new(
         kind: SourceKind,
         lane: usize,
-        processing: Processing,
+        mut processing: Processing,
         levels: Arc<Levels>,
         level_index: usize,
     ) -> Self {
         let now = Instant::now();
         let key = kind.key();
+        // The generation first, then the list: a change in between only means the first poll reads it again.
+        let muted_gen = crate::muted_gen();
+        let muted = crate::is_muted(&key);
+        if muted && let Some(chain) = &mut processing.chain {
+            chain.start_closed();
+        }
         Self {
             kind,
             lane,
@@ -195,9 +201,8 @@ impl Source {
             meter: Meter::new(),
             meter_after: Meter::new(),
             key,
-            muted: false,
-            // Not a real generation, so the first poll reads the list.
-            muted_gen: u64::MAX,
+            muted,
+            muted_gen,
             epoch: now,
             open: None,
             pid: None,
