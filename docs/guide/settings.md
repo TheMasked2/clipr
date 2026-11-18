@@ -197,10 +197,15 @@ runs, right-click it and choose **Go to details**: the highlighted name is the e
   pick it if a game's clips come out black. The tab also shows which game clipr detects right now.
 - **Find new games** (on): the known list is Discord's, which can miss brand-new and small games. On, a program
   that runs fullscreen from a game library folder (`steamapps\common`, `Epic Games`, `XboxGames`, GOG, EA,
-  Ubisoft, Riot, Amazon, itch) counts as a game too, named after its folder. Launchers, installers, crash
-  reporters and anti-cheat programs in those folders don't count, nor do blocked programs.
+  Ubisoft, Riot, Amazon, itch) counts as a game too, named after its folder. Launchers, installers, updaters,
+  helpers, overlays, crash reporters and anti-cheat programs in those folders don't count (judged by their exe
+  name), nor do tool folders like SteamVR or Wallpaper Engine, nor blocked programs. Turning it off, or blocking
+  the game, also ends one that's running.
 - **Extra games** (none): games clipr should always record, on top of the known list: an exe name
-  (`mygame.exe`), or the game's name as in its window title or folder (`Trust Your Gut`, at least 3 letters).
+  (`mygame.exe`), or the game's name (`Trust Your Gut`, at least 3 letters). A name counts when it is the game's
+  folder in a game library, or when a fullscreen program's window title starts with it as whole words
+  (`Trust Your Gut v0.3`, not `Trust Your Gutsy`). A game found by its title is named by that title, which
+  then stays out of Discord posts like other custom games.
   Below the list, **Ran fullscreen lately** shows up to 8 programs that ran fullscreen but weren't recorded as a
   game; **Add as a game** puts one in the list (then Save).
 - **Blocked programs** (none): exe names never treated as games, even if the known list has them. Use this

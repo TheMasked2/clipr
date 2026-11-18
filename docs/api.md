@@ -136,7 +136,8 @@ copy can "update" to the current release (still sha256-verified).
 - `GET /api/games` → `[{"name":"Valorant","clips":12,"size_bytes":...}]`
 - `GET /api/shelves` → `["funny","clutches"]`
 - `GET /api/games/unlisted` → programs that ran fullscreen lately but aren't games to clipr, newest first, up to
-  8: `[{"exe":"newgame.exe","title":"New Game"}]` (`exe` is what goes in `games.custom`)
+  8: `[{"exe":"newgame.exe","title":"New Game"}]` (`exe` is what goes in `games.custom`). Another device
+  (LAN) gets `"title": ""`: window titles stay on the PC.
 - `PATCH /api/clips` body `{"id", "title"?, "favorite"?, "shelves"?}` → `Clip`. A new title renames the file
   (same folder, same extension); the id changes, so use the returned clip.
 - `DELETE /api/clips?id=<id>` → `204`; the file (and its sidecars) go to the Recycle Bin
