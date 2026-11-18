@@ -25,8 +25,8 @@ that file resets everything.
 
 ## Video
 
-**Preview** at the top shows what clipr captures right now, a few frames a second (Home shows it too, with a
-**Hide** link). It only runs while the buffer or a recording does, and only while a page shows it, so it costs
+**Preview** at the top shows what clipr captures right now, 5 frames a second by default; pick 2, 15 or 30 in its
+corner (Home shows it too, with a **Hide** link). It only runs while the buffer or a recording does, and only while a page shows it, so it costs
 nothing otherwise. Other devices (LAN access) don't get it unless you turn on **Live preview on other devices**
 under Network, because it shows your whole screen.
 
@@ -37,6 +37,10 @@ under Network, because it shows your whole screen.
 - **Resolution** (1080p): 720p, 1080p, 1440p or Native (your monitor's resolution). The width follows your
   monitor's shape. Lower is lighter on the GPU and on file size.
 - **Frame rate** (60): 60 fps looks smoother in fast games; 30 fps halves the work.
+
+clipr remembers whether you last used Simple or Advanced. Below the settings it tells you when clips come out
+smaller than your monitor (downscaled). It never upscales: an output taller than the monitor records at the
+monitor's own size.
 
 **Advanced** shows the same settings in detail, plus more:
 
@@ -87,7 +91,8 @@ The top of the page lists the tracks your clips get and what each one holds:
 - **Separate tracks** (off): also give system audio and the microphone a track of their own.
 
 Clips hold up to 6 tracks; a source that doesn't fit is still in the mix. The clip page lets you listen to each
-track, and video editors show them all, so you can mute voice chat or your mic afterwards.
+track, and video editors show them all, so you can mute voice chat or your mic afterwards. The free editor
+[Kdenlive](https://kdenlive.org) puts each track on its own audio lane when you drop a clip in.
 
 **Live levels** shows what each source records right now, after its filters, push-to-talk and volume, from -60
 to 0 dB (hover the number to see the level before the filters). **CLIP** means the source is already distorting
@@ -252,6 +257,11 @@ the [cloud storage guide](cloud.md) for the step-by-step setup.
   this on at home. Turning it on or off works right away.
 - **First port** (7845): the first port to try for the page. If it's taken, clipr uses the next free one.
   Applies after a restart.
+
+**Away from home:** clipr doesn't open itself to the internet, and you shouldn't forward its port on your router
+(the connection isn't encrypted). To reach it from outside, put your phone and PC on a private network such as
+[Tailscale](https://tailscale.com), turn on local network access, and open the PC's address in that network. To
+share single clips, use [Cloud](#cloud).
 
 ## Appearance
 

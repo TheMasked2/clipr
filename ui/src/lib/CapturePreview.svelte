@@ -7,11 +7,32 @@
   let { hideable = false }: { hideable?: boolean } = $props();
 
   const KEY = 'clipr.preview.hidden';
-  const POLL_MS = 250;
+  const FPS_KEY = 'clipr.preview.fps';
+  const RATES = [2, 5, 15, 30];
   const RETRY_MS = 3000;
 
   let src = $state<string | null>(null);
   let hidden = $state(read());
+  // Pictures a second, remembered on this device. Higher is smoother and costs clipr a little more.
+  let fps = $state(readFps());
+
+  function readFps(): number {
+    try {
+      const v = Number(localStorage.getItem(FPS_KEY));
+      return RATES.includes(v) ? v : 5;
+    } catch {
+      return 5;
+    }
+  }
+
+  function setFps(v: number) {
+    fps = v;
+    try {
+      localStorage.setItem(FPS_KEY, String(v));
+    } catch {
+      /* private window: only for this visit */
+    }
+  }
   // Why there's no picture (the server said, or it can't be reached); empty when there's no problem.
   let problem = $state('');
 
@@ -50,9 +71,11 @@
         timer = setTimeout(poll, 1000);
         return;
       }
-      let wait = POLL_MS;
+      // Ask a little faster than the rate, so a picture is never missed.
+      const started = performance.now();
+      let wait = 0;
       try {
-        const r = await fetch('/api/preview', { cache: 'no-store' });
+        const r = await fetch(`/api/preview?fps=${fps}`, { cache: 'no-store' });
         if (r.status === 200) {
           const blob = await r.blob();
           if (!alive) return;
@@ -78,6 +101,7 @@
         problem = 'Cannot reach clipr. Is it running?';
         wait = RETRY_MS;
       }
+      if (!wait) wait = Math.max(10, 1000 / fps - (performance.now() - started));
       if (alive) timer = setTimeout(poll, wait);
     }
     poll();
@@ -90,12 +114,17 @@
 </script>
 
 <div class="preview">
-  {#if hideable}
-    <div class="bar">
-      <span class="muted small">Live preview</span>
-      <button class="link small" onclick={() => setHidden(!hidden)}>{hidden ? 'Show' : 'Hide'}</button>
-    </div>
-  {/if}
+  <div class="bar">
+    <span class="muted small">{hideable ? 'Live preview' : ''}</span>
+    <span class="ctl">
+      {#if !(hideable && hidden)}
+        <select class="small" value={fps} onchange={(e) => setFps(+e.currentTarget.value)} aria-label="Preview pictures a second">
+          {#each RATES as r (r)}<option value={r}>{r} fps</option>{/each}
+        </select>
+      {/if}
+      {#if hideable}<button class="link small" onclick={() => setHidden(!hidden)}>{hidden ? 'Show' : 'Hide'}</button>{/if}
+    </span>
+  </div>
   {#if !(hideable && hidden)}
     <div class="screen" class:live={!!src}>
       {#if src}
@@ -117,7 +146,9 @@
 
 <style>
   .preview { display: flex; flex-direction: column; gap: .4rem; }
-  .bar { display: flex; justify-content: space-between; align-items: baseline; }
+  .bar { display: flex; justify-content: space-between; align-items: center; max-width: 640px; }
+  .ctl { display: flex; align-items: center; gap: .6rem; }
+  .ctl select { padding: .1rem .3rem; font-size: .8rem; }
   .link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; }
   .screen {
     width: 100%; max-width: 640px; aspect-ratio: 16 / 9;

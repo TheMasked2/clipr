@@ -49,6 +49,7 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 LicenseFile=..\LICENSE
+SetupIconFile=..\assets\clipr.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 ; Setup and uninstall check clipr's single-instance mutex themselves (see the code section): they ask the

@@ -9,10 +9,10 @@ use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER,
-    DeleteObject, DrawTextW, EndPaint, FW_SEMIBOLD, FillRect, GetMonitorInfoW, InvalidateRect,
-    MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint, PAINTSTRUCT, SelectObject, SetBkMode,
-    SetTextColor, SetWindowRgn, TRANSPARENT,
+    BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DT_CALCRECT, DT_CENTER, DT_END_ELLIPSIS,
+    DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject, DrawTextW, EndPaint, FW_SEMIBOLD, FillRect, GetDC,
+    GetMonitorInfoW, HDC, HFONT, InvalidateRect, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
+    PAINTSTRUCT, ReleaseDC, SelectObject, SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -23,9 +23,21 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 
-const WIDTH: i32 = 280;
-const HEIGHT: i32 = 56;
-const MARGIN: i32 = 24;
+// Small on purpose: a glance in the corner, not a banner over the game (beta.3 feedback).
+/// Widest note; most fit in about 170 px.
+const MAX_WIDTH: i32 = 340;
+/// The width of the note showing now (it follows the text).
+static WIDTH: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(168);
+
+fn width() -> i32 {
+    WIDTH.load(std::sync::atomic::Ordering::Relaxed)
+}
+const HEIGHT: i32 = 32;
+/// Space around the text: left (after the bar) plus right.
+const PADDING: i32 = 24;
+const MARGIN: i32 = 16;
+const BAR: i32 = 4;
+const FONT_PX: i32 = 15;
 const SHOW_FOR: Duration = Duration::from_millis(2500);
 const HIDE_TIMER: usize = 1;
 
@@ -77,7 +89,7 @@ fn run(rx: mpsc::Receiver<(String, bool)>) {
             WS_POPUP,
             0,
             0,
-            WIDTH,
+            MAX_WIDTH,
             HEIGHT,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
@@ -93,12 +105,14 @@ fn run(rx: mpsc::Receiver<(String, bool)>) {
     unsafe {
         SetLayeredWindowAttributes(hwnd, 0, 235, LWA_ALPHA);
         SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
-        SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, WIDTH + 1, HEIGHT + 1, 16, 16), 1);
     }
     loop {
         match rx.recv_timeout(Duration::from_millis(50)) {
             Ok((text, ok)) => {
-                CURRENT.with(|c| *c.borrow_mut() = (wide(&text), ok));
+                let text = wide(&text);
+                let w = (measure(hwnd, &text) + BAR + PADDING).clamp(120, MAX_WIDTH);
+                WIDTH.store(w, std::sync::atomic::Ordering::Relaxed);
+                CURRENT.with(|c| *c.borrow_mut() = (text, ok));
                 show(hwnd);
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
@@ -115,9 +129,79 @@ fn run(rx: mpsc::Receiver<(String, bool)>) {
     }
 }
 
-fn show(hwnd: HWND) {
-    // SAFETY: valid window; plain geometry calls.
+/// The note's font. Delete it after use.
+fn font() -> HFONT {
+    let face = wide("Segoe UI");
+    // SAFETY: plain GDI call; `face` outlives it.
     unsafe {
+        CreateFontW(
+            FONT_PX,
+            0,
+            0,
+            0,
+            FW_SEMIBOLD as i32,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            5,
+            0,
+            face.as_ptr(),
+        )
+    }
+}
+
+/// Draws (or with `DT_CALCRECT` measures) NUL-terminated `text` in the note's font. Returns the text's width.
+///
+/// # Safety
+/// `dc` must be a valid device context.
+unsafe fn draw_text(dc: HDC, text: &[u16], rect: &mut RECT, flags: u32) -> i32 {
+    let len = text.iter().position(|&c| c == 0).unwrap_or(text.len());
+    if len == 0 {
+        return 0;
+    }
+    let mut text = text.to_vec();
+    // SAFETY: valid DC (caller); the font is selected for the call and deleted after.
+    unsafe {
+        let font = font();
+        let old = SelectObject(dc, font);
+        DrawTextW(
+            dc,
+            text.as_mut_ptr(),
+            len as i32,
+            rect,
+            flags | DT_SINGLELINE | DT_NOPREFIX,
+        );
+        SelectObject(dc, old);
+        DeleteObject(font);
+    }
+    rect.right - rect.left
+}
+
+/// How wide `text` is in the note's font, in pixels.
+fn measure(hwnd: HWND, text: &[u16]) -> i32 {
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: MAX_WIDTH,
+        bottom: HEIGHT,
+    };
+    // SAFETY: the window's own DC, released right after.
+    unsafe {
+        let dc = GetDC(hwnd);
+        let w = draw_text(dc, text, &mut rect, DT_CALCRECT);
+        ReleaseDC(hwnd, dc);
+        w
+    }
+}
+
+fn show(hwnd: HWND) {
+    let w = width();
+    // SAFETY: valid window; plain geometry calls. The window owns the region once set.
+    unsafe {
+        SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, w + 1, HEIGHT + 1, 10, 10), 1);
         let mut cursor = POINT { x: 0, y: 0 };
         GetCursorPos(&mut cursor);
         let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
@@ -128,9 +212,9 @@ fn show(hwnd: HWND) {
         SetWindowPos(
             hwnd,
             -1isize as HWND, // HWND_TOPMOST
-            work.right - WIDTH - MARGIN,
+            work.right - w - MARGIN,
             work.top + MARGIN,
-            WIDTH,
+            w,
             HEIGHT,
             SWP_NOACTIVATE,
         );
@@ -150,7 +234,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                 let rect = RECT {
                     left: 0,
                     top: 0,
-                    right: WIDTH,
+                    right: width(),
                     bottom: HEIGHT,
                 };
                 let bg = CreateSolidBrush(rgb(0x16, 0x16, 0x1d));
@@ -167,47 +251,27 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LP
                     &RECT {
                         left: 0,
                         top: 0,
-                        right: 6,
+                        right: BAR,
                         bottom: HEIGHT,
                     },
                     bar,
                 );
                 DeleteObject(bar);
-                let face = wide("Segoe UI");
-                let font = CreateFontW(
-                    20,
-                    0,
-                    0,
-                    0,
-                    FW_SEMIBOLD as i32,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    5,
-                    0,
-                    face.as_ptr(),
-                );
-                let old = SelectObject(dc, font);
                 SetBkMode(dc, TRANSPARENT as i32);
                 SetTextColor(dc, rgb(0xE5, 0xE5, 0xEA));
-                let mut text_rect = RECT { left: 10, ..rect };
-                // Windows may paint before any text was set: draw nothing then. The length excludes the NUL.
-                let mut text = text;
-                let len = text.iter().position(|&c| c == 0).unwrap_or(text.len());
-                if len > 0 {
-                    DrawTextW(
-                        dc,
-                        text.as_mut_ptr(),
-                        len as i32,
-                        &mut text_rect,
-                        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                    );
-                }
-                SelectObject(dc, old);
-                DeleteObject(font);
+                let mut text_rect = RECT {
+                    left: BAR + PADDING / 2,
+                    right: rect.right - PADDING / 2,
+                    ..rect
+                };
+                // Windows may paint before any text was set: that draws nothing. Text too long for the widest note
+                // ends in "…".
+                draw_text(
+                    dc,
+                    &text,
+                    &mut text_rect,
+                    DT_CENTER | DT_VCENTER | DT_END_ELLIPSIS,
+                );
                 EndPaint(hwnd, &ps);
             }
             0

@@ -28,8 +28,8 @@ pub trait Control: Send + Sync + 'static {
 
     /// The newest live preview of what is captured, as a JPEG (`None` while nothing is captured; `Err` with
     /// the reason when the GPU can't make one). Asking keeps the preview coming for a few seconds. It may take a
-    /// few milliseconds (it encodes the image).
-    fn preview(&self) -> Result<Option<std::sync::Arc<Vec<u8>>>, String> {
+    /// few milliseconds (it encodes the image). `fps` is how many pictures a second the page wants (1–30).
+    fn preview(&self, _fps: u32) -> Result<Option<std::sync::Arc<Vec<u8>>>, String> {
         Ok(None)
     }
 

@@ -12,7 +12,7 @@
 
 <header>
   <div class="inner">
-    <a class="brand" href="#/">clipr</a>
+    <a class="brand" href="#/"><img src="/icon.png" alt="" width="24" height="24" />clipr</a>
     <StatusPill />
     <nav>
       {#each links as l (l.route)}
@@ -49,6 +49,12 @@
     font-size: 1.25rem;
     letter-spacing: -0.02em;
     text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .brand img {
+    border-radius: 6px;
   }
   nav {
     margin-left: auto;
