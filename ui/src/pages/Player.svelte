@@ -70,7 +70,29 @@
   function audioTracks(): AudioTracks | undefined {
     return (video as unknown as { audioTracks?: AudioTracks } | undefined)?.audioTracks;
   }
+  // The player's volume and mute carry over from clip to clip (on this device).
+  const VOLUME_KEY = 'clipr.player.volume';
+  function restoreVolume(): void {
+    if (!video) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(VOLUME_KEY) ?? 'null') as { volume?: number; muted?: boolean } | null;
+      if (saved && typeof saved.volume === 'number') video.volume = Math.min(1, Math.max(0, saved.volume));
+      if (saved && typeof saved.muted === 'boolean') video.muted = saved.muted;
+    } catch {
+      // Blocked storage or a bad value: the browser's default volume.
+    }
+  }
+  function saveVolume(): void {
+    if (!video) return;
+    try {
+      localStorage.setItem(VOLUME_KEY, JSON.stringify({ volume: video.volume, muted: video.muted }));
+    } catch {
+      // Private window: it just isn't remembered.
+    }
+  }
+
   function onMeta() {
+    restoreVolume();
     setDur();
     // Chromium hides audioTracks behind a flag, so this may stay empty.
     const at = audioTracks();
@@ -253,6 +275,7 @@
       onloadedmetadata={onMeta}
       ondurationchange={setDur}
       ontimeupdate={() => (cur = video?.currentTime ?? 0)}
+      onvolumechange={saveVolume}
     >
       <track kind="captions" />
     </video>
