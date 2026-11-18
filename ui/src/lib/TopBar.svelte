@@ -11,7 +11,7 @@
 </script>
 
 <header>
-  <div class="inner" class:wide={router.route === 'home'}>
+  <div class="inner" class:wide={(router.route === 'home' || router.route === 'gallery')}>
     <a class="brand" href="#/"><img src="/icon.png" alt="" width="24" height="24" />clipr</a>
     <StatusPill />
     <nav>

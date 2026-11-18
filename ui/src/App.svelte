@@ -18,8 +18,8 @@
   <PinScreen />
 {:else}
   <TopBar />
-  <!-- Home is an overview with two columns, so it gets more room. -->
-  <main class:wide={router.route === 'home'}>
+  <!-- Home (an overview in two columns) and the Gallery (filters beside the clips) get more room. -->
+  <main class:wide={(router.route === 'home' || router.route === 'gallery')}>
     {#if router.route === 'gallery'}
       <Gallery />
     {:else if router.route === 'clip'}

@@ -70,8 +70,11 @@ Clips go to `Videos\clipr\<Game>\` unless you pick another folder.
 
 ## The gallery
 
-**Gallery** lists your clips grouped by game and day. Hover over a thumbnail to scrub through the clip. Filter
-by game, by clips or recordings, or search by title.
+**Gallery** lists your clips grouped by game and day. Hover over a thumbnail to scrub through the clip. The
+filters sit in a column on the left, like Settings' sections (on a phone, in a row above the clips): search by
+title, show clips, recordings or favorites, pick a game (with how many clips each has) or one of your shelves.
+
+The player remembers its volume and mute from clip to clip, on each device.
 
 Open a clip to:
 

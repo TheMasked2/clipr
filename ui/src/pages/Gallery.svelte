@@ -75,39 +75,69 @@
     return out;
   });
   const filtered = $derived(!!(q || game || shelf || favorite || kind));
+  const total = $derived(games.reduce((a, g) => a + g.clips, 0));
+  function clear(): void {
+    q = '';
+    game = '';
+    shelf = '';
+    favorite = false;
+    kind = '';
+  }
+  const kinds: { v: '' | api.ClipKind; t: string }[] = [
+    { v: '', t: 'Everything' },
+    { v: 'clip', t: 'Clips' },
+    { v: 'recording', t: 'Recordings' },
+  ];
   const upd = (u: api.Clip) => (clips = clips.map((x) => (x.id === u.id ? u : x)));
 </script>
 
 <h1>Gallery</h1>
 
-<div class="filters">
+<div class="layout">
+<!-- Filters in a column, like Settings' sections; on a phone they fold into a row above the clips. -->
+<aside class="side" aria-label="Filters">
   <input type="search" placeholder="Search clips…" bind:value={q} aria-label="Search" />
+  <div class="group">
+    <span class="gh">Show</span>
+    {#each kinds as k (k.v)}
+      <button class="item" class:active={kind === k.v} aria-pressed={kind === k.v} onclick={() => (kind = k.v)}>{k.t}</button>
+    {/each}
+    <button class="item" class:active={favorite} aria-pressed={favorite} onclick={() => (favorite = !favorite)}>★ Favorites</button>
+  </div>
+  <div class="group games">
+    <span class="gh">Games</span>
+    <button class="item" class:active={game === ''} aria-pressed={game === ''} onclick={() => (game = '')}><span>All games</span>{#if total}<small>{total}</small>{/if}</button>
+    {#each games as g (g.name)}
+      <button class="item" class:active={game === g.name} aria-pressed={game === g.name} onclick={() => (game = game === g.name ? '' : g.name)} title={g.name}><span>{g.name}</span><small>{g.clips}</small></button>
+    {/each}
+  </div>
+  {#if shelves.length}
+    <div class="group">
+      <span class="gh">Shelves</span>
+      {#each shelves as s (s)}
+        <button class="item" class:active={shelf === s} aria-pressed={shelf === s} onclick={() => (shelf = shelf === s ? '' : s)}><span>{s}</span></button>
+      {/each}
+    </div>
+  {/if}
+  {#if filtered}<button class="link small clear" onclick={clear}>Clear filters</button>{/if}
+</aside>
+
+<!-- On a phone: the same filters as two selects and chips. -->
+<div class="compact">
   <select bind:value={game} aria-label="Game">
     <option value="">All games</option>
     {#each games as g (g.name)}<option value={g.name}>{g.name} ({g.clips})</option>{/each}
   </select>
   <select bind:value={kind} aria-label="Kind">
-    <option value="">Clips and recordings</option>
-    <option value="clip">Clips</option>
-    <option value="recording">Recordings</option>
+    {#each kinds as k (k.v)}<option value={k.v}>{k.t}</option>{/each}
   </select>
-  <button class="chip" class:on={favorite} aria-pressed={favorite} onclick={() => (favorite = !favorite)}>
-    ★ Favorites
-  </button>
+  <button class="chip" class:on={favorite} aria-pressed={favorite} onclick={() => (favorite = !favorite)}>★ Favorites</button>
+  {#each shelves as s (s)}
+    <button class="chip" class:on={shelf === s} aria-pressed={shelf === s} onclick={() => (shelf = shelf === s ? '' : s)}>{s}</button>
+  {/each}
 </div>
-{#if shelves.length}
-  <div class="chips">
-    {#each shelves as s (s)}
-      <button
-        class="chip"
-        class:on={shelf === s}
-        aria-pressed={shelf === s}
-        onclick={() => (shelf = shelf === s ? '' : s)}>{s}</button
-      >
-    {/each}
-  </div>
-{/if}
 
+<div class="clips">
 {#if !loaded}
   <p class="muted">Loading…</p>
 {:else if !clips.length}
@@ -127,17 +157,35 @@
     {/each}
   </section>
 {/each}
+</div>
+</div>
 
 <style>
-  .filters { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 0.8rem; }
-  .filters input { flex: 1 1 14rem; }
-  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }
+  .layout { display: grid; grid-template-columns: 13rem minmax(0, 1fr); gap: 1.4rem; align-items: start; }
+  .side { display: flex; flex-direction: column; gap: 1rem; position: sticky; top: 4.2rem; max-height: calc(100vh - 5rem); overflow-y: auto; padding-right: 0.2rem; }
+  .side input { width: 100%; }
+  .group { display: flex; flex-direction: column; gap: 0.15rem; }
+  .gh { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 0 0 0.25rem 0.6rem; }
+  .item { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; background: transparent; border-color: transparent; color: var(--text-muted); text-align: left; padding: 0.35rem 0.6rem; }
+  .item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item small { font-variant-numeric: tabular-nums; opacity: 0.8; }
+  .item:hover { color: var(--text); }
+  .item.active { color: var(--text); background: var(--accent-soft); border-color: var(--accent-border); }
+  .clear { align-self: flex-start; margin-left: 0.6rem; }
+  .compact { display: none; }
+  .clips > section:first-child { margin-top: 0; }
   section { margin-top: 1.8rem; }
   .game { font-size: 1.25rem; margin-bottom: 0.2rem; }
   .day { margin: 0.9rem 0 0.5rem; font-weight: 500; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
+  @media (max-width: 760px) {
+    .layout { display: block; }
+    .side { position: static; max-height: none; overflow: visible; margin-bottom: 0.6rem; padding: 0; }
+    .side .group, .side .clear { display: none; }
+    .compact { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+    .compact select { flex: 1 1 8rem; }
+  }
   @media (max-width: 520px) {
     .grid { grid-template-columns: 1fr; }
-    .filters select { flex: 1 1 8rem; }
   }
 </style>
