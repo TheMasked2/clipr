@@ -147,6 +147,21 @@ setting, changing or renaming its way to a URL is `403`.
 - `POST /api/discord/test` body `{"url": "..."}` or `{"name": "#clips"}` (a saved one) → `204` after Discord
   took a short test message, `400` for a URL that isn't a Discord webhook, `502` with Discord's answer
 
+Connect Discord (OAuth2 with PKCE as the public clipr app; only from this PC: `403` from a LAN device):
+
+- `POST /api/discord/connect` body `{"channel": false}` → `{"url": "https://discord.com/oauth2/authorize?…",
+  "state": "…"}`. Open `url`; with `"channel": true` Discord also asks for a channel and makes a webhook for it.
+  `409` when clipr doesn't run on port 7845 (Discord only sends the browser back to
+  `http://127.0.0.1:7845/discord/callback`), `429` with 20 sign-ins pending.
+- `GET /api/discord/connect/{state}` → `202 {"pending": true}` until Discord sent the browser back, then
+  `{"account": {"id", "username", "name", "avatar"}, "webhook": {"url", "channel_id", "guild_id"} | null}`, or
+  `502` with what went wrong (cancelled, Discord refused). The answer can be read again until 15 minutes after
+  the start, then `404`. Nothing is saved: put `account` in `discord.account` (and the webhook in
+  `discord.webhooks`) with `PUT /api/config`. `discord.account` can only be changed from this PC (a LAN device's
+  `PUT` keeps the saved one), and its `avatar` must be on `https://cdn.discordapp.com/avatars/<id>/`.
+- `GET /discord/callback?code&state` is where Discord sends the browser; it shows a short page to close. Each
+  sign-in takes one redirect; a reload of that page says it expired.
+
 ## Files
 
 - `GET /media/<id>` → the video file, with HTTP Range support (the `<video>` element seeks with it)

@@ -211,7 +211,11 @@ icon, like *Playing clipr · VALORANT · Clipping with clipr*, with the time sin
 its window title. Recording the desktop shows nothing. It talks to the Discord app on this PC, so nothing goes online and there's nothing to sign in
 to; with Discord closed it does nothing.
 
-Post clips to Discord channels through webhooks. See the [Discord guide](discord.md) for the step-by-step
+**Discord account:** **Connect Discord** signs you in on Discord's own page and shows who's connected. No
+password or token is kept. Only on the PC running clipr.
+
+Post clips to Discord channels through webhooks: **Pick a channel in Discord** lets you choose one in Discord's
+own picker, **Paste a webhook URL** adds one by hand. See the [Discord guide](discord.md) for the step-by-step
 setup and what each option does.
 
 ## Network

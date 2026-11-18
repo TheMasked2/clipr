@@ -103,6 +103,11 @@ impl Lan {
             .send_if_modified(|v| std::mem::replace(v, on) != on || retry);
     }
 
+    /// The port the web UI listens on.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
     /// Why access from the local network is on but not working, if it isn't.
     pub fn error(&self) -> Option<String> {
         self.error.lock().unwrap().clone()
@@ -180,6 +185,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/discord/share", post(discord::share))
         .route("/api/discord/answer", post(discord::answer))
         .route("/api/discord/test", post(discord::test))
+        .route("/api/discord/connect", post(discord::connect))
+        .route("/api/discord/connect/{state}", get(discord::connect_result))
+        .route("/discord/callback", get(discord::callback))
         .route("/api/login", post(auth::login))
         .route("/media/{*id}", get(api::media))
         .route("/thumbs/{*name}", get(api::thumb))

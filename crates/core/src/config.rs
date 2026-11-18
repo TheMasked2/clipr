@@ -531,6 +531,21 @@ pub struct DiscordConfig {
     /// Rich Presence: show the game clipr clips (and its icon) in your Discord profile. Needs the Discord app
     /// running on this PC; nothing goes online.
     pub presence: bool,
+    /// The Discord account connected through "Connect Discord" (shown in Settings; no token is kept).
+    pub account: Option<DiscordAccount>,
+}
+
+/// Who connected their Discord account: only what clipr shows.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscordAccount {
+    pub id: String,
+    pub username: String,
+    /// Display name, when set.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Avatar URL on Discord's CDN, when set.
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
 
 impl Default for DiscordConfig {
@@ -540,6 +555,7 @@ impl Default for DiscordConfig {
             post_during_game: false,
             upload_limit_mb: 10,
             presence: true,
+            account: None,
         }
     }
 }

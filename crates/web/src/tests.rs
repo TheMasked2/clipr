@@ -1023,6 +1023,15 @@ async fn discord_settings_are_checked_and_urls_stay_on_the_pc() {
         (2, HOOK, "")
     );
 
+    // Nor can it plant or clear who's connected.
+    let mut planted = json(&body);
+    planted["discord"]["account"] = serde_json::json!({
+        "id": "1", "username": "someone", "name": null, "avatar": "https://cdn.discordapp.com/avatars/1/x.png"
+    });
+    let (code, _, body) = lan_call("PUT", "/api/config", Some(planted.to_string())).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(env.control.config().discord.account, None);
+
     // The UI can tell it's on another device.
     let (_, _, body) = lan_call("GET", "/api/system", None).await;
     assert_eq!(json(&body)["remote"], true);
@@ -1195,4 +1204,66 @@ async fn lan_access_opens_and_closes_without_a_restart() {
         .unwrap()
         .unwrap()
         .unwrap();
+}
+
+#[tokio::test]
+async fn connect_discord_stays_on_this_pc() {
+    let env = env();
+    // On another port Discord can't send the browser back: the UI is told why.
+    let app = router(env.state.clone());
+    let (code, _, body) = call("POST", "/api/discord/connect").body("{}").send(&app).await;
+    assert_eq!(code, StatusCode::CONFLICT);
+    assert!(json(&body)["error"].as_str().unwrap().contains("7845"));
+
+    let mut state = env.state.clone();
+    state.lan = crate::Lan::new(clipr_discord::account::REDIRECT_PORT, false);
+    let app = router(state);
+    let (code, _, body) = call("POST", "/api/discord/connect")
+        .body(r#"{"channel":true}"#)
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    let v = json(&body);
+    let url = v["url"].as_str().unwrap();
+    let st = v["state"].as_str().unwrap().to_string();
+    assert!(url.contains("webhook.incoming") && url.contains(&format!("state={st}")));
+
+    // Still on Discord's page.
+    let result = format!("/api/discord/connect/{st}");
+    let (code, _, _) = call("GET", &result).send(&app).await;
+    assert_eq!(code, StatusCode::ACCEPTED);
+    // A redirect with someone else's state does nothing.
+    let (code, _, body) = call("GET", "/discord/callback?code=x&state=forged")
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    assert!(body.contains("expired"));
+    // The user cancels on Discord: the UI hears it, also when it asks again later.
+    let cancel = format!("/discord/callback?error=access_denied&state={st}");
+    let (code, _, body) = call("GET", &cancel).send(&app).await;
+    assert_eq!(code, StatusCode::OK);
+    assert!(body.contains("cancelled"));
+    for _ in 0..2 {
+        let (code, _, body) = call("GET", &result).send(&app).await;
+        assert_eq!(code, StatusCode::BAD_GATEWAY);
+        assert!(json(&body)["error"].as_str().unwrap().contains("cancelled"));
+    }
+    // The redirect only counts once (a reload doesn't trade the code again).
+    let (code, _, body) = call("GET", &cancel).send(&app).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    assert!(body.contains("expired"));
+    let (code, _, _) = call("GET", "/api/discord/connect/unknown").send(&app).await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+
+    // Never from another device, not even with the PIN.
+    {
+        let mut c = env.control.config.lock().unwrap();
+        c.web.lan = true;
+        c.web.lan_pin = "123456".into();
+    }
+    let (code, _, _) = call("GET", "/discord/callback?code=x&state=y")
+        .peer("192.168.1.9")
+        .send(&app)
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
 }
