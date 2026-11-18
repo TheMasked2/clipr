@@ -16,6 +16,7 @@
   import LevelMeters from './LevelMeters.svelte';
   import AudioFilters from './AudioFilters.svelte';
   import DiscordSettings from './DiscordSettings.svelte';
+  import CloudSettings from './CloudSettings.svelte';
   import UpdatePanel from './UpdatePanel.svelte';
 
   let { initial }: { initial: Config } = $props();
@@ -25,7 +26,7 @@
   let savedJson = $state(untrack(() => JSON.stringify(initial)));
   const dirty = $derived(JSON.stringify(draft) !== savedJson);
 
-  const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Discord', 'Network', 'Appearance'] as const;
+  const tabs = ['General', 'Video', 'Replay', 'Audio', 'Hotkeys', 'Games', 'Library', 'Recording', 'Discord', 'Cloud', 'Network', 'Appearance'] as const;
   let tab = $state<(typeof tabs)[number]>('General');
   let advanced = $state(false);
   let saving = $state(false);
@@ -346,7 +347,9 @@
   {:else if tab === 'Recording'}
     <Field title="Maximum length (minutes)" hint="Stop a recording after this many minutes. 0 = no limit."><input type="number" min="0" bind:value={draft.recording.max_minutes} /></Field>
   {:else if tab === 'Discord'}
-    <DiscordSettings discord={draft.discord} remote={sys?.remote ?? false} />
+    <DiscordSettings discord={draft.discord} remote={sys?.remote ?? false} cloudReady={draft.cloud.enabled && !!draft.cloud.public_url} onCloud={() => (tab = 'Cloud')} />
+  {:else if tab === 'Cloud'}
+    <CloudSettings cloud={draft.cloud} remote={sys?.remote ?? false} />
   {:else if tab === 'Network'}
     <Field title="Allow access from my local network" hint="Open this page to other devices at home (your phone). They must enter a PIN. Off by default."><Toggle bind:checked={draft.web.lan} label="LAN access" /></Field>
     {#if draft.web.lan}

@@ -32,6 +32,8 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
   - `{"type":"clip_failed","message":"..."}`
   - `{"type":"library"}` when clips changed some other way (deleted, renamed, cleanup); refetch the list
   - `{"type":"discord"}` when the Discord post list changed; refetch `GET /api/discord/posts`
+  - `{"type":"cloud"}` when uploads or clips' cloud states changed (also twice a second with upload progress);
+    refetch `GET /api/cloud/uploads` and `GET /api/cloud/status`
 
 ## Actions
 
@@ -50,7 +52,7 @@ rebinding). Other machines get a generic message on `500` (details stay in clipr
 ## Settings
 
 - `GET /api/config` → the whole `Config` (see `crates/core/src/config.rs`; sections `web ui general privacy
-  replay video audio hotkeys clips games recording`, serde names as in the Rust structs, enums lowercase).
+  replay video audio hotkeys clips games recording discord cloud`, serde names as in the Rust structs, enums lowercase).
   `games.profiles` is a list of `{"game","fps","height","bitrate_kbps"}` (numbers may be null = keep
   `video.*`); `game` matches the detected game's name or exe, case-insensitive
 - `PUT /api/config` body: a whole `Config` → `200 Config` (as saved) or `400 {"error":"message"}`.
@@ -161,6 +163,35 @@ Connect Discord (OAuth2 with PKCE as the public clipr app; only from this PC: `4
   `PUT` keeps the saved one), and its `avatar` must be on `https://cdn.discordapp.com/avatars/<id>/`.
 - `GET /discord/callback?code&state` is where Discord sends the browser; it shows a short page to close. Each
   sign-in takes one redirect; a reload of that page says it expired.
+
+## Cloud
+
+The bucket is `cloud` in the config (`enabled`, `provider`: `r2|s3|b2|other`, `endpoint`, `region`, `bucket`,
+`access_key_id`, `secret_access_key`, `public_url`, `prefix`, `upload`: `after_game|now|manual`, `max_mbps`,
+`recordings`). `endpoint` and `public_url` are `https://` (or `http://` to this PC, for a local test bucket).
+The secret is like a webhook URL: a LAN device gets `""`, may send `""` to keep it, and changing the bucket
+(provider, endpoint, region, bucket, key, secret, public address, folder) from a LAN device is `403`.
+Turning uploads on or off, the timing, the speed limit and `recordings` are fine. Objects go to
+`<prefix><clip id>` (path-style URLs; virtual-hosted on `*.amazonaws.com`), signed with AWS Signature V4.
+
+- `GET /api/cloud/status` → `{ "<clip id>": { "state": "uploaded|queued|uploading|failed", "url": "..." | null,
+  "progress": 0.42 | null, "error": "..." | null } }` for every clip that has one. `url` is the public link
+  (needs `public_url`); it keeps the clip's name at upload time, so a renamed clip's link still works.
+- `GET /api/cloud/uploads` → jobs, newest first: `{ "id", "clip": {…, no local paths}, "key",
+  "state": "queued|uploading|done|failed|cancelled", "now", "error", "created", "done_bytes" }`. New clips
+  (recordings with `recordings`) are queued when cloud storage is on and `upload` isn't `manual`; they go
+  when no game runs (`after_game`) or right away (`now`). The last 50 finished jobs are kept.
+- `POST /api/cloud/upload` body `{"id": "<clip id>"}` → `{"job": 5}`: uploads now, game or not (also a retry);
+  `400` when cloud storage isn't set up or the clip is already up
+- `POST /api/cloud/cancel` body `{"job": 5}` → `204`
+- `POST /api/cloud/remove` body `{"id": "<clip id>"}` → `204` after deleting it from the bucket (the file on
+  this PC stays); `502` with the bucket's answer; `403` from a LAN device
+- `POST /api/cloud/test` body: a `cloud` object (a blank secret means the saved one) → `{"message": "..."}`
+  after writing, reading back (also through `public_url`) and deleting a small file; `400` when fields are
+  missing or malformed, `502` with what went wrong; `403` from a LAN device
+
+With cloud storage on and `public_url` set, a Discord post is the clip's link (uploaded first if it isn't up
+yet, waiting up to an hour); otherwise, or if that fails, the file as before.
 
 ## Files
 

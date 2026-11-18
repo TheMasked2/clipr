@@ -121,6 +121,18 @@ fn run() -> Result<()> {
         log_dir: paths.log_dir(),
         known_games: Arc::new(move || watcher.list_len()),
     });
+    let in_game = {
+        let status = status.clone();
+        move || status.activity().game.is_some()
+    };
+    let cloud = clipr_cloud::Uploader::start(
+        paths.data_dir.join("cloud-queue.json"),
+        {
+            let config = shared_config.clone();
+            move || config.lock().unwrap().cloud.clone()
+        },
+        in_game.clone(),
+    );
     let server = runtime.spawn(clipr_web::serve_many(
         vec![listener],
         AppState {
@@ -136,11 +148,14 @@ fn run() -> Result<()> {
                     let config = shared_config.clone();
                     move || config.lock().unwrap().discord.clone()
                 },
+                in_game,
                 {
-                    let status = status.clone();
-                    move || status.activity().game.is_some()
+                    // A post waits up to an hour for its clip to reach the bucket, then goes as a file.
+                    let cloud = cloud.clone();
+                    move |clip| cloud.link(clip, Duration::from_secs(3600))
                 },
             ),
+            cloud,
             library,
             lan,
         },

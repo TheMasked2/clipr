@@ -59,6 +59,9 @@ Two settings apply to all channels:
 - **Upload limit** (10 MB): your Discord upload limit: 10 MB on a free account, 50 MB with Nitro Basic, 500 MB
   with Nitro. A clip bigger than that is sent as a smaller copy that fits. The clip itself never changes.
 
+**Recommended: [cloud storage](cloud.md).** With your own bucket (Cloudflare R2 is free up to 10 GB) and a public
+address, a post is a link to the full clip: Discord shows a player, at full quality and with no upload limit.
+
 Full recordings are never posted by themselves. To share one, use **Share to Discord** on its page.
 
 ## Share a clip by hand

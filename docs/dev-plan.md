@@ -24,7 +24,7 @@ phases, milestones and the risks to settle early.
 | Overlay | A layered, click-through, topmost Win32 window | Not a game hook |
 | Webhooks / HTTP | `reqwest` (rustls) | |
 | Rich Presence | Discord IPC over the local pipe, our own small client | No dependency |
-| Cloud | `rusty-s3` (SigV4 presign) + `reqwest` | Works with R2, S3, B2. Avoids the heavy AWS SDK |
+| Cloud | Own SigV4 signing (`sha2`) + `ureq` | Works with R2, S3, B2. Avoids the heavy AWS SDK; checked against AWS's published example |
 | Voice (v1.x) | `ort` (ONNX Runtime) for openWakeWord, `whisper-rs` (whisper.cpp) | Local, multilingual-capable |
 | Logging / crash | `tracing`, opt-in crash reports (minidump + `module+offset` stack, reported as a GitHub issue by the user) | |
 | Packaging | Inno Setup installer + portable zip, GitHub Actions release | Same as Ultron |
@@ -45,7 +45,7 @@ crates/
   library        # SQLite clip index, thumbnails/scrub sprites, cleanup, markers
   web            # axum server, REST + WebSocket API, LAN PIN auth, embedded UI
   discord        # webhooks, embeds, post queue, Rich Presence, account connect
-  cloud          # (v1.x) S3 upload queue, share pages, online gallery generator
+  cloud          # S3 client + upload queue; (v1.x) share pages, online gallery generator
   voice          # (v1.x) wake word + STT + command grammar
   update         # opt-in GitHub release updater
 ui/              # Svelte app
@@ -200,7 +200,7 @@ A capture restart (new monitor or video settings) finishes the file and continue
 - [ ] Release v1.0 on GitHub
 
 ### v1.x (after release, roughly in this order)
-1. **Cloud:** BYO R2/S3/B2 with an in-app tutorial; storage mode local / cloud / both; upload timing
+1. **Cloud:** ✅ BYO R2/S3/B2 with an in-app tutorial; storage mode local / both (cloud only later); upload timing
    (after game / immediate throttled / manual); Discord posts as links
 2. **Share pages + online gallery:** static HTML in the bucket with OpenGraph embeds
 3. **Voice:** wake word (custom), whisper tiny command parsing, length by voice, extra commands, configurable cues

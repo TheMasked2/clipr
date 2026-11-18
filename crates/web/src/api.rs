@@ -200,6 +200,7 @@ pub async fn get_config(State(s): State<AppState>, ext: Extensions) -> Json<Conf
     let mut config = s.control.config();
     if auth::is_remote(&ext) {
         crate::discord::hide_urls(&mut config);
+        crate::cloud::hide_secret(&mut config.cloud);
     }
     Json(config)
 }
@@ -486,6 +487,7 @@ pub fn validate_config(c: &Config) -> Result<()> {
     }
     check_clips_folder(&c.clips.folder)?;
     crate::discord::check(&c.discord)?;
+    clipr_cloud::check(&c.cloud)?;
     let accent = c.ui.accent.as_bytes();
     if !(accent.len() == 7 && accent[0] == b'#' && accent[1..].iter().all(u8::is_ascii_hexdigit)) {
         bail!("The accent colour must look like #8B5CF6");
@@ -519,6 +521,18 @@ pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes)
         w.url = w.url.trim().to_string();
     }
     crate::discord::keep_urls(&ext, &s.control.config().discord, &mut config.discord)?;
+    for text in [
+        &mut config.cloud.endpoint,
+        &mut config.cloud.region,
+        &mut config.cloud.bucket,
+        &mut config.cloud.access_key_id,
+        &mut config.cloud.secret_access_key,
+        &mut config.cloud.public_url,
+        &mut config.cloud.prefix,
+    ] {
+        *text = text.trim().to_string();
+    }
+    crate::cloud::keep_bucket(&ext, &s.control.config().cloud, &mut config.cloud)?;
     validate_config(&config).map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
     if auth::is_remote(&ext) {
         // Where files go and who can reach the API are for the PC's own user to decide.
@@ -552,6 +566,7 @@ pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes)
     let mut saved = saved;
     if auth::is_remote(&ext) {
         crate::discord::hide_urls(&mut saved);
+        crate::cloud::hide_secret(&mut saved.cloud);
     }
     Ok(Json(saved))
 }
@@ -620,10 +635,13 @@ pub async fn patch_clip(State(s): State<AppState>, body: Bytes) -> ApiResult<Jso
             req.favorite,
             req.shelves.as_deref(),
         )?;
-        // A new title renames the file: posts still waiting follow it.
+        // A new title renames the file: posts still waiting and the cloud copy follow it.
         if req.title.is_some() {
             match crate::discord::clip_info(&st.library, &st.thumbs_dir, &clip) {
-                Ok(info) => st.discord.clip_renamed(&old_id, &info),
+                Ok(info) => {
+                    st.discord.clip_renamed(&old_id, &info);
+                    st.cloud.clip_renamed(&old_id, &info);
+                }
                 Err(e) => tracing::warn!("can't update Discord posts for a renamed clip: {e:#}"),
             }
         }
@@ -715,6 +733,13 @@ pub async fn trim_clip(State(s): State<AppState>, body: Bytes) -> ApiResult<Json
         };
         st.library.write_markers(&finished, &markers)?;
         let out = st.library.add_file(&finished)?;
+        // The trimmed file replaced the original: its cloud copy is out of date.
+        if req.replace {
+            match crate::discord::clip_info(&st.library, &st.thumbs_dir, &out) {
+                Ok(info) => st.cloud.clip_replaced(&info),
+                Err(e) => tracing::warn!("can't update the cloud copy of a trimmed clip: {e:#}"),
+            }
+        }
         st.library.notify_changed();
         Ok(out)
     })

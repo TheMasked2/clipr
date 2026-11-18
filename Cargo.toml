@@ -80,6 +80,7 @@ clipr-games = { path = "crates/games" }
 clipr-library = { path = "crates/library" }
 clipr-mux = { path = "crates/mux" }
 clipr-discord = { path = "crates/discord" }
+clipr-cloud = { path = "crates/cloud" }
 tower-http = { version = "0.6", features = ["fs"] }
 ureq = { version = "3", features = ["json"] }
 clipr-update = { path = "crates/update" }

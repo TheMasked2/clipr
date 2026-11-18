@@ -5,6 +5,7 @@
   import { confirmDialog, onServerEvent, toast, toastError } from '../lib/store.svelte';
   import { fmtBytes, fmtDateTime, fmtTime, fmtTimePrecise } from '../lib/format';
   import ShareDiscord from '../lib/ShareDiscord.svelte';
+  import CloudShare from '../lib/CloudShare.svelte';
 
   type AudioTracks = ArrayLike<{ label: string; language: string; enabled: boolean }>;
 
@@ -371,6 +372,7 @@
     {/if}
 
     <ShareDiscord id={clip.id} />
+    <CloudShare id={clip.id} />
 
     <div class="row">
       <a class="btn" href={clip.url} download={fileName}>Download</a>

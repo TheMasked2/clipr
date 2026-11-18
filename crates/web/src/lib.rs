@@ -6,6 +6,7 @@
 
 mod api;
 mod auth;
+mod cloud;
 mod control;
 mod discord;
 #[cfg(test)]
@@ -71,6 +72,8 @@ pub struct AppState {
     pub thumbs_dir: PathBuf,
     /// Posts clips to Discord.
     pub discord: clipr_discord::Poster,
+    /// Copies clips to the user's cloud bucket.
+    pub cloud: clipr_cloud::Uploader,
     /// Opens and closes access from the local network as `web.lan` changes.
     pub lan: Lan,
 }
@@ -182,6 +185,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/cleanup", post(api::cleanup))
         .route("/api/disk", get(api::disk))
         .route("/api/discord/posts", get(discord::posts))
+        .route("/api/cloud/uploads", get(cloud::uploads))
+        .route("/api/cloud/status", get(cloud::status))
+        .route("/api/cloud/upload", post(cloud::upload))
+        .route("/api/cloud/cancel", post(cloud::cancel))
+        .route("/api/cloud/remove", post(cloud::remove))
+        .route("/api/cloud/test", post(cloud::test))
         .route("/api/discord/share", post(discord::share))
         .route("/api/discord/answer", post(discord::answer))
         .route("/api/discord/test", post(discord::test))
@@ -252,7 +261,7 @@ async fn first_scan(state: AppState) -> Result<()> {
 }
 
 /// Adds every saved clip to the library (and queues its thumbnails) even when no browser is open, and hands
-/// it to the Discord queue.
+/// it to the Discord and cloud queues.
 async fn index_saved_clips(state: AppState) -> Result<()> {
     let mut bus = state.bus.subscribe();
     let mut shutdown = state.shutdown.clone();
@@ -264,7 +273,11 @@ async fn index_saved_clips(state: AppState) -> Result<()> {
                     let _ = tokio::task::spawn_blocking(move || {
                         match st.library.add_file(&path) {
                             Ok(clip) => match discord::clip_info(&st.library, &st.thumbs_dir, &clip) {
-                                Ok(info) => st.discord.clip_saved(&info),
+                                Ok(info) => {
+                                    // The cloud queue first: a Discord post may want the clip's link.
+                                    st.cloud.clip_saved(&info);
+                                    st.discord.clip_saved(&info);
+                                }
                                 Err(e) => tracing::warn!("can't queue {} for Discord: {e:#}", path.display()),
                             },
                             Err(e) => tracing::warn!("can't add {} to the library: {e:#}", path.display()),
@@ -416,6 +429,7 @@ async fn push_events(mut socket: WebSocket, state: AppState, remote: bool) {
     let mut bus = state.bus.subscribe();
     let mut library = state.library.subscribe();
     let mut posts = state.discord.subscribe();
+    let mut uploads = state.cloud.subscribe();
     let mut shutdown = state.shutdown.clone();
     let mut send_status = true;
     let mut meter = tokio::time::interval(LEVELS_EVERY);
@@ -486,6 +500,15 @@ async fn push_events(mut socket: WebSocket, state: AppState, remote: bool) {
                 }
                 while posts.try_recv().is_ok() {}
                 if !send_json(&mut socket, &json!({ "type": "discord" })).await {
+                    return;
+                }
+            }
+            changed = uploads.recv() => {
+                if matches!(changed, Err(broadcast::error::RecvError::Closed)) {
+                    break;
+                }
+                while uploads.try_recv().is_ok() {}
+                if !send_json(&mut socket, &json!({ "type": "cloud" })).await {
                     return;
                 }
             }

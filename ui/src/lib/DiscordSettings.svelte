@@ -9,7 +9,12 @@
 
   // The Discord channels clips go to, and when. `discord` is the settings draft, changed in place.
   // `remote`: this page is open on another device, which never sees or sets webhook URLs.
-  let { discord, remote }: { discord: DiscordConfig; remote: boolean } = $props();
+  let {
+    discord,
+    remote,
+    cloudReady = false,
+    onCloud,
+  }: { discord: DiscordConfig; remote: boolean; cloudReady?: boolean; onCloud?: () => void } = $props();
 
   const MODES: { v: PostMode; name: string; text: string }[] = [
     { v: 'ask', name: 'Ask', text: 'New clips wait on the Home page for your yes.' },
@@ -244,7 +249,14 @@
 <Field title="Post while a game runs" hint="Off: posts wait until the game closes, so uploading never costs frames. Clips you share by hand go right away.">
   <Toggle bind:checked={discord.post_during_game} label="Post while a game runs" />
 </Field>
-<Field title="Upload limit" hint="Your Discord upload limit. A bigger clip is sent as a smaller copy that fits; the clip itself never changes.">
+{#if !cloudReady}
+  <div class="banner tip">
+    <b>Recommended: cloud storage.</b> With your own bucket (Cloudflare R2 is free up to 10 GB), Discord gets a link to the
+    full-quality clip instead of a smaller copy, with no upload limit.
+    {#if onCloud}<button class="linkish" onclick={onCloud}>Set up cloud storage</button>{/if}
+  </div>
+{/if}
+<Field title="Upload limit" hint={cloudReady ? `Clips in the cloud go as links. This limit is for clips that aren't uploaded yet when they're posted.` : 'Your Discord upload limit. A bigger clip is sent as a smaller copy that fits; the clip itself never changes.'}>
   <select bind:value={discord.upload_limit_mb}>
     {#each LIMITS as l (l.v)}<option value={l.v}>{l.t}</option>{/each}
     {#if !LIMITS.some((l) => l.v === discord.upload_limit_mb)}<option value={discord.upload_limit_mb}>{discord.upload_limit_mb} MB</option>{/if}
@@ -265,4 +277,6 @@
   .note { margin: 0 0 0.8rem; }
   .okt { color: #4ade80; margin: 0; }
   .errt { color: var(--danger); margin: 0; }
+  .tip { margin: 0.4rem 0 0.8rem; background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid var(--accent-border); }
+  .linkish { margin-left: 0.4rem; }
 </style>

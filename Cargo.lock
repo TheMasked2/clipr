@@ -306,6 +306,7 @@ dependencies = [
  "clipr-audio",
  "clipr-buffer",
  "clipr-capture",
+ "clipr-cloud",
  "clipr-core",
  "clipr-discord",
  "clipr-encode",
@@ -357,6 +358,17 @@ dependencies = [
 [[package]]
 name = "clipr-cloud"
 version = "0.1.0-beta.2"
+dependencies = [
+ "anyhow",
+ "clipr-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "ureq",
+]
 
 [[package]]
 name = "clipr-core"
@@ -480,6 +492,7 @@ version = "0.1.0-beta.2"
 dependencies = [
  "anyhow",
  "axum",
+ "clipr-cloud",
  "clipr-core",
  "clipr-discord",
  "clipr-library",

@@ -218,6 +218,23 @@ Post clips to Discord channels through webhooks: **Pick a channel in Discord** l
 own picker, **Paste a webhook URL** adds one by hand. See the [Discord guide](discord.md) for the step-by-step
 setup and what each option does.
 
+## Cloud
+
+Copy clips to your own bucket on Cloudflare R2, Backblaze B2, Amazon S3 or another S3-compatible service. See
+the [cloud storage guide](cloud.md) for the step-by-step setup.
+
+- **Service** (Cloudflare R2): picks the setup steps and fills in the region (`auto` on R2).
+- **Endpoint, Region, Bucket, Access key ID, Secret access key:** where clips go and the key that may write
+  there. Only on the PC running clipr; other devices never see the secret.
+- **Public address** (empty): the bucket's public link (`https://pub-….r2.dev` or your own domain). Discord
+  gets links under it; without one, Discord gets the file.
+- **Folder in the bucket** (`clipr/`): clips go to `<folder>/<game>/<file>`.
+- **Test:** writes a small file, reads it back (and through the public address) and deletes it.
+- **Copy clips to the cloud** (off): needs the fields above.
+- **When to upload** (After the game): after the game, right away, or only by hand.
+- **Speed limit** (0 = no limit): in Mbit/s.
+- **Upload recordings too** (off): full recordings can be gigabytes.
+
 ## Network
 
 - **Allow access from my local network** (off): open the clipr page to other devices at home, like your phone.

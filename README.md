@@ -96,9 +96,11 @@ webhook, and your Discord status shows the game you're clipping.
   Discord gets a link with a playable embed.
 
 ### Cloud (bring your own)
-- ⏭ Your own **Cloudflare R2 / S3 / Backblaze B2** bucket, with a step-by-step tutorial in the app.
-- ⏭ Storage mode: **local only**, **cloud only** or **both** (both is the safest).
-- ⏭ Upload timing, configurable and explained: after the game closes (default, Pumpkin-style), immediately
+- ✅ Your own **Cloudflare R2 / S3 / Backblaze B2** bucket, with a step-by-step tutorial in the app. Clips in
+  the cloud get a cloud icon in the gallery.
+- ✅ Storage mode: **local only** or **both** (both is the safest). ⏭ **Cloud only** comes with the online
+  gallery.
+- ✅ Upload timing, configurable and explained: after the game closes (default, Pumpkin-style), immediately
   with a bandwidth cap, or manual.
 - ⏭ **Static share pages** per clip (a player plus OpenGraph embed, served straight from your bucket) and a
   **full online gallery**, so you can browse your clips from anywhere, read-only.
@@ -154,7 +156,7 @@ webhook, and your Discord status shows the game you're clipping.
 | `crates/clipr` | The `clipr.exe` binary: tray, single instance, lifecycle |
 | `crates/core` | Config, paths, logging, status, event bus |
 | `crates/web` | Local web server (REST + WebSocket) with the UI embedded |
-| `crates/*` (others) | capture, gpu, encode, audio, buffer, mux, games, library, discord, update (see `docs/dev-plan.md`); cloud and voice are placeholders for v1.x |
+| `crates/*` (others) | capture, gpu, encode, audio, buffer, mux, games, library, discord, cloud, update (see `docs/dev-plan.md`); voice is a placeholder for v1.x |
 | `ui/` | The Svelte web UI, built into `ui/dist` and embedded in the exe |
 | `docs/dev-plan.md` | Phased development plan and milestones |
 | `legacy/ultron/` | [TheMasked2/ultron](https://github.com/TheMasked2/ultron) at `5590c12`, MIT. Voice clipping on OBS: game detection, wake word + STT, installer, updater. Reference only. |
