@@ -324,7 +324,7 @@ impl Library {
     /// Call when the recordings-folder setting changes (`None`: recordings go to the clips folder). Files there
     /// get ids starting with [`RECORDINGS_PREFIX`]; the next [`scan`](Self::scan) indexes them.
     pub fn set_recordings_dir(&self, dir: Option<PathBuf>) {
-        let dir = dir.filter(|d| *d != self.clips_dir());
+        let dir = dir.filter(|d| !clipr_core::config::same_folder(d, &self.clips_dir()));
         let mut current = self
             .inner
             .recordings_dir
@@ -335,10 +335,23 @@ impl Library {
         }
         *current = dir;
         drop(current);
+        // The old folder's recordings leave the library (the files stay); so do their thumbnails.
+        let gone: Vec<String> = self
+            .all_rows()
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|r| r.id)
+                    .filter(|id| id.starts_with(RECORDINGS_PREFIX))
+                    .collect()
+            })
+            .unwrap_or_default();
         let _ = lock(&self.inner.db).execute(
             "DELETE FROM clips WHERE substr(id, 1, ?1) = ?2",
             params![RECORDINGS_PREFIX.len() as i64, RECORDINGS_PREFIX],
         );
+        for id in &gone {
+            remove_thumbs(&self.inner.thumbs_dir, id);
+        }
         *lock(&self.inner.last_scan) = None;
     }
 
@@ -833,8 +846,12 @@ impl Library {
         }
         if cfg.max_total_gb > 0 {
             let limit = i64::from(cfg.max_total_gb) << 30;
-            let mut total: i64 =
-                rows.iter().map(|r| r.size).sum::<i64>() - doomed.iter().map(|r| r.size).sum::<i64>();
+            let mut total: i64 = rows
+                .iter()
+                .filter(|r| self.root_present(&r.id))
+                .map(|r| r.size)
+                .sum::<i64>()
+                - doomed.iter().map(|r| r.size).sum::<i64>();
             for r in rows
                 .iter()
                 .rev()

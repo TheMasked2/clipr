@@ -36,11 +36,15 @@
     }
   }
 
+  // Only the newest answer counts: an older, slower one mustn't overwrite it.
+  let asked = 0;
   async function load(l?: { max_age_days: number; max_total_gb: number }) {
+    const n = ++asked;
     try {
-      preview = await api.cleanupPreview(l, HOURS);
+      const p = await api.cleanupPreview(l, HOURS);
+      if (n === asked) preview = p;
     } catch {
-      preview = null;
+      if (n === asked) preview = null;
     }
   }
 

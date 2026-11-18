@@ -554,7 +554,7 @@ pub fn validate_config(c: &Config) -> Result<()> {
             norm_path(&rec.to_string_lossy()),
             norm_path(&c.clips.dir().to_string_lossy()),
         );
-        if rec.starts_with(&format!("{clips}\\")) || clips.starts_with(&format!("{rec}\\")) {
+        if rec == clips || rec.starts_with(&format!("{clips}\\")) || clips.starts_with(&format!("{rec}\\")) {
             bail!("The recordings folder can't be inside the clips folder (or the other way round)");
         }
     }

@@ -487,10 +487,25 @@ impl RecordingConfig {
         }
     }
 
-    /// The separate recordings folder, if one is set (and it isn't the clips folder).
+    /// The separate recordings folder, if one is set (and it isn't the clips folder, however it's written).
     pub fn own_dir(&self, clips: &ClipsConfig) -> Option<std::path::PathBuf> {
-        Some(self.dir(clips)).filter(|d| *d != clips.dir())
+        Some(self.dir(clips)).filter(|d| !same_folder(d, &clips.dir()))
     }
+}
+
+/// A Windows path compared the way Windows does: any case, `/` or `\`, no trailing separator.
+pub fn folder_key(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    match s.trim_end_matches('\\') {
+        "" => s,
+        t if t.ends_with(':') => format!("{t}\\"),
+        t => t.to_string(),
+    }
+}
+
+/// Whether two paths name the same folder (see [`folder_key`]).
+pub fn same_folder(a: &std::path::Path, b: &std::path::Path) -> bool {
+    folder_key(a) == folder_key(b)
 }
 
 impl Default for ClipsConfig {
@@ -856,6 +871,27 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_recordings_folder_written_like_the_clips_folder_is_the_same_folder() {
+        let clips = ClipsConfig {
+            folder: r"D:\Clips".into(),
+            ..ClipsConfig::default()
+        };
+        for same in [r"d:\clips", "D:/Clips/", r"D:\Clips\"] {
+            let rec = RecordingConfig {
+                folder: same.into(),
+                ..RecordingConfig::default()
+            };
+            assert_eq!(rec.own_dir(&clips), None, "{same}");
+        }
+        let rec = RecordingConfig {
+            folder: r"E:\Recordings".into(),
+            ..RecordingConfig::default()
+        };
+        assert_eq!(rec.own_dir(&clips), Some(r"E:\Recordings".into()));
+        assert_eq!(folder_key(std::path::Path::new("C:/")), r"c:\");
+    }
 
     #[test]
     fn volumes_by_source_and_compared_without_them() {
