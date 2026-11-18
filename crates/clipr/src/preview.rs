@@ -25,8 +25,10 @@ struct Frame {
 
 struct State {
     watch_until: Option<Instant>,
-    /// The rate the page asked for last.
+    /// The fastest rate a page asked for within the last [`WATCH`], so two pages (the PC at 30 fps, a phone at
+    /// 2) don't take turns; a slower one takes over once the fast one stops asking.
     interval: Duration,
+    interval_until: Option<Instant>,
     latest: Option<Arc<Frame>>,
     /// Why the GPU can't make snapshots right now (the video thread tries again a little later).
     error: Option<String>,
@@ -35,6 +37,7 @@ struct State {
 static STATE: Mutex<State> = Mutex::new(State {
     watch_until: None,
     interval: DEFAULT_INTERVAL,
+    interval_until: None,
     latest: None,
     error: None,
 });
@@ -91,8 +94,13 @@ impl Drop for ClearOnDrop {
 pub fn jpeg(fps: u32) -> Result<Option<Arc<Vec<u8>>>, String> {
     let frame = {
         let mut s = state();
-        s.watch_until = Some(Instant::now() + WATCH);
-        s.interval = Duration::from_millis(1000 / u64::from(fps.clamp(1, 30)));
+        let now = Instant::now();
+        s.watch_until = Some(now + WATCH);
+        let interval = Duration::from_millis(1000 / u64::from(fps.clamp(1, 30)));
+        if interval <= s.interval || s.interval_until.is_none_or(|t| now >= t) {
+            s.interval = interval;
+            s.interval_until = Some(now + WATCH);
+        }
         match (&s.latest, &s.error) {
             (Some(frame), _) => frame.clone(),
             (None, Some(error)) => return Err(error.clone()),
@@ -142,6 +150,9 @@ mod tests {
         jpeg(30).unwrap();
         assert_eq!(interval(), Duration::from_millis(33));
         jpeg(100).unwrap();
+        assert_eq!(interval(), Duration::from_millis(33));
+        // A slower page doesn't slow down a faster one that still watches.
+        jpeg(2).unwrap();
         assert_eq!(interval(), Duration::from_millis(33));
         drop(ClearOnDrop);
         assert_eq!(jpeg(5), Ok(None));
