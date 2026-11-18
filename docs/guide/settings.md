@@ -49,7 +49,7 @@ under Network, because it shows your whole screen.
 - **Output height (px)** (1080): the width follows the monitor's shape. 0 = the monitor's own resolution.
 - **Monitor** (primary): which monitor to capture: the primary one, or a specific one in Windows' order.
 - **GPU priority** (off): let clipr's capture go a little ahead of the game on the GPU. Try it if clips
-  stutter while a game runs at uncapped FPS; turn it off again if the game loses frames.
+  stutter: it helps on some PCs and makes clips skip frames on others, so try it both ways.
 
 **Per-game profiles** (none): use other video settings while a particular game runs, for example a higher
 bitrate for a fast shooter. Match by the game's name or exe (`cs2.exe`), in any case. Leave a box empty to keep
@@ -205,6 +205,11 @@ clips use.
 ## Recording
 
 - **Maximum length (minutes)** (0 = no limit): stop a full recording after this many minutes.
+
+While a recording runs it's written so that a crash or power cut keeps everything up to the last second. When
+it stops, clipr adds an index to the file (a second or two, even for hours of video), so it opens and seeks at
+once in the gallery and in editors. Recordings made with beta.3 or older get that index the next time clipr
+starts.
 
 ## Discord
 

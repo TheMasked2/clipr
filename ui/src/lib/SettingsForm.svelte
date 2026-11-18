@@ -212,7 +212,7 @@
           {/if}
         </select>
       </Field>
-      <Field title="GPU priority" hint="Let clipr's capture go a little ahead of the game on the GPU. Try it if clips stutter while a game runs at uncapped FPS; turn it off again if your game loses frames. Off by default."><Toggle bind:checked={draft.video.gpu_priority} label="GPU priority" /></Field>
+      <Field title="GPU priority" hint="Let clipr's capture go a little ahead of the game on the GPU. It helps on some PCs and makes clips skip frames on others: if your clips stutter, try it both ways. Off by default."><Toggle bind:checked={draft.video.gpu_priority} label="GPU priority" /></Field>
     {/if}
     <Field title="Per-game profiles" hint="Use other video settings while a particular game runs. Match by the game's name or exe (cs2.exe), any case. Leave a box empty to keep the normal value above. Capture restarts when the game changes." stacked>
       <div class="profiles">

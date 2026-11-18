@@ -184,7 +184,7 @@ fn desc(adapter: &IDXGIAdapter1) -> Result<DXGI_ADAPTER_DESC1> {
 
 /// Gives clipr's GPU work a little priority over the game's, so a game running at uncapped FPS can't starve
 /// the capture (stutter and dropped frames in clips). Opt-in: beta.3 used the HIGH class and the top GPU
-/// thread priority, which cost a game frames on an RTX 4070 Ti, so this stays at ABOVE_NORMAL. Best effort.
+/// thread priority, and clips skipped more frames with it on an RTX 4070 Ti, so this stays at ABOVE_NORMAL. Best effort.
 pub fn raise_gpu_priority(_gpu: &Gpu) {
     const ABOVE_NORMAL: i32 = 3;
     // SAFETY: the current-process pseudo handle; a valid D3DKMT_SCHEDULINGPRIORITYCLASS.

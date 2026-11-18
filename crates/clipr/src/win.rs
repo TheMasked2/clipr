@@ -215,3 +215,34 @@ pub fn is_elevated() -> bool {
     unsafe { CloseHandle(token) };
     ok != 0 && elevation.TokenIsElevated != 0
 }
+
+/// Opts clipr out of Windows 11's power throttling (EcoQoS). Windows applies it to background programs
+/// without a window, which is what clipr is while you play: its threads then move to efficiency cores and
+/// its timers get coalesced, and a 60 fps frame loop misses its deadlines (seen on an i7-13700K). OBS
+/// opts out for the same reason. Best effort.
+pub fn disable_power_throttling() {
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+        PROCESS_POWER_THROTTLING_STATE, ProcessPowerThrottling, SetProcessInformation,
+    };
+    let state = PROCESS_POWER_THROTTLING_STATE {
+        Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+            | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+        // Controlled, and off.
+        StateMask: 0,
+    };
+    // SAFETY: the current-process pseudo handle and a valid struct of the size passed.
+    let ok = unsafe {
+        SetProcessInformation(
+            GetCurrentProcess(),
+            ProcessPowerThrottling,
+            (&raw const state).cast(),
+            size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
+        )
+    };
+    if ok == 0 {
+        tracing::debug!("couldn't opt out of power throttling (older Windows?)");
+    }
+}

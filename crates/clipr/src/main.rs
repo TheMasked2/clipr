@@ -54,6 +54,7 @@ fn run() -> Result<()> {
 
     let _log_guard = clipr_core::logging::init(&paths.log_dir())?;
     tracing::info!("clipr {} starting", clipr_core::VERSION);
+    win::disable_power_throttling();
     if win::is_elevated() {
         tracing::warn!(
             "clipr runs as administrator: game capture can fail and the settings may belong to another account; start it normally"

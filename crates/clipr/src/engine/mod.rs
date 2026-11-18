@@ -633,7 +633,20 @@ impl Supervisor {
         if self.pipeline.is_none() {
             return;
         }
-        tracing::debug!("last 10 s: {d:?}");
+        // Logged at info level so a log sent in with "my clips stutter" shows what happened.
+        let total = d.fresh + d.repeated;
+        // A still desktop repeats frames by design (Windows sends a picture only when something changes).
+        if self.game.is_some() && total > 0 && (d.repeated * 5 > total || d.dropped + d.late > 0) {
+            tracing::info!(
+                "last 10 s: {} new frames, {} repeated (no new picture from Windows), {} late, {} dropped",
+                d.fresh,
+                d.repeated,
+                d.late,
+                d.dropped
+            );
+        } else {
+            tracing::debug!("last 10 s: {d:?}");
+        }
         if d.dropped + d.late > 30 {
             tracing::warn!(
                 "{} late and {} dropped frames in 10 s: something is starving clipr (a game at uncapped \

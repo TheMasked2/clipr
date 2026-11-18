@@ -88,7 +88,7 @@ pub struct VideoConfig {
     /// Which monitor to capture: 0 = the primary monitor, 1, 2, … = that monitor in Windows' order.
     pub monitor: u32,
     /// Give clipr's capture work a raised GPU priority, so a game running at uncapped FPS can't starve it
-    /// (stutter in clips). Off by default: on some PCs (seen on an RTX 4070 Ti) it costs the game frames.
+    /// (stutter in clips). Off by default: on some PCs (seen on an RTX 4070 Ti) clips skipped more frames with it.
     /// Replaces beta.3's `high_priority`, which was on by default and used a higher GPU class.
     pub gpu_priority: bool,
 }
