@@ -201,6 +201,7 @@ pub async fn set_volume(State(s): State<AppState>, body: Bytes) -> ApiResult<Jso
         st.control
             .set_config(config)
             .map_err(|e| LibraryError::Invalid(format!("{e:#}")))?;
+        st.bus.emit(clipr_core::events::Event::ConfigChanged);
         Ok(st.control.config())
     })
     .await?;
@@ -592,6 +593,7 @@ pub fn validate_config(c: &Config) -> Result<()> {
         ("Toggle recording", &h.toggle_recording),
         ("Mark", &h.mark),
         ("Mute microphone", &h.toggle_mic),
+        ("In-game overlay", &h.overlay),
     ];
     let mut used: Vec<(u32, u32, &str)> = Vec::new();
     for (name, text) in keys {
@@ -650,6 +652,7 @@ pub async fn put_config(State(s): State<AppState>, ext: Extensions, body: Bytes)
         st.control
             .set_config(config)
             .map_err(|e| LibraryError::Invalid(format!("{e:#}")))?;
+        st.bus.emit(clipr_core::events::Event::ConfigChanged);
         if before != after {
             st.library.set_clips_dir(after.0);
             st.library.set_recordings_dir(after.1);

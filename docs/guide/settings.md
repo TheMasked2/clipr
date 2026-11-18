@@ -184,6 +184,8 @@ it off. A hotkey turns red when two actions share the same combination.
 - **Mark moment** (off): marks this moment. Markers show on the clip's timeline.
 - **Mute / unmute microphone** (off): mutes your mic in clips (not in your voice chat), with a short blip.
   Press it again to unmute.
+- **In-game overlay** (`Alt+F11`): opens the Gallery and Settings over your game, and closes them again (see
+  [the in-game overlay](getting-started.md#the-in-game-overlay)). Not `Alt+Z`, which NVIDIA's overlay uses.
 
 ## Games
 

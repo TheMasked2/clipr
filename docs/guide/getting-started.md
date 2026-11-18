@@ -47,6 +47,7 @@ part of it:
 | Save the whole buffer ("long clip") | off |
 | Pause or resume the buffer | off |
 | Mark a moment | off |
+| Open or close the [in-game overlay](#the-in-game-overlay) | `Alt+F11` |
 
 Set or change them under [Settings → Hotkeys](settings.md#hotkeys).
 
@@ -107,6 +108,21 @@ Open a clip to:
 - **Share to Discord** (see [Discord](discord.md)), **Show in folder** or **Delete** it.
 
 Favorites are never removed by the automatic cleanup.
+
+### The in-game overlay
+
+Press `Alt+F11` in a game to open the Gallery and Settings over it: watch the clip you just saved, trim it,
+share it or fix a setting, without alt-tabbing out. The game keeps running, dimmed, behind it. Press `Alt+F11`
+again, `Esc`, **Back to game** or click beside the panel to go back; the game gets the focus back.
+
+- It's never in your clips, screenshots or screen shares: window capture only takes the game's window, and
+  Windows leaves the overlay out of every screen capture.
+- It works over games in borderless or windowed mode, which is what most games on Windows 10 and 11 use, even
+  when set to "fullscreen". A game in true exclusive fullscreen is minimised while the overlay is open.
+- It's a normal window, not a hook into the game, so anti-cheat has nothing to object to.
+- It needs Microsoft Edge WebView2, which comes with Windows 11 and up-to-date Windows 10. Without it, the
+  hotkey opens the Gallery in your browser instead.
+- Change or turn off the hotkey under [Settings → Hotkeys](settings.md#hotkeys).
 
 ## Full recordings
 

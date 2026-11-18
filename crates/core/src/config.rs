@@ -373,6 +373,9 @@ pub struct HotkeyConfig {
     pub mark: String,
     /// Mutes or unmutes the microphone in clips (not in your voice chat). Empty (the default) turns it off.
     pub toggle_mic: String,
+    /// Opens or closes the in-game overlay (the Gallery and Settings over the game). Not `Alt+Z`, which is
+    /// NVIDIA's overlay.
+    pub overlay: String,
 }
 
 impl Default for HotkeyConfig {
@@ -384,6 +387,7 @@ impl Default for HotkeyConfig {
             toggle_recording: "Alt+F9".into(),
             mark: String::new(),
             toggle_mic: String::new(),
+            overlay: "Alt+F11".into(),
         }
     }
 }

@@ -128,6 +128,7 @@
       toggle_recording: draft.hotkeys.toggle_recording,
       mark: draft.hotkeys.mark,
       toggle_mic: draft.hotkeys.toggle_mic,
+      overlay: draft.hotkeys.overlay,
     }),
   );
   const addProfile = () => draft.games.profiles.push({ game: '', fps: null, height: null, bitrate_kbps: null });
@@ -366,6 +367,7 @@
     <Field title="Start / stop recording" hint="Starts or stops a full recording." error={bad.has('toggle_recording')}><HotkeyInput bind:value={draft.hotkeys.toggle_recording} conflict={bad.has('toggle_recording')} /></Field>
     <Field title="Mark moment" hint="Marks this moment; markers show on the clip's timeline." error={bad.has('mark')}><HotkeyInput bind:value={draft.hotkeys.mark} conflict={bad.has('mark')} /></Field>
     <Field title="Mute / unmute microphone" hint="Mutes your mic in clips (not in your voice chat), with a short blip. Press again to unmute. Empty (the default) turns it off." error={bad.has('toggle_mic')}><HotkeyInput bind:value={draft.hotkeys.toggle_mic} conflict={bad.has('toggle_mic')} /></Field>
+    <Field title="In-game overlay" hint="Opens the Gallery and Settings over your game, so you can watch, trim or share a clip without alt-tabbing. Press again (or Esc) to go back to the game. It's never in your clips. Empty turns it off." error={bad.has('overlay')}><HotkeyInput bind:value={draft.hotkeys.overlay} conflict={bad.has('overlay')} /></Field>
   {:else if tab === 'Games'}
     <Field title="Mode" hint="Game only buffers while a known game runs and does nothing otherwise. Desktop buffers your monitor all the time, game or not.">
       <div class="row">

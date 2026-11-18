@@ -112,6 +112,8 @@ export interface Config {
     toggle_recording: string;
     mark: string;
     toggle_mic: string;
+    /** Opens or closes the in-game overlay. */
+    overlay: string;
   };
   clips: { folder: string; max_age_days: number; max_total_gb: number; min_free_gb: number };
   games: {
@@ -314,7 +316,9 @@ export type ServerEvent =
   | { type: 'library' }
   | { type: 'levels'; levels: Level[] }
   | { type: 'discord' }
-  | { type: 'cloud' };
+  | { type: 'cloud' }
+  /** The settings were saved (by any page, the overlay included): load them again. */
+  | { type: 'config' };
 
 export class ApiError extends Error {
   status: number;
