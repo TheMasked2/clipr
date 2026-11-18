@@ -116,10 +116,10 @@ share it or fix a setting, without alt-tabbing out. The game keeps running, dimm
 again, `Esc`, **Back to game** or click beside the panel to go back; the game gets the focus back.
 
 - It's never in your clips, screenshots or screen shares: window capture only takes the game's window, and
-  Windows leaves the overlay out of every screen capture.
+  Windows 10 (2004 or newer) and 11 leave the overlay out of screen capture.
 - It works over games in borderless or windowed mode, which is what most games on Windows 10 and 11 use, even
   when set to "fullscreen". A game in true exclusive fullscreen is minimised while the overlay is open.
-- It's a normal window, not a hook into the game, so anti-cheat has nothing to object to.
+- It's a normal window, not a hook into the game: nothing is injected into it.
 - It needs Microsoft Edge WebView2, which comes with Windows 11 and up-to-date Windows 10. Without it, the
   hotkey opens the Gallery in your browser instead.
 - Change or turn off the hotkey under [Settings → Hotkeys](settings.md#hotkeys).

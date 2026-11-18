@@ -1,6 +1,6 @@
 <script lang="ts">
   import { router } from './lib/router.svelte';
-  import { app, startConnection } from './lib/store.svelte';
+  import { app, loadConfig, startConnection } from './lib/store.svelte';
   import TopBar from './lib/TopBar.svelte';
   import Toasts from './lib/Toasts.svelte';
   import ConfirmDialog from './lib/ConfirmDialog.svelte';
@@ -16,6 +16,16 @@
   // In the in-game overlay the page is a panel over the dimmed game: the page itself is see-through.
   if (inOverlay) document.documentElement.classList.add('overlay');
   const overlayKey = $derived(app.config?.hotkeys.overlay ?? '');
+  let downOnBackdrop = false;
+  let closeBtn = $state<HTMLButtonElement>();
+  // Opened again over the game: settings may have changed while it was hidden, and the keyboard goes to the
+  // panel (Esc works straight away).
+  if (inOverlay) {
+    window.addEventListener('clipr-overlay-open', () => {
+      void loadConfig();
+      closeBtn?.focus();
+    });
+  }
 
   /** Esc closes the overlay, unless it's closing something else first (a dialog, a menu, a hotkey box). */
   function onKey(e: KeyboardEvent) {
@@ -50,15 +60,21 @@
   <!-- Another device without a session: only the PIN screen, nothing that would call the API. -->
   <PinScreen />
 {:else if inOverlay}
-  <!-- A click beside the panel closes the overlay, like Esc. -->
+  <!-- A click beside the panel closes the overlay, like Esc: pressed and let go there (not a drag out of the
+       panel, a seek or a text selection). -->
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="ov-backdrop" onclick={(e) => e.target === e.currentTarget && closeOverlay()}>
-    <div class="ov-panel" role="dialog" aria-label="clipr overlay">
-      <button class="ov-close" onclick={closeOverlay} title="Back to the game (Esc{overlayKey ? ` or ${overlayKey}` : ''})">
+  <div
+    class="ov-backdrop"
+    onpointerdown={(e) => (downOnBackdrop = e.target === e.currentTarget)}
+    onclick={(e) => downOnBackdrop && e.target === e.currentTarget && closeOverlay()}
+  >
+    <div class="ov-panel" role="dialog" aria-modal="true" aria-label="clipr overlay">
+      <button class="ov-close" bind:this={closeBtn} onclick={closeOverlay} title="Back to the game (Esc{overlayKey ? ` or ${overlayKey}` : ''})">
         Back to game {#if overlayKey}<kbd>{overlayKey}</kbd>{/if} ×
       </button>
       {@render pages()}
     </div>
+    <Toasts />
   </div>
 {:else}
   {@render pages()}

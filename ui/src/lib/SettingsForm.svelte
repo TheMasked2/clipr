@@ -29,6 +29,22 @@
   let savedJson = $state(untrack(() => JSON.stringify(initial)));
   let pinShown = $state(false);
   const dirty = $derived(JSON.stringify(draft) !== savedJson);
+  // The settings were saved somewhere else (the in-game overlay, another tab) while this page is open: take
+  // them over when nothing is being edited here, else say so, so Save doesn't quietly put the old ones back.
+  let elsewhere = $state<string | null>(null);
+  $effect(() => {
+    const json = JSON.stringify(initial);
+    untrack(() => {
+      if (json === savedJson) return;
+      if (dirty) {
+        elsewhere = json;
+      } else {
+        savedJson = json;
+        Object.assign(draft, clone(initial));
+        elsewhere = null;
+      }
+    });
+  });
 
   /** A fader saved a volume on its own: take it into the draft and the saved copy, so it isn't a pending
    * change (and Save doesn't put the old value back). */
@@ -104,6 +120,7 @@
       const lanChanged = JSON.parse(savedJson).web?.lan !== c.web.lan;
       savedJson = JSON.stringify(c);
       Object.assign(draft, clone(c));
+      elsewhere = null;
       justSaved = true;
       // The server opens or closes the network port right after saving; show if it couldn't.
       if (lanChanged) setTimeout(() => api.getSystem().then((s) => (sys = s)).catch(() => {}), 500);
@@ -115,6 +132,8 @@
     }
   }
   function revert() {
+    if (elsewhere) savedJson = elsewhere;
+    elsewhere = null;
     Object.assign(draft, clone(JSON.parse(savedJson)));
     applyAccent(draft.ui.accent);
     error = '';
@@ -451,6 +470,7 @@
   <span class="msg">
     {#if error}<span class="errt">{error}</span>
     {:else if justSaved}<span class="okt">Saved</span>
+    {:else if dirty && elsewhere}<span class="errt">Settings were changed elsewhere since. Save puts yours over them; Revert takes theirs.</span>
     {:else if dirty}You have unsaved changes
     {/if}
   </span>
