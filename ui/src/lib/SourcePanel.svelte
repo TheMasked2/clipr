@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as api from './api';
   import type { Config } from './api';
-  import { app, saveConfig, toastError } from './store.svelte';
+  import { app, confirmDialog, quickEdit, saveDraft, toastError } from './store.svelte';
   import Field from './Field.svelte';
   import Fader from './Fader.svelte';
   import AudioFilters from './AudioFilters.svelte';
@@ -62,7 +62,7 @@
     if (!draft) return;
     saving = true;
     try {
-      await saveConfig(clone(draft));
+      await saveDraft(clone(draft));
       onclose();
     } catch (e) {
       toastError(e);
@@ -71,21 +71,33 @@
     }
   }
 
-  function removeApp() {
-    if (!draft || !source) return;
+  const lower = (s: string) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+
+  /** Drops the app and its volume and filters (unsaved edits in this panel go with it). */
+  async function removeApp() {
+    if (!source) return;
     const key = source;
-    draft.audio.apps = draft.audio.apps.filter((a) => a.trim().toLowerCase() !== key);
-    void save();
+    if (!(await confirmDialog(`Stop recording ${title} on its own track? Its volume and filters are removed too.`, 'Remove', true))) return;
+    saving = true;
+    try {
+      await quickEdit((c) => {
+        c.audio.apps = c.audio.apps.filter((a) => lower(a.trim()) !== key);
+        delete c.audio.volumes[key];
+        delete c.audio.filters[key];
+      });
+      onclose();
+    } catch (e) {
+      toastError(e);
+    } finally {
+      saving = false;
+    }
   }
 </script>
 
 <dialog
   bind:this={dlg}
   aria-label="{title} settings"
-  oncancel={(e) => {
-    e.preventDefault();
-    onclose();
-  }}
+  onclose={() => source && onclose()}
 >
   {#if draft && source}
     <header>

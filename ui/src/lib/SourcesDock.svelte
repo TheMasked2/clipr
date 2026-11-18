@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { Config } from './api';
   import { app, quickEdit, toastError } from './store.svelte';
   import SourcePanel from './SourcePanel.svelte';
@@ -15,12 +16,14 @@
   let newApp = $state('');
   let busy = $state(0);
 
-  async function change(edit: (c: Config) => void) {
+  async function change(edit: (c: Config) => void): Promise<boolean> {
     busy++;
     try {
       await quickEdit(edit);
+      return true;
     } catch (e) {
       toastError(e);
+      return false;
     } finally {
       busy--;
     }
@@ -53,17 +56,31 @@
     return { name: 'Game capture', sub: st?.game ? `${st.game} · ${how}` : `${how} · waiting for a game` };
   });
 
-  function addApp() {
+  /** Opens a source's panel; cleared first, so the same one opens again even if its dialog was closed some
+   * way that didn't report back. */
+  async function openPanel(key: string) {
+    open = null;
+    await tick();
+    open = key;
+  }
+
+  async function addApp() {
     const exe = newApp.trim();
     if (!exe) return;
+    if (/[\\/:]/.test(exe)) {
+      toastError(new Error('Type the program\'s file name only, like discord.exe (no folder).'));
+      return;
+    }
     const name = /\.exe$/i.test(exe) ? exe : `${exe}.exe`;
     if (apps.some((a) => a.key === lower(name))) {
       toastError(new Error(`${name} is already a source.`));
       return;
     }
-    newApp = '';
-    adding = false;
-    void change((c) => c.audio.apps.push(name));
+    // The form stays filled in until the server takes it.
+    if (await change((c) => c.audio.apps.push(name))) {
+      newApp = '';
+      adding = false;
+    }
   }
 </script>
 
@@ -73,7 +90,7 @@
   </button>
 {/snippet}
 {#snippet gear(key: string, label: string)}
-  <button class="gear" onclick={() => (open = key)} aria-label="{label} settings" title="{label} settings">⚙</button>
+  <button class="gear" onclick={() => openPanel(key)} aria-label="{label} settings" title="{label} settings">⚙</button>
 {/snippet}
 
 {#if cfg}

@@ -20,19 +20,24 @@
     return `${q} · ${h} · ${v.fps} fps`;
   });
 
+  // More and Output open a panel under (or over) their button: a disclosure, so Tab moves through it as usual.
   let menu = $state<'' | 'more' | 'output'>('');
   let root: HTMLElement | undefined = $state();
+  let moreBtn: HTMLButtonElement | undefined = $state();
+  let outBtn: HTMLButtonElement | undefined = $state();
   function toggle(m: 'more' | 'output') {
     menu = menu === m ? '' : m;
   }
-  // A click elsewhere or Esc closes an open menu.
+  // A click elsewhere closes an open panel; Esc closes it and returns to its button; so does tabbing out of it.
   $effect(() => {
     if (!menu) return;
     const click = (e: MouseEvent) => {
       if (root && !root.contains(e.target as Node)) menu = '';
     };
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') menu = '';
+      if (e.key !== 'Escape') return;
+      (menu === 'more' ? moreBtn : outBtn)?.focus();
+      menu = '';
     };
     window.addEventListener('pointerdown', click);
     window.addEventListener('keydown', key);
@@ -43,7 +48,7 @@
   });
 </script>
 
-<div class="controls" bind:this={root}>
+<div class="controls" bind:this={root} onfocusout={(e) => { if (menu && !root?.contains(e.relatedTarget as Node | null)) menu = ''; }}>
   <button class="primary act" onclick={() => run(api.saveClip())}>Save clip{#if hk?.save_clip}<kbd>{hk.save_clip}</kbd>{/if}</button>
   <button class="act" onclick={() => run(api.saveClip(app.config?.replay.buffer_secs))}>Save long clip{#if hk?.save_long_clip}<kbd>{hk.save_long_clip}</kbd>{/if}</button>
   <button class="act" class:danger={recording} class:solid={recording} onclick={() => run(api.setRecording(!recording))}>
@@ -55,26 +60,26 @@
   {/if}
 
   <div class="menu-wrap">
-    <button class="act" aria-expanded={menu === 'more'} aria-haspopup="menu" onclick={() => toggle('more')}>More<span class="caret">▾</span></button>
+    <button class="act" bind:this={moreBtn} aria-expanded={menu === 'more'} aria-controls="more-panel" onclick={() => toggle('more')}>More<span class="caret">▾</span></button>
     {#if menu === 'more'}
-      <div class="menu" role="menu">
+      <div class="menu" id="more-panel">
         {#if !paused}
-          <button role="menuitem" class="act" onclick={() => { menu = ''; run(api.setBuffer(false)); }}>Pause buffer{#if hk?.toggle_buffer}<kbd>{hk.toggle_buffer}</kbd>{/if}</button>
+          <button class="act" onclick={() => { menu = ''; run(api.setBuffer(false)); }}>Pause buffer{#if hk?.toggle_buffer}<kbd>{hk.toggle_buffer}</kbd>{/if}</button>
         {/if}
-        <button role="menuitem" class="act" onclick={() => { menu = ''; run(api.markMoment()); }}>Mark moment{#if hk?.mark}<kbd>{hk.mark}</kbd>{/if}</button>
+        <button class="act" onclick={() => { menu = ''; run(api.markMoment()); }}>Mark moment{#if hk?.mark}<kbd>{hk.mark}</kbd>{/if}</button>
         {#if app.config?.audio.mic || st?.mic_muted}
-          <button role="menuitem" class="act" onclick={() => { menu = ''; run(api.setMicMuted(!st?.mic_muted)); }}>{st?.mic_muted ? 'Unmute mic' : 'Mute mic'}{#if hk?.toggle_mic}<kbd>{hk.toggle_mic}</kbd>{/if}</button>
+          <button class="act" onclick={() => { menu = ''; run(api.setMicMuted(!st?.mic_muted)); }}>{st?.mic_muted ? 'Unmute mic' : 'Mute mic'}{#if hk?.toggle_mic}<kbd>{hk.toggle_mic}</kbd>{/if}</button>
         {/if}
       </div>
     {/if}
   </div>
 
   <div class="menu-wrap out">
-    <button class="output" aria-expanded={menu === 'output'} onclick={() => toggle('output')} title="Quality, resolution and frame rate">
+    <button class="output" bind:this={outBtn} aria-expanded={menu === 'output'} aria-controls="output-panel" onclick={() => toggle('output')} title="Quality, resolution and frame rate">
       <span class="muted">Output</span><span class="val">{output}</span><span class="caret">▾</span>
     </button>
     {#if menu === 'output'}
-      <div class="menu wide up"><QuickCapture /></div>
+      <div class="menu wide up" id="output-panel"><QuickCapture /></div>
     {/if}
   </div>
 </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import type * as api from './api';
   import { app } from './store.svelte';
   import { fmtBytes } from './format';
@@ -60,16 +61,13 @@
       <span class="k">{fresh ? 'Just saved' : 'Last clip'}</span> <span class="t">{latest.title}</span>
     </a>
   {/if}
-  <button class="link small" onclick={() => (graphs = true)}>Graphs ▸</button>
+  <button class="link small" onclick={async () => { graphs = false; await tick(); graphs = true; }}>Graphs ▸</button>
 </footer>
 
 <dialog
   bind:this={dlg}
   aria-label="Performance"
-  oncancel={(e) => {
-    e.preventDefault();
-    graphs = false;
-  }}
+  onclose={() => (graphs = false)}
 >
   {#if graphs}
     <header><h2>Performance</h2><button class="x" onclick={() => (graphs = false)} aria-label="Close">×</button></header>
